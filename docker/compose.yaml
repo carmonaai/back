@@ -175,6 +175,7 @@ services:
     environment:
       <<: *valkey
       CONSOLE_ORIGINS: http://localhost:3000     # the only Origin allowed on login/register/refresh/logout
+      CARMONAI_GATEWAY_REGISTRATIONOPEN: "true"  # the harness registers through the gateway; production must not set this
     depends_on:
       valkey: { condition: service_healthy }
       auth: { condition: service_healthy }
