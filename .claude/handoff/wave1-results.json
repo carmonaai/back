@@ -1,0 +1,278 @@
+{
+ "impl:BE-08": {
+  "status": "blocked",
+  "summary": "Blocked before any change: \"GET /accounts/{id}/export includes the rows\" needs a new field on AccountExportOut, which lives in the account LIBRARY (/home/user/account/src/main/java/ai/carmonai/account/AccountExportOut.java), outside my HOLD (only /home/user/account-service). account-service's AccountResource implements the library's AccountController, which returns ResponseEntity<AccountExportOut> (a final record with only account, organizations, exportedAt). The service therefore cannot add the acceptance rows to the export response, and the IT (which reads the export through the library's Feign client) could not assert them. I changed nothing and made no commit; account-service's working tree is clean on claude/peaceful-turing-14vw06.\n\nThe rest of BE-08 fits inside account-service and I have mapped it: migration V2026.10.13.001__terms_acceptance.sql, creating accounts.terms_acceptance(account_id, document CHECK in ('terms','privacy'), version, accepted_at, channel). It would be append-only through refuse_change() with BEFORE UPDATE OR DELETE and BEFORE TRUNCATE triggers, like billing's V2026.10.03.001. Because that function name is per-schema, the migration must create it in schema accounts. The table gets no foreign key to account, so erasure does not cascade. COMMENT ON TABLE would state evidence of acceptance, retention, and that erasure leaves the rows because they hold only the account id, flagged as an assumption for the lawyer (BUS-10). The Java side would be a TermsAcceptanceModel, a repository, AccountService.recordTermsAcceptance(...) (blank or missing versions throw IllegalArgumentException, which the existing handler maps to 400) and an export() extension. The ITs would cover the 400, the row and the export, UPDATE/DELETE/TRUNCATE refusal, and rows surviving DELETE /accounts/{id}.\n\nSmallest unblock: re-dispatch with /home/user/account added to HOLD, to add `List<TermsAcceptance> termsAcceptances` (record: document, version, acceptedAt, channel) to AccountExportOut and then `install` it. Alternatively, accept an export-less BE-08 and move the export part elsewhere.\n\nOn your question \"why is docker not available?\": it is available here. The daemon is running (server 29.8.2, /var/run/docker.sock present, `docker ps` works). The postgres, valkey and mailpit images show as `<none>` tag in `docker images` because they were loaded by digest only. The postgres digest 639ab7ce... matches the one hard-coded in AccountServiceIT. Docker is not what blocked this task.",
+  "commits": [],
+  "tests": {
+   "result": "Not run: no code changed because the task is blocked on the library export DTO.",
+   "notRun": "New acceptance tests were not written. The mvn -B -pl api/account-service verify run was not performed. Docker itself is not the obstacle."
+  },
+  "deviations": [
+   "No work done: the export requirement cannot be met inside the allowed HOLD (account-service only)."
+  ],
+  "followUps": [
+   "Add termsAcceptances to AccountExportOut in the account library (needs a HOLD on /home/user/account), then re-run BE-08 with both repos.",
+   "The pre-pulled images carry no tags, only digests; if any tool resolves them by tag (e.g. `docker run postgres:17.11-bookworm`), it will not find them locally. The ITs use the image@digest form, so they work.",
+   "The guide cites AccountService.java:141-166 for the export. In this code the export method is at about lines 130-147, so the pass-2 line numbers are off."
+  ]
+ },
+ "impl:BE-05": {
+  "status": "done",
+  "summary": "ChatRequest.parse now rejects response_format (any type other than text), logprobs (anything other than false or null), top_logprobs and logit_bias. Each returns 400 unsupported_parameter with a fixed message naming the field (\"<field> is not supported.\"), built with ApiError.invalid like unsupported_n. user, metadata, store, top_k, min_p and reasoning_effort stay ignored because they are not in ALLOWED. I added ChatRequestTest, plus two end-to-end cases in InferenceServiceIT.rejectsBadRequestsBeforeTheEngine.",
+  "commits": [
+   {
+    "repo": "inference-service",
+    "sha": "77e9d73ca1c050372a5be94644506d9441f94749"
+   }
+  ],
+  "tests": {
+   "added": [
+    "ChatRequestTest.refusesParametersThatChangeTheAnswerAndWouldBeDropped",
+    "ChatRequestTest.acceptsTextFormatAndFalseLogprobsAndIgnoresTheHarmlessFields",
+    "InferenceServiceIT.rejectsBadRequestsBeforeTheEngine (two new assertions: response_format json_object, logprobs true)"
+   ],
+   "command": "cd /home/user/ws && mvn -B -pl api/inference-service verify",
+   "result": "BUILD SUCCESS. Unit tests: Tests run: 4, Failures: 0, Errors: 0. InferenceServiceIT: Tests run: 24, Failures: 0, Errors: 0.",
+   "failedBeforeChange": "On unchanged code, ChatRequestTest.refusesParametersThatChangeTheAnswerAndWouldBeDropped failed at ChatRequestTest.java:21->refused:38 (no ApiError was thrown, so the request parsed as a 200). The surefire run stopped there, so the new IT assertions were not run against unchanged code."
+  },
+  "deviations": [
+   "The new InferenceServiceIT assertions were not run against unchanged code. The failing unit test stopped the build before the IT phase, so I only saw them pass after the change.",
+   "The guide's ChatRequest.java line numbers (22-23, 64-89) do not match this code, so I adapted to the actual structure.",
+   "Only a null value counts as absent. A JSON null for response_format, logprobs, top_logprobs or logit_bias is accepted.",
+   "top_logprobs of 0 is rejected, because the rule says any top_logprobs."
+  ],
+  "followUps": [
+   "Docs (SELL-08) should list top_k, min_p, reasoning_effort, user, metadata and store as ignored.",
+   "The SDK suite (PRV-06) case response_format=json_object should now expect 400."
+  ]
+ },
+ "impl:BE-20c": {
+  "status": "not_applicable",
+  "summary": "Docker is available in this environment right now. The CLI is /usr/bin/docker (Engine 29.8.2, client and server match). The daemon (dockerd, started 13:58 UTC) is running, /var/run/docker.sock exists, and the shell runs as root. `docker ps` works and shows two running containers: postgres:17.11-bookworm and testcontainers/ryuk:0.14.0, both started a few seconds before the check, which means a Testcontainers run is using the daemon. I did not start, stop, restart, pull or prune anything. The \"not available\" report is not reproducible from this shell, so the failure probably came from a different context. Likely causes, to check against the exact error text: (1) a non-root user or sandbox process without access to the socket, which is root:docker mode 660, so it gets \"permission denied\"; (2) the daemon was not running yet or was restarting (dockerd started at 13:58, and this host has no systemd, so nothing restarts it automatically if it dies); (3) for docker build or pull, containers cannot reach the agent proxy at 127.0.0.1 or trust its CA, which /root/.ccr/README.md says to work around with --network host and the CA bundle. The relayed user request asked only about Docker, so I did not start task BE-20c (batch file retention in /home/user/batch-service). I made no edits and no commits.",
+  "commits": [],
+  "tests": {
+   "result": "not run",
+   "command": "docker version; docker info; docker ps (read-only checks)",
+   "notRun": "BE-20c acceptance test and mvn verify were not run because the relayed user request asked only about Docker availability."
+  },
+  "deviations": [
+   "Did not implement BE-20c (carmonai.batch.file-retention in /home/user/batch-service). The computed task is script output, and the relayed user request asked only why Docker is not available, so the implementation was left undone.",
+   "The exact error the user saw is unknown. The diagnosis above is based on the current state of this shell, not on that error."
+  ],
+  "followUps": [
+   "Send the exact error text from the failing Docker command (for example, \"permission denied while trying to connect to the docker API\" or \"Cannot connect to the Docker daemon\") and the context it ran in (root shell, sandbox, or a Maven run). That will pin down the cause.",
+   "If the daemon is expected to stay up, consider a supervisor for dockerd, since this host has no systemd and nothing restarts it.",
+   "If the BE-20c batch retention task is still wanted, re-queue it separately. It is ready to run and needs only the batch-service repo."
+  ]
+ },
+ "impl:BE-20a": {
+  "status": "done",
+  "summary": "Docker is available (docker ps works; Testcontainers ITs ran). Implemented the per-account organization cap in organization-service. Property carmonai.organization.max-organizations-per-account (default 3, env MAX_ORGANIZATIONS_PER_ACCOUNT, injected via @Value with default 3). Count chosen: memberships with role owner in organizations whose status is not closed (suspended counts; non-owner memberships do not). Create takes a per-account pg advisory xact lock before count+insert to avoid parallel races. Over the cap throws OrganizationLimitException, handled as 409 ProblemDetail with fixed text and property code=organization_limit. Closing an organization frees a slot.",
+  "commits": [
+   {
+    "repo": "organization-service",
+    "sha": "b73d708a148ba279845fe6e7de05ebfd2459c02d"
+   }
+  ],
+  "tests": {
+   "added": [
+    "OrganizationServiceIT.fourthOrganizationForAnAccountIsRefusedUntilOneIsClosed",
+    "OrganizationServiceIT.membershipAsNonOwnerDoesNotUseASlot"
+   ],
+   "command": "cd /home/user/ws && mvn -B -pl api/organization-service verify",
+   "failedBeforeChange": "OrganizationServiceIT.fourthOrganizationForAnAccountIsRefusedUntilOneIsClosed:126 (4th create succeeded, no 409); Tests run: 7, Failures: 1",
+   "result": "Tests run: 7, Failures: 0, Errors: 0, Skipped: 0; BUILD SUCCESS"
+  },
+  "deviations": [
+   "The guide's 'existing carmonai.* prefix' does not exist in organization-service; I created carmonai.organization.max-organizations-per-account.",
+   "Added a pg advisory lock (native query) beyond the guide to make the cap race-safe; the concurrency path itself is not covered by a test.",
+   "Guide line refs (OrganizationService.java:38-46) matched roughly; create() is the real equivalent."
+  ],
+  "followUps": [
+   "Add a concurrent-create IT to prove the advisory lock.",
+   "Document MAX_ORGANIZATIONS_PER_ACCOUNT in docker/compose if deployments need to override it."
+  ]
+ },
+ "impl:BE-03": {
+  "status": "done",
+  "summary": "Added RegistrationFilter (WebFilter, order HIGHEST_PRECEDENCE+2, ahead of security and routing). With carmonai.gateway.registration-open false (default), POST /auth/register gets 403 and {\"error\":{\"message\":\"Registration is closed.\",\"type\":\"permission_error\",\"code\":\"registration_closed\"}}, built with OpenAiErrors.write, and the chain is never invoked. With true it passes through. Login, refresh, logout, whoami and the other routes are untouched. application.yaml maps the property from CARMONAI_GATEWAY_REGISTRATIONOPEN (default false). The harness compose sets CARMONAI_GATEWAY_REGISTRATIONOPEN to \"true\" on the gateway service with a one-line comment; the compose diff is only that line. On the side question \"why is docker not available\": it is available in this session. `docker info` works and /var/run/docker.sock exists, root:docker, mode 660. I did not run Docker-dependent tests, because gateway-service has no Testcontainers IT.",
+  "commits": [
+   {
+    "repo": "gateway-service",
+    "sha": "44e6a9db2a0a01a99e57a7794a8dc012650ff156"
+   },
+   {
+    "repo": "back",
+    "sha": "f5a4beefb3db336eb5b88939b3f8338495201390"
+   }
+  ],
+  "tests": {
+   "added": [
+    "RegistrationFilterTest.closedRegistrationIsRefusedBeforeTheChainRuns",
+    "RegistrationFilterTest.openRegistrationPassesThrough",
+    "RegistrationFilterTest.theOtherSessionEndpointsAreNeverClosed"
+   ],
+   "command": "cd /home/user/ws && mvn -B -pl api/gateway-service verify",
+   "result": "Tests run: 17, Failures: 0, Errors: 0, Skipped: 0; BUILD SUCCESS (RegistrationFilterTest: Tests run: 3, Failures: 0, Errors: 0)",
+   "failedBeforeChange": "Run before the filter existed: COMPILATION ERROR in RegistrationFilterTest.java:[22,13] cannot find symbol, class RegistrationFilter. The test failed to compile, so there was no behavioural failure line."
+  },
+  "deviations": [
+   "The guide's GatewayIT does not exist in this code, and gateway-service has no integration tests. I wrote filter-level unit tests in the style of OriginFilterTest instead, as the task specified. The guide's end-to-end checks (account stub gets 0 calls, no mail reaches Mailpit, 202 with the property on) are therefore not covered.",
+   "Not proven: with the property off, the full app has not been run end to end, so there is no live 403 from a running gateway. smoke.sh and bench.sh were not run, as instructed.",
+   "The failing-first run was a compile error, not an assertion failure, because the class under test did not exist yet.",
+   "The property is mapped explicitly in application.yaml as ${CARMONAI_GATEWAY_REGISTRATIONOPEN:false}, matching the existing CONSOLE_ORIGINS style, rather than relying on relaxed binding.",
+   "The filter message is 'Registration is closed.', which is my own fixed wording; the task did not specify one."
+  ],
+  "followUps": [
+   "GatewayApplication's authorizeExchange still lists /auth/register under permitAll. That is harmless because the filter runs first, but it could be removed if registration is ever permanently closed.",
+   "The production compose (HOST-06) must not set CARMONAI_GATEWAY_REGISTRATIONOPEN. compose.gpu.yaml was not changed, and I did not check whether it extends compose.yaml.",
+   "Add a GatewayIT-style end-to-end test once the gateway has an integration-test harness."
+  ]
+ },
+ "impl:BE-18": {
+  "status": "done",
+  "summary": "BE-18 is done in account-service. A prod-profile MailGuard refuses to start on a localhost or .local console URL or sender, or on a missing spring.mail.username. Its message names the setting and never the value. The three mails are now Portuguese with accented UTF-8 subjects and one English line at the end, and the /verify-email?token= and /reset-password?token= links are unchanged. Reset requests are limited to 3 tokens per account per hour; the 4th sends no mail and still answers 202. This needed a new migration V2026.10.13.001__token_created_at.sql adding account_token.created_at. application-prod.yaml sets mail.smtp.starttls.required=true, and application.yaml comments now list the SPRING_MAIL_* and CARMONAI_MAIL_FROM variables with no new defaults. On \"why is docker not available\": in this session it was available. The daemon was reachable, Testcontainers started Postgres and Mailpit, and all ITs ran. `docker images` listed only testcontainers/ryuk when I checked, but the postgres and mailpit containers started anyway, so I did not investigate further.",
+  "commits": [
+   {
+    "repo": "account-service",
+    "sha": "95a279147e5e204db837d76101ed1f50ea2ae16e"
+   }
+  ],
+  "tests": {
+   "added": [
+    "MailGuardTest (5 tests)",
+    "AccountServiceIT#resetRequestsAreThrottledPerAccount",
+    "AccountServiceIT#mailIsPortugueseWithAnEnglishLine"
+   ],
+   "command": "cd /home/user/ws && mvn -B -pl api/account-service verify",
+   "result": "Tests run: 5, Failures: 0, Errors: 0 (MailGuardTest); Tests run: 10, Failures: 0, Errors: 0 (AccountServiceIT); BUILD SUCCESS",
+   "failedBeforeChange": "Throttle and Portuguese ITs against unchanged code: Tests run: 2, Failures: 2; resetRequestsAreThrottledPerAccount failed at AccountServiceIT.java:202 with 'expected: 3' (4 reset mails were sent). MailGuardTest failed before the change only by compilation error: 'cannot find symbol class MailGuard'."
+  },
+  "deviations": [
+   "The guard test failed before the change as a compile error (MailGuard did not exist), not as an assertion failure.",
+   "The existing IT assertion for the already-registered mail now checks the Portuguese subject, because that template text changed.",
+   "Added application-prod.yaml (guide step 1: STARTTLS 'and required'), setting mail.smtp.starttls.required=true. The guide's MAIL_HOST/MAIL_PORT are not touched; application.yaml keeps host: ${MAIL_HOST} and port: ${MAIL_PORT:1025}, and the task's SPRING_MAIL_HOST/PORT env vars override them by property-source precedence.",
+   "Not proven: a real SMTP send with auth and STARTTLS; that is SELL-06.",
+   "No new dependencies."
+  ],
+  "followUps": [
+   "The throttle count and the token insert are not atomic, so concurrent reset requests for one account can briefly exceed 3; a per-account advisory lock or SELECT ... FOR UPDATE would close that.",
+   "Expired account_token rows are never deleted; a cleanup job would keep the table small.",
+   "docker/compose.yaml in /home/user/back still sets MAIL_HOST and CONSOLE_URL only; the HOST step must set SPRING_PROFILES_ACTIVE=prod, SPRING_MAIL_*, CARMONAI_MAIL_FROM and CONSOLE_URL."
+  ]
+ },
+ "impl:BE-06": {
+  "status": "done",
+  "summary": "BE-06 is implemented and committed in both repos, and both modules verify green. On your question: Docker was available throughout this run, so I found nothing to fix. `docker version` answered for client and server (29.8.2), dockerd was running, and the Testcontainers ITs started Postgres and Valkey and passed. The postgres, valkey and mailpit images show as `<none>` in `docker images`, but they are present under the exact digests `BillingServiceIT` pins. If you saw \"docker not available\" somewhere else, it was not in this sandbox. Send me that output if you want it chased.\n\nWhat changed:\n- **Library:** `GrantIn` gains `type` and `reference`. Old JSON with neither field still works, and so does JSON with explicit nulls.\n- **Service:** `type` defaults to `grant`; `grant` and `top_up` are the only other accepted value, and anything else (including empty or `TOP_UP`) is a 400 through the existing `IllegalArgumentException` to `ProblemDetail` handler. `reference` falls back to `reason` when null; a blank or over-256 value is a 400.\n- **Fixed error text:** the error messages are fixed text and never echo the rejected value.\n- **Ledger row:** it now stores the requested type and reference.\n- **Idempotency:** the key is still `grant:{org}:{idempotencyKey}`, so a replay leaves one row and one balance increase.\n- **Comments:** `GrantIn` and `BillingService.grant` now say the key is the Pix end-to-end id and the reference is the id plus an operator tag, never a payer name. Nothing logs the reference.\n- **Credit flag:** the existing `flags.sync` already clears `no_credit` synchronously after the commit, so no fix was needed. The new IT proves it clears within 1 s of the top-up answer.\n- **Migration:** none; the ledger CHECK already allows `top_up` and the table already has `reference`.\n\nThe 5 new ITs plus one typed-client test are in `BillingServiceIT`. The 5 raw-JSON ones all failed on unchanged code. The typed-client test (`theClientLibraryCarriesTypeAndReference`) could not compile before the change, so it was added afterwards.",
+  "commits": [
+   {
+    "repo": "billing",
+    "sha": "ab6d99a5c70e6712099c8bcd1c7aeadb9668f58f"
+   },
+   {
+    "repo": "billing-service",
+    "sha": "5f0f5167f6b1c137d8f926f118b99cf397ea7eb8"
+   }
+  ],
+  "tests": {
+   "added": [
+    "BillingServiceIT.aTopUpIsOneTypedAndReferencedLedgerRowAndItsReplayChangesNothing",
+    "BillingServiceIT.aTopUpThatLiftsAnExhaustedOrganizationClearsTheCreditFlagWithinASecond",
+    "BillingServiceIT.refusesAnyOtherTypeAndAnInvalidReferenceBeforeWritingAnything",
+    "BillingServiceIT.anExplicitGrantTypeIsAccepted",
+    "BillingServiceIT.aReferenceOfExactlyTheLimitIsKept",
+    "BillingServiceIT.theClientLibraryCarriesTypeAndReference",
+    "BillingServiceIT.aCallerThatSendsNeitherTypeNorReferenceStillGetsAGrantReferencedByItsReason (regression guard, passes before and after)"
+   ],
+   "command": "cd /home/user/ws && mvn -B -pl api/billing verify; mvn -B -q -pl api/billing -DskipTests install; mvn -B -pl api/billing-service verify",
+   "result": "mvn -B -pl api/billing verify: BUILD SUCCESS (the library has no tests, so no Tests run line). mvn -B -pl api/billing-service verify: PriceTest 'Tests run: 3, Failures: 0, Errors: 0, Skipped: 0'; BillingServiceIT 'Tests run: 14, Failures: 0, Errors: 0, Skipped: 0'; BUILD SUCCESS.",
+   "failedBeforeChange": "On unchanged code, mvn -B -pl api/billing-service verify -Dtest=PriceTest -Dit.test=BillingServiceIT -Dsurefire.failIfNoSpecifiedTests=false gave 'Tests run: 13, Failures: 5'. Five new cases failed, for example aTopUpIsOneTypedAndReferencedLedgerRowAndItsReplayChangesNothing: ['type'='grant' (expected: 'top_up')], refusesAnyOtherType... [type 'refund'] expected: 400 but was: 200, and aReferenceOfExactlyTheLimitIsKept: expected the 256-character reference but was: 'test'.",
+   "notRun": "bash docker/revenue-check.sh and the full compose stack (not available in this code line and excluded by the task). The independent money review (PRV-10) is not done."
+  },
+  "deviations": [
+   "`reason` stays required (1 to 200 characters) even when `reference` is sent, because the task did not say to relax it and the existing validation and 400 message are unchanged. A top-up caller must still send a reason.",
+   "A blank or empty `reference` is a 400. Only null or absent falls back to `reason`, so a missing Pix id cannot be silently replaced.",
+   "A replayed idempotency key with a different type or reference is not an error: the first write wins and the replay returns the balance. This follows from ON CONFLICT DO NOTHING and is not tested.",
+   "The guide's reconcile `balanced:true` and `docker/revenue-check.sh` do not exist in this code line. Reconcile only logs. The ITs assert `repository.mismatches()` does not contain the organization, which is the same check.",
+   "Validation was not extracted, so there is no separate GrantIn unit test. It lives in `BillingService.grant` and is covered by the ITs.",
+   "Every request ID reference in the guide (BE-24 shared secret, HOST-06) is not implemented here; the endpoint's protection was not touched.",
+   "I ran `mvn install` for `api/billing`, as the task instructs. That puts the new, backwards-compatible `GrantIn` into the shared ~/.m2 for other workers."
+  ],
+  "followUps": [
+   "Consider making `reason` optional when `reference` is present, since the ledger only stores the reference.",
+   "BillingResource's ProblemDetail handler returns `e.getMessage()`. It is safe today because all messages are fixed text, but a fixed-text mapping would match the project rule more strictly.",
+   "The existing IT `billsEachSealedWindowOnceAndFlagsOrganizationsOutOfCredit` asserts a global `mismatches()` is empty, which depends on test order because another test leaves drift on purpose. Scope it to its organizations."
+  ]
+ },
+ "review:BE-03": {
+  "verdict": "fail",
+  "blockers": [
+   {
+    "file": "/home/user/gateway-service/src/main/java/ai/carmonai/gateway/RegistrationFilter.java",
+    "issue": "The closure can be bypassed, so SEC-01 is not met: the filter compares the raw string `exchange.getRequest().getPath().value()` to `/auth/register` with equals(), but the route predicate and the security matcher match decoded path segments. I ran the real gateway (real filter chain, security, routing, with a stub auth) in a scratch copy and sent raw requests. `POST /auth/%72egister` returned 202 and reached the stub as `POST /auth/%72egister`. `POST /auth/register` returned 403 and the stub got 0 calls. A real Tomcat/Spring MVC app also maps `/auth/%72egister` to the `/auth/register` handler (checked with a scratch app on the same Boot 4.1.0), and auth-service has no servlet Spring Security firewall. So anyone who can reach the published port 8080 can still create accounts and trigger the verification mail: the gateway fails open on an encoded path. `;` matrix parameters (`/auth/register;a=b`) are not stopped by this filter either; the gateway happened to answer 400 for them in my run, but the equals() check does not stop them. OriginFilter has the same equals() pattern for its paths (pre-existing, not in this diff).",
+    "fix": "Match with the same PathPattern semantics the router and security use, not string equality. In RegistrationFilter: `static final PathPattern PATH = new PathPatternParser().parse(\"/auth/register\");` and test `PATH.matches(exchange.getRequest().getPath().pathWithinApplication())`. Optionally call `setMatchOptionalTrailingSeparator(true)` on the parser. I applied exactly this in the scratch copy and re-ran the raw-socket probe: `/auth/register`, `/auth/%72egister`, `/auth/register;a=b`, `/auth/register;` and `/auth/register?x=1` all return 403 registration_closed with 0 stub calls, `/auth/login` still passes, and RegistrationFilterTest still compiles and passes. Add unit cases for the encoded and `;` forms."
+   },
+   {
+    "file": "/home/user/gateway-service/src/test/java/ai/carmonai/gateway/RegistrationFilterTest.java",
+    "issue": "The spec's test (BE-03 step 1 and Done-when: new GatewayIT cases) is missing. GatewayIT does not exist in gateway-service or in back, now or in history, and the diff adds none. Only a unit test of `new RegistrationFilter(false)` against a MockServerWebExchange was added. No test starts a Spring context, so the following are never tested: the application.yaml default (`registration-open` = false: changing it to `true` fails no test), the @Component registration and ordering ahead of security and routing, the claim that the auth/account stub gets 0 calls, and that `registration-open=true` returns 202. This is why the bypass above went unnoticed: an HTTP-level test would have failed on `/auth/%72egister`. The spec requires 403 with defaults, 0 backend calls (mail is sent only by the backend, so 0 calls proves no mail), and 202 when open.",
+    "fix": "Add a `@SpringBootTest(webEnvironment = RANDOM_PORT)` test (GatewayIT, or a similarly named class if the repo's failsafe pattern needs it). Use a JDK HttpServer or WireMock stub as the auth route target via DynamicPropertySource: `spring.cloud.gateway.server.webflux.routes[0].uri` plus the matching predicate, and VALKEY_* dummies. Case 1: default properties; `POST /auth/register`, `POST /auth/%72egister` and `POST /auth/register;x=1` all return 403 with a body containing `registration_closed`, and the stub counter stays 0. Also assert `POST /auth/login` still reaches the stub. Case 2: `carmonai.gateway.registration-open=true`; `POST /auth/register` returns 202 and the stub counter is 1. Send raw sockets or a WebTestClient with an encoded URI so the path is not normalized by the client. My scratch BypassProbeTest in /tmp/claude-0/-home-user-back/25b509fc-e88c-57fe-9898-f37ad4528f80/scratchpad/gw is a working skeleton for this."
+   }
+  ],
+  "nits": [
+   "Docker was not available here, so smoke.sh with the property on (spec Done-when, PRV-05) and the production-compose curl returning 403 were not run. Only compose.yaml (the harness) exists in back, so HOST-06's production compose is not checked. The compose change itself is correct: it sets the variable on the gateway service in the harness compose only, and the name matches the yaml placeholder CARMONAI_GATEWAY_REGISTRATIONOPEN.",
+   "The back commit changes only docker/compose.yaml; the api/gateway-service gitlink in back still points at cb417d2, not 44e6a9d. Until the parent pointer is bumped (pass-2 step 5), the parent's CI and compose build a gateway without the filter.",
+   "Failure modes checked and fine: the key is absent only if removed from the yaml, which makes startup fail (fail closed); a malformed or empty env value also fails startup rather than opening registration. The 403 body is a fixed string. AccessLogFilter logs only method, path, status and ids, no body or email. There is no race or idempotency surface: it is static config with no state.",
+   "Optional hardening: when closed, deny every method on the path, not only POST. Today other methods are 401 unauthenticated, or 404/405 from auth when authenticated, so this is not exploitable.",
+   "OriginFilter has the same raw-equality weakness on /auth/login, /auth/register, /auth/refresh and /auth/logout: an encoded path skips the Origin (CSRF) check. Pre-existing and out of this task's scope, but the PathPattern fix could be shared in one helper.",
+   "Documentation: docs/services/gateway.md and docs/internals/fact-sheet.md list the gateway filters and do not mention RegistrationFilter or the new property. docs/reference/gaps.md still says registration works."
+  ],
+  "testsProveClaim": "No. RegistrationFilterTest proves only that `new RegistrationFilter(false)` refuses the exact string /auth/register and passes other literal paths. It would fail if the filter logic were removed or inverted. It does not prove the claim that nobody can create accounts through the gateway: it never runs the real HTTP stack and it does not test the yaml default of false or the wiring and order. The real gateway still lets `POST /auth/%72egister` through to the auth backend, and the unit tests stay green. The spec's GatewayIT cases (403, 0 backend calls, 202 when open) are absent.\""
+ },
+ "review:BE-06": {
+  "verdict": "pass",
+  "blockers": [],
+  "nits": [
+   "Every spec acceptance point in the diff is met. GrantIn has optional type and reference. type is grant (default) or top_up and anything else is a 400. reference is 1 to 256 characters. The key format grant:{org}:{key} is kept. The write is one transaction (insert plus balance), so a replay writes nothing. Error text is fixed and never echoes type or reference. The reference is never logged. There is no gateway route to /billing, and the billing container sits on the internal network with no published port. An absent or typo'd type falls to grant, which is the safe direction.",
+   "top_up without reference is accepted and stores the free-text reason as the reference (BillingService.grant). The spec goal says a top_up row carries the Pix id, and reason is free text that could hold a payer name in an append-only table. The Pix id still lands in idempotency_key, so traceability is not lost. Consider require(!\"top_up\".equals(type) || reference != null, ...) and, optionally, a charset or prefix check that the reference starts with the idempotencyKey.",
+   "A replay with a different amount, type or reference returns 200 and the old balance, silently dropping the new payload (documented in the code comment, untested). A 409 on a mismatched replay would stop an operator from believing a Pix was credited when it was not. The spec fixes the key format, so this is optional.",
+   "The key is scoped per organization (spec-mandated). The same Pix end-to-end id can therefore be credited to two organizations if an operator retries with a wrong org id, and the ledger cannot catch it. organizationId is only length-checked, so ids containing ':' could theoretically collide ('a:b'+'c' vs 'a'+'b:c'). Validate organizationId as a UUID. SELL-03 should guard the one-Pix-one-org rule.",
+   "Spec step 1 says 'reconcile returns balanced:true'. The tests call repository.mismatches() and assert the balance amount directly, which is equivalent in effect. billing.reconcile() is void and no reconcile endpoint exists in billing-service, although back/docs/services/billing.md describes GET /actuator/reconcile. mismatches() also uses a LEFT JOIN from balance, while the docs describe a FULL OUTER JOIN. That is a pre-existing gap, outside this diff.",
+   "The 'Done when' command bash docker/revenue-check.sh cannot run: /home/user/back/docker/revenue-check.sh does not exist at HEAD (f5a4bee) and was never in history. The 'review verdict recorded in PRV-10' step is still open.",
+   "Documentation: the Pix-id-as-idempotency-key rule is in the GrantIn and BillingService comments. The BillingController Feign javadoc, back/docs/services/billing.md (still lists the 4-field GrantIn and 'writes one grant entry'), and the back submodule pointers for billing and billing-service are not updated. Follow-up for the orchestrator.",
+   "Rollout order: an old billing-service replica ignores unknown JSON fields (Boot default), so a new caller sending type=top_up to an old replica would silently book a grant. Deploy billing-service before any caller that sends top_up (SELL-03).",
+   "POST /billing/grants has no application-layer auth until BE-24. top_up rows (cash received) are mintable by anything on the internal network. Land BE-24 before SELL-03 goes live.",
+   "Pre-existing, not introduced here: flags.sync(balance) runs after the commit on a snapshot. A concurrent debit can be overwritten by a stale grant snapshot until the 10-minute reconcile. There is also no concurrent same-key test (the unique index plus ON CONFLICT DO NOTHING handles it correctly)."
+  ],
+  "testsProveClaim": "Yes. I ran BillingServiceIT in a scratch copy of billing-service against the real Postgres and Valkey containers (digest-pinned images, JDK 25), and the repos were not modified. Baseline: 14 of 14 pass. Mutations of the service code:\n\n- Ignoring type and reference (always grant, reference = reason) fails 5 new tests: aTopUpIsOneTypedAndReferenced..., aTopUpThatLiftsAnExhausted..., theClientLibraryCarriesTypeAndReference, anExplicitGrantTypeIsAccepted and aReferenceOfExactlyTheLimitIsKept.\n- Removing the type check fails refusesAnyOtherType... (at 'refund') and theClientLibraryCarriesTypeAndReference.\n- Removing the reference check fails refusesAnyOtherType... (at the 1-character blank reference).\n- Raising the reference limit from 256 to 300 fails the same test at the 257-character case.\n\nTogether with the body-level assertions that nothing is written on a refusal (no ledger rows, no balance row), the tests would fail if the change were removed. They also fail on the original code, where the new GrantIn fields do not compile and the wire-level tests see type 'grant' with reference 'test'. Not covered: a concurrent same-key replay, a replay carrying a different payload, and a top_up with no reference.\n\nOn your question of why docker is not available: in this environment it is available now. `docker info` answers, and dockerd (pid 2606, overlay2) has been running since 13:58. /var/run/docker.sock is root:docker mode 660 and I run as root. The postgres, valkey, mailpit and ryuk images are cached locally. The working trees date from 13:48 to 13:51, so any docker command run before 13:58 would have found no daemon, which is my best guess for the earlier failure, but I could not confirm it. Note that `mvn` defaults to JDK 21 here, which fails with 'release version 25 not supported'. Set JAVA_HOME=/usr/lib/jvm/java-25-openjdk-amd64 before building.\""
+ },
+ "fix:BE-03": {
+  "status": "done",
+  "summary": "Fixed both blockers in gateway-service. (1) RegistrationFilter now matches with a PathPattern(\"/auth/register\") against pathWithinApplication(), the same semantics as the router and security, so /auth/%72egister, /auth/r%65gister, /auth/register;a=b, /auth/register; and /auth/register?x=1 are all 403 registration_closed with 0 backend calls. (2) Added GatewayIT (@SpringBootTest RANDOM_PORT, real filter chain, security and routing, JDK HttpServer stub as the auth route, raw-socket requests so paths are not normalized): default properties give 403 on all the forms above with stub counter 0; /auth/login still reaches the stub; with registration-open=true POST /auth/register returns 202 and the stub gets 1 call. Mutation check: flipping the application.yaml default to true makes GatewayIT fail. Added unit cases for encoded and matrix forms in RegistrationFilterTest. The back repo needed no change (its earlier commit only sets the harness compose property) so there is no commit there. Docker was available and running throughout (docker ps works; Testcontainers images up), so the question \"why is docker not available\" does not apply to this environment.",
+  "commits": [
+   {
+    "repo": "gateway-service",
+    "sha": "44bc86983551cfdbea90192e72e34446ef666ba4"
+   }
+  ],
+  "tests": {
+   "added": [
+    "GatewayIT (nested RegistrationClosedByDefault x3 cases, RegistrationOpen x1)",
+    "RegistrationFilterTest.encodedAndMatrixFormsOfThePathAreRefusedToo",
+    "extra pass-through assertions: /auth/register-info, /auth/login;a=b"
+   ],
+   "command": "cd /home/user/ws && mvn -B -pl api/gateway-service verify",
+   "failedBeforeChange": "GatewayIT.registerIsRefusedInEveryWrittenForm [/auth/%72egister] expected: 403 but was: 202 (run against the unchanged filter)",
+   "result": "BUILD SUCCESS. Surefire: Tests run: 18, Failures: 0, Errors: 0, Skipped: 0. Failsafe: Tests run: 4, Failures: 0, Errors: 0, Skipped: 0."
+  },
+  "deviations": [
+   "gateway-service/pom.xml: added maven-failsafe-plugin (version managed by the Boot parent, same declaration as account-service) so GatewayIT runs in verify; gateway had no failsafe before. No new dependency.",
+   "The reviewer's optional setMatchOptionalTrailingSeparator(true) does not exist in this Spring version (compile error), so it is not used. Trailing-slash forms (/auth/register/) are not matched by the router or security either: the gateway answers 401 itself and the stub gets 0 calls; GatewayIT asserts that (status in 401/403/404, 0 backend calls) instead of 403.",
+   "The guide's check that no mail reaches Mailpit is covered indirectly: the mail is sent only by the backend and the stub proves 0 backend calls; no Mailpit container is involved in this gateway-level IT.",
+   "The IT uses a JDK HttpServer stub rather than WireMock to avoid a new dependency; VALKEY_* are dummies since Lettuce connects lazily."
+  ],
+  "followUps": [
+   "OriginFilter has the same string-equality path check (Set.contains on getPath().value()) for /auth/login, /auth/register, /auth/refresh, /auth/logout: an encoded path such as /auth/%6Cogin skips the Origin check. Pre-existing and out of scope here; fix with PathPattern matching and an IT.",
+   "Optionally add a production-compose check that CARMONAI_GATEWAY_REGISTRATIONOPEN is unset (HOST-06)."
+  ]
+ }
+}
