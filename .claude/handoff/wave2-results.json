@@ -1,0 +1,428 @@
+{
+ "standards:BE-05R": {
+  "hard": [
+   {
+    "file": "src/main/java/ai/carmonai/inference/ChatRequest.java",
+    "rule": "carmonai-architecture/SKILL.md, Review checklist: `grep -ri store` over the changed modules must return nothing",
+    "issue": "The new comment above rejectUnsupported names `store` (\"user, metadata, store, top_k, min_p and reasoning_effort ...\"), so the grep now hits in main code.",
+    "fix": "Reword the comment without the word, e.g. \"the other OpenAI-only fields are not in ALLOWED and stay ignored\"."
+   },
+   {
+    "file": "src/test/java/ai/carmonai/inference/ChatRequestTest.java",
+    "rule": "carmonai-architecture/SKILL.md, Review checklist: `grep -ri store` returns nothing",
+    "issue": "acceptsTextFormat... passes `\\\"store\\\":true` and asserts `doesNotContain(..., \\\"store\\\", ...)`, so the grep hits in the test as well.",
+    "fix": "Drop `store` from the test, or ask the owner to scope the checklist grep to storage code. The grep rule as written has no exception."
+   },
+   {
+    "file": "src/test/java/ai/carmonai/inference/ChatRequestTest.java",
+    "rule": "tdd/tests.md: one logical assertion per test, test behaviour through the public interface",
+    "issue": "refusesParametersThatChangeTheAnswerAndWouldBeDropped bundles six cases in one test, so the first failure hides the rest. acceptsTextFormat... asserts on `upstream().propertyNames()`, an internal map of the forwarded body, so it is coupled to how ChatRequest builds the engine payload. It also bundles accept-text, accept-false and ignore-eight-fields into one assertion.",
+    "fix": "Use @ParameterizedTest for the refusals. Split the acceptance test into accepted values and ignored fields, and assert on the observable outcome (no exception, forwarded body)."
+   }
+  ],
+  "smells": [
+   {
+    "file": "src/main/java/ai/carmonai/inference/ChatRequest.java",
+    "smell": "Duplicated Code",
+    "quote": "JsonNode value = root.get(field); if (value != null && !value.isNull()) {...}; format != null && !format.isNull() ...; logprobs != null && !logprobs.isNull() ..."
+   },
+   {
+    "file": "src/main/java/ai/carmonai/inference/ChatRequest.java",
+    "smell": "Mysterious Name",
+    "quote": "!(logprobs.isBoolean() && !logprobs.asBoolean())  // double negation hides \"only logprobs:false is acceptable\""
+   },
+   {
+    "file": "src/main/java/ai/carmonai/inference/ChatRequest.java",
+    "smell": "Divergent Change",
+    "quote": "rejectUnsupported(root) in parse() sits beside n, messages and flex handling, so ChatRequest changes whenever any parameter policy changes. A parameter-policy method or class would give it one place."
+   }
+  ],
+  "summary": "The change follows the module and LGPD rules, because the 400 message carries only the field name. It breaks the checklist item `grep -ri store`: the word appears in a main-code comment and in the new test."
+ },
+ "spec:BE-05R": {
+  "missing": [
+   {
+    "specLine": "`top_k`, `min_p` and `reasoning_effort` stay ignored and are listed in the docs (SELL-08).",
+    "issue": "The diff does not add or touch any docs listing top_k, min_p and reasoning_effort as ignored. The commit message and code comment only state they stay ignored. Probably SELL-08's scope, but the line sits inside BE-05's Do list and is not marked deferred."
+   },
+   {
+    "specLine": "the SDK suite (PRV-06) case \"response_format=json_object\" expects 400 in this state.",
+    "issue": "No SDK-suite change in this diff. PRV-06 is likely a separate repo or task, so this is out of this diff's reach and only flagged for completeness."
+   },
+   {
+    "specLine": "Test first: ... each return 400 `unsupported_parameter`. Today they return 200 with plain text.",
+    "issue": "Partial at integration level. InferenceServiceIT covers only response_format json_object and logprobs true over HTTP. json_schema, top_logprobs and logit_bias are checked only in the ChatRequestTest unit test. That is acceptable if parse is the only entry point (ChatHandler:71 is the only caller), but there is no end-to-end check that the HTTP error body names the field, and none for the streaming path."
+   }
+  ],
+  "wrong": [
+   {
+    "specLine": "Accept `response_format` of type `text` and `logprobs: false`.",
+    "issue": "Edge case. `response_format: {}` (no type) or a non-object value is rejected as unsupported. `logprobs` with a non-boolean value such as 0 or \"false\" is also rejected. This is defensible for malformed input, but the message \"response_format is not supported.\" is misleading when the client simply omitted type. Low severity.",
+    "fix": "Optionally treat a missing type as text, or word the message as 'response_format.type must be text'."
+   },
+   {
+    "specLine": "any `top_logprobs`, any `logit_bias` each return 400",
+    "issue": "An explicit JSON null is accepted and passes through as absent, so `top_logprobs: null` and `logit_bias: null` get 200 while `top_logprobs: 0` and `logit_bias: {}` get 400. This is consistent with the null handling for the other fields and with OpenAI semantics where null means unset. The spec says 'any', so treat null as a judgement call. It is not a defect, and the code matches the intent.",
+    "fix": "None required. Note it in the docs."
+   }
+  ],
+  "scopeCreep": [
+   "Nothing material. The new ChatRequestTest unit test file is test scaffolding for the spec's 'test first' step. The null-tolerance (response_format, logprobs, top_logprobs and logit_bias set to null are accepted) was not specified but is harmless.",
+   "The commit message and code comment restate the ignored-field list (user, metadata, store, top_k, min_p, reasoning_effort). That is documentation of the existing ALLOWED whitelist, not new behaviour."
+  ],
+  "summary": "The core spec is implemented correctly. response_format json_object/json_schema, logprobs true, any top_logprobs and any logit_bias now give 400 `unsupported_parameter` through `ApiError.invalid`, and each message names the field ('<field> is not supported.'). response_format type text and logprobs false are accepted. user, metadata, store, top_k, min_p and reasoning_effort are not in ALLOWED, so they are dropped, not rejected. I checked this in the unit test and by reading ChatRequest. The check runs inside `ChatRequest.parse`, the only entry point (ChatHandler:71), so streaming, batch and flex requests all get it. No behaviour in the diff goes beyond the spec. The gaps are minor: the SELL-08 docs listing and the PRV-06 SDK-suite case are not in this diff, probably because they belong to other tasks, and the integration test covers only two of the six rejected cases over HTTP. Two small edge cases are noted under 'wrong'."
+ },
+ "standards:BE-18R": {
+  "hard": [
+   {
+    "file": "src/main/resources/application-prod.yaml",
+    "rule": "carmonai-architecture: LGPD 'TLS in transit' / Review checklist 'every hardening override met'",
+    "issue": "Prod requires STARTTLS but nothing in prod sets mail.smtp.auth=true or a password check; MailGuard validates only the username, so a blank SPRING_MAIL_PASSWORD starts fine. Also no test covers application-prod.yaml (starttls.required), so the TLS rule is unverified."
+   },
+   {
+    "file": "src/test/java/ai/carmonai/account/AccountServiceIT.java",
+    "rule": "tdd tests.md: test behavior, not implementation; assertions must be able to fail",
+    "issue": "mailIsPortugueseWithAnEnglishLine asserts the verbatim copy strings; it is coupled to the literal wording and does not check the UTF-8 encoding on the wire the ID-04 comment claims. resetRequestsAreThrottledPerAccount counts token links in the mailbox, which is behavioral and fine, but there is no test of the window expiry (a request after an hour) or per-account isolation."
+   },
+   {
+    "file": "src/main/java/ai/carmonai/account/AccountService.java",
+    "rule": "carmonai-architecture: Services are stateless / replicas scale horizontally",
+    "issue": "Throttle is a read-then-issue count inside a transaction without locking; concurrent requests across replicas can exceed 3 links. Best-effort limit, undocumented."
+   }
+  ],
+  "smells": [
+   {
+    "file": "src/main/java/ai/carmonai/account/AccountService.java",
+    "smell": "Duplicated Code / Data Clumps",
+    "quote": "private static final Duration RESET_WINDOW = Duration.ofHours(1);  (beside RESET_FOR = Duration.ofHours(1))"
+   },
+   {
+    "file": "src/main/java/ai/carmonai/account/AccountTokens.java",
+    "smell": "Primitive Obsession",
+    "quote": "countIssuedSince(String accountId, String purpose, Instant since)  with purpose as a String constant"
+   },
+   {
+    "file": "src/main/java/ai/carmonai/account/MailGuard.java",
+    "smell": "Mysterious Name",
+    "quote": "List<String> wrong  /  isLocal(String value)  (also applied to a sender address, where 'local' means a hostname test)"
+   },
+   {
+    "file": "src/main/java/ai/carmonai/account/Mailer.java",
+    "smell": "Duplicated Code",
+    "quote": "English: ... (one use, 24 hours) ... repeated per template alongside the Portuguese text, so each message is maintained twice"
+   }
+  ],
+  "summary": "Commit 95a2791 largely follows the documented standards. Config comes from env, no secrets are in code, no personal data is logged, and the migration is date-versioned. The main gaps are an unchecked SMTP password, no test for the prod STARTTLS setting, and a throttle that can be exceeded under concurrency."
+ },
+ "spec:BE-18R": {
+  "summary": "Spec axis, commit 95a2791. The guard, Portuguese templates and throttle are all present and broadly match the spec. There are no real gaps, one weak throttle implementation and some small partials. Nothing clearly counts as scope creep.",
+  "missing": [
+   {
+    "specLine": "Test: start with `CONSOLE_URL=http://localhost:3000` fails with a clear message.",
+    "issue": "MailGuardTest only builds an ApplicationContextRunner around MailGuard with property values. No test boots the real application under the prod profile. It does not prove that the real `CONSOLE_URL` env var reaches `carmonai.console.url`, or that the component is picked up. It also does not prove that `SPRING_MAIL_USERNAME` binds to `spring.mail.username` via relaxed binding. The spec itself marks that binding 'unverified'."
+   },
+   {
+    "specLine": "`SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH=true`, `SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE=true` (and required), `CARMONAI_MAIL_FROM=...`, `CONSOLE_URL=...`",
+    "issue": "All of this is left to env. The diff only adds comments in application.yaml, and `starttls.required` only in application-prod.yaml. Nothing in the diff (prod guard or compose/env example) checks that `smtp.auth` or `starttls.enable` are actually true. The guard only checks the username, so a prod start with the login set but auth off, or an empty password, passes. The spec asks only for the login check, so this is partial."
+   },
+   {
+    "specLine": "UTF-8 subjects with accents",
+    "issue": "Only the already-registered subject ('Voc\u00ea j\u00e1 tem uma conta') has an accent. The verify and reset subjects ('Confirme seu e-mail na Carmonai', 'Redefina sua senha na Carmonai') have none. The test asserts those two subjects only as plain strings, so the accent coverage on the wire is thin. Encoding rests on Spring Boot's default `spring.mail.default-encoding=UTF-8`, which is not set or asserted."
+   }
+  ],
+  "wrong": [
+   {
+    "specLine": "Throttle (ID-05): at most 3 reset tokens per account per hour; the fourth request sends no mail and still answers 202.",
+    "issue": "The count is over `accounts.account_token`, but `AccountTokens.use()` DELETEs a token when it is spent. The new comment 'issued since then, spent or not' is therefore false. Spent tokens do not count, so the window is not 'tokens issued per hour'. Request 3, complete one reset, and a further request is mailed again. Mailing is the thing being limited, and the count undercounts it.",
+    "fix": "Count rows that survive use, for example a separate request-log row or a `used_at` soft-delete column, or document that the limit counts only unspent links."
+   },
+   {
+    "specLine": "at most 3 reset tokens per account per hour",
+    "issue": "The count-then-issue check in `requestPasswordReset` has no lock. Two concurrent requests under READ COMMITTED can both see 2 and both issue, giving 4 or more mails. There is also a clock mismatch: the window cutoff uses the app's `Instant.now()`, but `created_at` defaults to the DB's `now()`.",
+    "fix": "Lock the account row (`SELECT ... FOR UPDATE`) or compute the cutoff in SQL (`now() - interval '1 hour'`)."
+   },
+   {
+    "specLine": "refuse to start if the console URL or the sender contains `localhost` or `.local`",
+    "issue": "The substring match is literal and broad. A legitimate host such as `localhost-free.example` or `x.localdomain.com` is refused, and the check is not on the host part. It matches the spec text, so this is a minor intent issue. It also misses `127.0.0.1`, which the spec does not ask for."
+   }
+  ],
+  "scopeCreep": [
+   "The English line was also added to the 'already registered' mail. This is plausibly covered by 'Portuguese templates (verify, already registered, reset) ... one-line English tail'.",
+   "`mail.smtp.starttls.required: true` in the new application-prod.yaml. The spec says 'STARTTLS_ENABLE=true (and required)', so this is arguably asked for. It is set in YAML rather than env, which diverges slightly from 'settings from the environment'.",
+   "The guard's error message also lists the env var names, such as `(CONSOLE_URL)`. This is harmless and not requested."
+  ]
+ },
+ "standards:BE-20aR": {
+  "hard": [],
+  "smells": [
+   {
+    "file": "src/main/java/ai/carmonai/organization/MembershipRepository.java",
+    "smell": "Primitive Obsession / Duplicated Code: role and status literals repeated in JPQL instead of the service's OWNER/CLOSED constants",
+    "quote": "where m.accountId = :accountId and m.role = 'owner' ... o.status <> 'closed'"
+   },
+   {
+    "file": "src/main/java/ai/carmonai/organization/MembershipRepository.java",
+    "smell": "Mysterious Name: lockAccount returns a throwaway String (via ::text cast) only to satisfy Spring Data; the return value is meaningless and the lock lives on a membership repository, though it serializes organization creation",
+    "quote": "@Query(value = \"select pg_advisory_xact_lock(hashtext(:accountId))::text\", nativeQuery = true) String lockAccount(String accountId);"
+   },
+   {
+    "file": "src/main/java/ai/carmonai/organization/OrganizationService.java and src/main/resources/application.yaml",
+    "smell": "Duplicated Code: the default of 3 is declared in both the @Value placeholder and application.yaml, so it can drift",
+    "quote": "@Value(\"${carmonai.organization.max-organizations-per-account:3}\") ... max-organizations-per-account: ${MAX_ORGANIZATIONS_PER_ACCOUNT:3}"
+   },
+   {
+    "file": "src/main/java/ai/carmonai/organization/OrganizationService.java",
+    "smell": "Shotgun Surgery (minor): dropping @RequiredArgsConstructor for a hand-written constructor only to inject one int. A @ConfigurationProperties record or a field @Value would keep the Lombok style.",
+    "quote": "public OrganizationService(OrganizationRepository organizationRepository, MembershipRepository membershipRepository, @Value(...) int maxOrganizationsPerAccount)"
+   }
+  ],
+  "summary": "No documented-standard violations found in commit b73d708. The change meets the layering rule: the domain exception is raised in the Service and mapped to HTTP in the Resource, with no DTOs in the Service. The cap is configured through an env var in application.yaml. No personal data is logged, and no collection endpoint is added. A grep of the touched code for \"store\" was not run; the diff has no such term. The tests go through the Feign client against a real DB, with no mocks of project classes and no tautological assertions, so they follow tdd/tests.md. Only judgement-call smells are listed."
+ },
+ "spec:BE-20aR": {
+  "summary": "Core ORG-03 behaviour is implemented: the property defaults to 3, the fourth create returns 409 with code organization_limit, and closing an organization frees a slot. The gaps are minor: no test that the property can be changed, and the test-first and \"failed before\" requirements cannot be verified from one commit. The diff also adds a few things the spec did not ask for. Nothing in the diff is clearly wrong against the spec.",
+  "missing": [
+   {
+    "specLine": "If it goes wrong: if a real customer needs more than 3 organizations, raise the property for that deployment; the cap is a default, not a rule.",
+    "issue": "No test shows the cap follows the property (for example a limit of 1 or 5). Every test runs only at the default of 3, so a hardcoded 3 would pass. The service also accepts 0 or a negative value without complaint, which would silently block all creates."
+   },
+   {
+    "specLine": "Tests first. / Done when: the three tests pass and failed before.",
+    "issue": "The tests and the implementation are in the same single commit, so test-first and 'failed before' cannot be shown from the diff. The 409 assertion only checks that the body contains the string organization_limit; it does not check the ProblemDetail 'code' field itself."
+   },
+   {
+    "specLine": "the fourth create returns 409 `organization_limit`",
+    "issue": "Partial. The cap counts only organizations the account owns (role = owner). The spec says 'organizations per account' and does not say owner-only. This is a defensible reading, but it is an unstated decision, and membership as admin or member is deliberately uncapped. No code path in this repo lets a second owner be added to an existing organization, so there is no bypass today."
+   }
+  ],
+  "wrong": [],
+  "scopeCreep": [
+   "Per-account Postgres advisory lock (MembershipRepository.lockAccount, pg_advisory_xact_lock(hashtext(accountId))). The spec only says 'the fourth create returns 409', not that it must be race-safe. It is defensible, but it ties the service to Postgres and adds a native query, with no concurrency test to show it works. hashtext collisions can also serialize unrelated accounts.",
+   "Environment variable MAX_ORGANIZATIONS_PER_ACCOUNT in application.yaml. The spec asks only for the property `max-organizations-per-account` (default 3). The env binding is harmless, but the property is namespaced under carmonai.organization, a prefix the spec does not name.",
+   "Extra test membershipAsNonOwnerDoesNotUseASlot, and the owner-only counting rule it locks in (see the 'missing' item above).",
+   "OrganizationService drops @RequiredArgsConstructor for a hand-written constructor, and the `countOpenOwned` query treats 'suspended' organizations as using a slot (status <> 'closed'). The spec says only that closing frees a slot, so suspended organizations still counting is an unstated choice."
+  ]
+ },
+ "standards:BE-03R": {
+  "hard": [
+   {
+    "file": "back/docs/services/gateway.md (filter-order table, lines 71-79) and back/docs/internals/fact-sheet.md:54-56; commit 44e6a9d adds RegistrationFilter",
+    "rule": "Repo docs describe the gateway filter chain and name every WebFilter; the new filter at HIGHEST_PRECEDENCE+2 is not documented",
+    "issue": "The docs tables list AccessLogFilter, V1RequestFilter, OriginFilter and the rest, but not RegistrationFilter. A Valkey-free reader of the docs cannot learn that registration is closed by default or that registration-open exists.",
+    "fix": "Add RegistrationFilter to the order table and fact-sheet, and document the registration-open property."
+   },
+   {
+    "file": "back/docs/reference/decisions.md:149; back/docs/services/account.md:72; back/docs/operations/running.md:178",
+    "rule": "Repo docs state that POST /auth/register always answers 202, and that smoke.sh registers through the gateway",
+    "issue": "After this change the gateway answers 403 registration_closed by default. The docs are now false for production, and nothing says the harness compose sets CARMONAI_GATEWAY_REGISTRATIONOPEN.",
+    "fix": "Record the SEC-01 decision, qualify the 202 statements, and note the harness-only flag in running.md."
+   },
+   {
+    "file": "gateway-service/src/main/resources/logback-spring.xml:5 (module changed by the diff)",
+    "rule": "carmonai-architecture SKILL.md, Review checklist: `grep -ri store` over the changed modules returns nothing",
+    "issue": "The grep over gateway-service still matches the comment 'ships it to a store'. This is not introduced by the diff, but the checklist is not met for this module.",
+    "fix": "Reword the comment, or confirm the checklist item is meant for code and not comments."
+   },
+   {
+    "file": "gateway-service/src/test/java/ai/carmonai/gateway/GatewayIT.java (trailingSlashFormsNeverReachTheAuthService)",
+    "rule": "tdd/tests.md: tests must describe behaviour with a precise expectation, not an unspecified one",
+    "issue": "`assertThat(status).isIn(401, 403, 404)` accepts three different outcomes, so it passes whichever way the gateway happens to refuse. The test pins only 'authCalls == 0'.",
+    "fix": "Assert the one status the gateway actually returns, or drop the status assertion and keep only the zero-backend-calls check."
+   },
+   {
+    "file": "gateway-service/src/test/java/ai/carmonai/gateway/RegistrationFilterTest.java (closedRegistrationIsRefusedBeforeTheChainRuns)",
+    "rule": "tdd/tests.md: implementation-coupled assertion",
+    "issue": "`.startsWith(\"{\\\"error\\\":{\\\"message\\\":\\\"\")` pins the exact serialization prefix of OpenAiErrors.write, which is owned by another class. It breaks on any harmless change to field order or whitespace. Behaviour is covered by 'code' contains registration_closed.",
+    "fix": "Parse the JSON and assert error.code, or leave the shape check to an OpenAiErrors test."
+   }
+  ],
+  "smells": [
+   {
+    "file": "gateway-service/.../RegistrationFilter.java vs OriginFilter.java and IdentityHeadersFilter.java",
+    "smell": "Duplicated Code / Shotgun Surgery",
+    "quote": "PATH.matches(exchange.getRequest().getPath().pathWithinApplication()) versus PATHS.contains(exchange.getRequest().getPath().value()) and SESSION_PATHS.contains(...getPath().value())"
+   },
+   {
+    "file": "gateway-service/.../RegistrationFilter.java",
+    "smell": "Mysterious Name",
+    "quote": "static final PathPattern PATH = new PathPatternParser().parse(\"/auth/register\");"
+   },
+   {
+    "file": "back/docker/compose.yaml and gateway-service application.yaml",
+    "smell": "Mysterious Name",
+    "quote": "CARMONAI_GATEWAY_REGISTRATIONOPEN: \"true\""
+   },
+   {
+    "file": "gateway-service/.../GatewayIT.java and RegistrationFilterTest.java",
+    "smell": "Duplicated Code",
+    "quote": "{\"/auth/register\", \"/auth/%72egister\", \"/auth/register;x=1\", \"/auth/register;\", \"/auth/register?x=1\"} in the IT and {\"/auth/%72egister\", \"/auth/r%65gister\", \"/auth/register;a=b\", \"/auth/register;\", \"/auth/register?x=1\"} in the unit test"
+   },
+   {
+    "file": "gateway-service/.../GatewayIT.java",
+    "smell": "Duplicated Code",
+    "quote": "registry.add(\"spring.cloud.gateway.server.webflux.routes[0].predicates[0]\", () -> \"Path=/auth/login,/auth/register,/auth/whoami,/auth/refresh,/auth/logout\");"
+   }
+  ],
+  "summary": "Standards axis: no violation of hardening overrides 1-6 or the LGPD rules; the default is closed and the flag is env-driven. The hard findings are documentation drift, one checklist grep that still matches, and two weak test assertions. Smells: the fix matches the register path with a PathPattern, while OriginFilter and IdentityHeadersFilter still match with exact getPath().value(), so a form like /auth/%72efresh or /auth/%72egister skips their checks. That is worth a follow-up. PATH holds a pattern and should be named for what it is. The env var REGISTRATIONOPEN breaks the CONSOLE_ORIGINS snake_case style. The IT copies the auth route predicates from application.yaml, and the encoded-path lists repeat across IT and unit test. The IT uses a stub HTTP server and a raw socket, not mocks of project classes, and the unit test uses a hand-rolled chain, so neither is tautological."
+ },
+ "spec:BE-03R": {
+  "missing": [
+   {
+    "specLine": "1. Test first in `GatewayIT`: ... the account service stub gets 0 calls, and no mail reaches Mailpit.",
+    "issue": "Process and assertion gap. GatewayIT only appears in the second commit (44bc869, 'review fixes'). The first commit shipped the filter with only a unit test, so the test-first order was not followed. No test asserts that no mail reaches Mailpit. The IT only counts calls on a stub standing in for auth, and the stub never touches account-service or mail. Zero backend calls implies no mail, but the spec's check is not made."
+   },
+   {
+    "specLine": "Done when: ... on the production compose, `curl ... /auth/register ... prints 403`; smoke.sh still reports 0 failed with the property on (PRV-05); review verdict recorded.",
+    "issue": "Nothing in the three commits proves these. There is no production compose in the repo, so the curl check cannot be seen, and no smoke.sh run is evidenced. The back commit only adds the env line to docker/compose.yaml. It does not bump the api/gateway-service submodule pointer, which still points at cb417d2 (pre-BE-03). The harness compose builds ../api/gateway-service, so as committed the harness gets a gateway without the filter. The property is then ignored and registration stays open."
+   },
+   {
+    "specLine": "When false the gateway answers `POST /auth/register` with an OpenAI-shaped 403 `registration_closed` before any routing.",
+    "issue": "Partial for one case. OriginFilter (order HIGHEST+1) runs ahead of RegistrationFilter (HIGHEST+2) and matches the raw path. A register POST with a non-console Origin header gets a bare 403 with no body, not `registration_closed`. This is still a 403 and the account service is not reached, but it is not the specified answer. No test covers it."
+   }
+  ],
+  "wrong": [
+   {
+    "specLine": "answers `POST /auth/register` with an OpenAI-shaped 403 `registration_closed` before any routing ... (brief: in every written form of the path (encoded, matrix))",
+    "issue": "The matching looks correct. The second commit uses PathPattern on `pathWithinApplication()`, the same input the router Path predicate and the security `pathMatchers` use, so %-encoded and `;x=1` forms are closed. GatewayIT verifies this over a raw socket. Residual risk: OriginFilter and IdentityHeadersFilter still match `getPath().value()` raw. That is outside BE-03, but the encoded-path class of bypass remains elsewhere in the gateway.",
+    "fix": "No change needed for BE-03. Note the raw-path matching in OriginFilter as a follow-up."
+   },
+   {
+    "specLine": "POST /auth/register ... (route `Path=/auth/login,/auth/register,...` has no Method predicate)",
+    "issue": "Only POST is closed. A GET, PUT or DELETE on /auth/register is still routed to auth-service if the caller holds a valid JWT. This is not account creation and matches the spec's POST wording, so it is low risk. The brief's 'every written form of the path' is satisfied only for POST.",
+    "fix": "Optional: add `Method=POST` to the route, or close the path for all methods."
+   }
+  ],
+  "scopeCreep": [
+   "pom.xml: adds maven-failsafe-plugin. The spec never mentions build changes. It is needed for the IT to run in verify, so it is justified but unasked.",
+   "GatewayIT replaces the route table with a single stub-backed auth route and boots the real gateway with fake VALKEY settings. This is test harness infrastructure beyond 'GatewayIT new cases', and it does not exercise the real routes.",
+   "Extra tests beyond the spec: trailing-slash forms (`/auth/register/`, `/auth/r%65gister/`) asserted `isIn(401, 403, 404)`, and `/auth/register-info`, `/auth/login;a=b`, `/auth/whoami` and `/accounts/verify-email` pass-through cases. These are harmless but not requested. The trailing-slash assertion is loose and does not pin 'closed'.",
+   "RegistrationFilter.java comment and Javadoc-style notes explain the encoded-path matching. No behaviour beyond the spec was added to the filter itself."
+  ],
+  "summary": "The core of BE-03 is implemented correctly. The property `carmonai.gateway.registration-open` defaults to false through the yaml placeholder. RegistrationFilter answers POST /auth/register with an OpenAI-shaped 403 `registration_closed` ahead of security and routing. Login, refresh and logout are untouched and tested. GatewayIT covers the 202 case with the property true. The harness compose sets `CARMONAI_GATEWAY_REGISTRATIONOPEN: \"true\"` and no production compose is touched. The encoded-path fix is sound, because it uses the same `pathWithinApplication()` matching as the router and security. The gaps are mostly in verification and process. GatewayIT was added after the filter, the Mailpit assertion is missing, and the smoke and production-curl checks are not evidenced. The back repo commit does not bump the gateway-service submodule pointer. A closed-registration request with a bad Origin gets a bare 403 instead of `registration_closed`. Nothing here was run: this review is from reading the diffs and the surrounding code."
+ },
+ "impl:BE-20c": {
+  "status": "done",
+  "summary": "BE-20c (BAT-01) done in batch-service. The file retention is now the property carmonai.batch.file-retention (Duration, default 7d in application.yaml). It is bound into both file INSERTs (upload and batch output) as an interval, replacing the hard-coded 30 days. The expiry sweep log reports the configured value. The sweep itself compares expires_at, so it is unchanged. New IT theSweepKeepsAFileWithinItsRetentionAndDeletesItAfter (retention set to 1 minute for the class) fails before the change (file still served after the sweep, expected 404 at BatchServiceIT line 231) and passes after. Full module verify is green: 8 tests, 0 failures.",
+  "commits": [
+   {
+    "repo": "batch-service",
+    "sha": "02badfc93dc697ea823ae5fa1aa72673e2e75595"
+   }
+  ],
+  "tests": {
+   "added": [
+    "BatchServiceIT.theSweepKeepsAFileWithinItsRetentionAndDeletesItAfter"
+   ],
+   "command": "export JAVA_HOME=/usr/lib/jvm/java-25-openjdk-amd64; export PATH=$JAVA_HOME/bin:$PATH; cd /home/user/ws && mvn -B -pl api/batch-service verify",
+   "result": "Tests run: 8, Failures: 0, Errors: 0, Skipped: 0 (BUILD SUCCESS)",
+   "failedBeforeChange": "Focused run before the change (-Dit.test=BatchServiceIT#theSweepKeepsAFileWithinItsRetentionAndDeletesItAfter): Tests run: 1, Failures: 1 at BatchServiceIT.java:231, expected 404 but was 200 (the file was still served after the one-minute sweep because retention was hard-coded at 30 days).",
+   "seams": [
+    "(a) The HTTP API of the batch-service Files endpoints (GET /v1/files/{id} and GET /v1/files/{id}/content) in the existing BatchServiceIT, with the expiry sweep BatchFinisher.expireFiles() invoked directly by the test as the existing erasure test does with eraseClosed()."
+   ],
+   "notRun": "The 7-day default is not exercised by any test (the test class sets carmonai.batch.file-retention=1m for all its tests). The new test takes about 62 s because it waits for real wall-clock expiry; there is no clock seam in the module."
+  },
+  "pushed": true,
+  "deviations": [
+   "Behaviour change: new files now expire after 7 days instead of 30 (the default that the guide and the task specify). Files already stored keep their existing expires_at.",
+   "The Flyway migration V2026.10.03.001__create_tables.sql comment still says 'kept 30 days at most'. Not edited, because applied migrations are checksummed; it needs a follow-up migration or accepting the stale comment.",
+   "The new test waits about 61 s on the real clock to pass the 1-minute retention (no clock seam exists in this module). Class-level property carmonai.batch.file-retention=1m applies to every test in BatchServiceIT.",
+   "Commit trailer: the task asked for 'Co-Authored-By: Claude Sonnet 5.5', but the session attribution instruction specifies 'Claude Haiku 5.5' with the same Claude-Session URL. I used the session attribution. The task's project rule that commit messages must not name an AI model conflicts with the required trailer; trailers were kept as required.",
+   "The sweep log prints the Duration's toString (for example 'PT1M' or 'PT168H'), not a human-readable unit."
+  ],
+  "followUps": [
+   "Add a follow-up Flyway migration or otherwise correct the V2026.10.03.001 comment that says files are kept 30 days.",
+   "Customer terms must state 7 days for batch files (BUS-10); this is outside batch-service.",
+   "Consider a clock seam for retention tests so expiry can be tested without waiting a real minute.",
+   "Existing files keep their 30-day expires_at; decide whether a one-off update should shorten them to 7 days."
+  ]
+ },
+ "standards:BE-06R": {
+  "hard": [
+   {
+    "file": "/home/user/billing-service/src/main/java/ai/carmonai/billing/BillingService.java (grant, lines ~45-58)",
+    "rule": "carmonai-architecture/SKILL.md, LGPD working rules: 'DELETE /accounts/{id} erases or irreversibly anonymizes the data and reaches every service holding it. Each service holding personal data states how it erases and how it exports.' Also 'Collect only fields a feature needs; record the purpose of each.'",
+    "issue": "reference is free text (1 to 256 chars) written to an append-only ledger (UPDATE/DELETE/TRUNCATE are blocked by trigger). Nothing enforces the 'Pix id plus operator tag, never a payer name' rule; it lives only in a comment. A caller can put a name into the row and it can never be erased. The fallback `reference == null ? reason : reference` also copies the free-text reason into the permanent column. The change states no erasure or export position for this field.",
+    "fix": "Validate a format (for example Pix id + '|op:' + tag, with an allowed character set) or document and get DPO sign-off that ledger rows are exempt or keyed by organization id only. Record the erasure/export statement in the service docs."
+   },
+   {
+    "file": "/home/user/billing-service/src/test/java/ai/carmonai/billing/BillingServiceIT.java (aTopUpIsOneTyped..., theClientLibraryCarriesType..., anExplicitGrantTypeIsAccepted, aReferenceOfExactlyTheLimitIsKept, aCallerThatSendsNeither...)",
+    "rule": "tdd/tests.md: 'Verifying through external means instead of interface' and implementation-coupled tests are bad",
+    "issue": "Outcomes are checked with raw SQL against ledger_entry and with CreditFlags.PREFIX Redis keys, so the tests depend on table/column names and the key scheme rather than on a public interface. Several tests are also multi-assertion (one test asserts row, balance, mismatches and flag), against 'one logical assertion per test'. No mocks of project classes and no tautologies found; the real HTTP path and the real client are used, which is good.",
+    "fix": "The service has no ledger read endpoint, so SQL is the only way to see the row. Accept that deliberately, or add a read interface later. Split the multi-concern tests (the flag-lift test mixes flag, balance, amounts and types)."
+   }
+  ],
+  "smells": [
+   {
+    "file": "/home/user/billing/src/main/java/ai/carmonai/billing/GrantIn.java, BillingService.java",
+    "smell": "Primitive Obsession: type is a String with magic literals \"grant\" and \"top_up\"",
+    "quote": "private static final Set<String> GRANT_TYPES = Set.of(\"grant\", \"top_up\"); ... String entryType = type == null ? \"grant\" : type;"
+   },
+   {
+    "file": "BillingService.java / BillingResource.java",
+    "smell": "Repeated Switches (one list kept in three places): the allowed values live in the Java Set, in the DB CHECK (grant, usage, refund, adjustment, top_up) and in the GrantIn comment, so adding a type means editing all of them. Shotgun Surgery risk",
+    "quote": "require(type == null || GRANT_TYPES.contains(type), \"type must be grant or top_up\");"
+   },
+   {
+    "file": "BillingService.java / BillingResource.java",
+    "smell": "Data Clumps: six loose parameters pass from GrantIn through the resource into the service in the same order (organization, amount, type, reason, reference, key). A String-heavy signature invites swapped arguments (reason and reference are both Strings)",
+    "quote": "billingService.grant(in.organizationId(), in.amountMicroBrl(), in.type(), in.reason(), in.reference(), in.idempotencyKey())"
+   },
+   {
+    "file": "BillingService.java",
+    "smell": "Divergent Change / long method: grant now validates, defaults type and reference, builds the idempotency key and writes in one method",
+    "quote": "String entryReference = reference == null ? reason : reference;"
+   },
+   {
+    "file": "BillingServiceIT.java",
+    "smell": "Duplicated Code: the reference format is spelled twice, once in the PIX_REFERENCE constant and again in the topUp helper. Also repeated wire(...)+put(\"type\")+put(\"reference\") blocks across tests",
+    "quote": "static final String PIX_REFERENCE = PIX + \"|op:o1\"; ... body.put(\"reference\", pixId + \"|op:o1\");"
+   },
+   {
+    "file": "BillingServiceIT.java",
+    "smell": "Mysterious Name: single-letter ids (t, u, k, o, n, r, m) hide intent",
+    "quote": "String t = id(); ... String u = id(); ... String m = id();"
+   }
+  ],
+  "summary": "Standards axis only. Two hard findings: an LGPD gap (free-text reference in an append-only ledger with no enforced format or erasure/export statement) and tests that verify through raw SQL and Redis keys. Nothing else breaks the architecture skill: no hardening override 1-6 is touched, no 'store' hit, no unbounded collection, no personal data logged (the 400 text is fixed). The module rules hold, with Resource calling Service and the library staying DTO-only. The smells are judgement calls."
+ },
+ "spec:BE-06R": {
+  "summary": "The core of BE-06 is implemented and matches the spec: type defaults to grant, other values get a 400, reference is capped at 256, the key format is kept, and a replay gives one row. Two spec items are not done: the idempotency-key documentation, and the revenue-check and fail-on-unchanged-code verification. One item is wrong (the reason-required rule) and one is added behaviour (the reference fallback). Nothing was run; I read the diffs, the migration and CreditFlags.",
+  "missing": [
+   {
+    "specLine": "Document: the idempotency key is the Pix end-to-end id (decision D-33).",
+    "issue": "The statement only appears in Java comments on GrantIn and BillingService.grant. No doc, README or API description was updated, so a caller reading the docs would not learn it. Partial."
+   },
+   {
+    "specLine": "reconcile returns `balanced:true` ... `bash docker/revenue-check.sh` prints balanced",
+    "issue": "The tests assert repository.mismatches() does not contain the org. They never call BillingService.reconcile(), a reconcile endpoint, or revenue-check.sh, and nothing shows the script was run. mismatches() is a global check on a shared DB, and `doesNotContain` only covers the org under test. Partial."
+   },
+   {
+    "specLine": "the new `BillingServiceIT` cases pass and fail on unchanged code",
+    "issue": "No evidence that the new cases were run red against the old code or green against the new. The commit message only says the flag sync already clears no_credit."
+   },
+   {
+    "specLine": "Test first in `BillingServiceIT` ... reference equal to the Pix id",
+    "issue": "The top-up test asserts reference equals PIX + \"|op:o1\" (Pix id plus an operator tag), not the bare Pix id. This is consistent with item 2 but differs from item 1's wording. It is minor; I am flagging the inconsistency inside the spec rather than a defect."
+   },
+   {
+    "specLine": "The reference is the Pix end-to-end id plus an operator tag, never the payer name",
+    "issue": "Nothing checks that reference contains the Pix id, or that the key and reference agree. This is arguably unenforceable, so it is a note rather than a defect."
+   }
+  ],
+  "wrong": [
+   {
+    "specLine": "`GrantIn` gains `type` ... and `reference` (at most 256 characters: the Pix end-to-end id plus an operator tag ...)",
+    "issue": "The service still requires `text(reason, 200)`, so every top-up must also send a non-blank reason of at most 200 characters, although reference now carries the meaning. A client that sends reference without reason gets a 400. The spec does not say reason stays mandatory. The 200-character limit also sits oddly beside reference's 256.",
+    "fix": "Decide whether reason stays required for top_up. If not, relax it when reference is present."
+   },
+   {
+    "specLine": "`type` (`grant` default, or `top_up`; refuse other values here)",
+    "issue": "An empty-string type is refused with a 400 rather than defaulting. This is defensible, and the test explicitly pins it. Blank-string reference is also refused, which is stricter than 'at most 256 characters'.",
+    "fix": "Acceptable, but confirm that rejecting \"\" matches the intended default semantics."
+   }
+  ],
+  "scopeCreep": [
+   "The reference silently falls back to reason when absent (`entryReference = reference == null ? reason : reference`). The spec says nothing about this. It is kept for backward compatibility and the tests pin it, but it means the reference column can still hold free-text reasons and potentially a payer name for a top_up sent without a reference. That cuts against the spec's personal-data rule. A top_up with no reference could be refused instead.",
+   "Extra tests beyond the brief: an exact-256 boundary test, an echo-suppression check on the 400 body, a client-library round trip, and a short-top-up-keeps-flag case. These are harmless."
+  ]
+ }
+}

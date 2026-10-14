@@ -1,4 +1,5 @@
 # MVP backend, wave 1: where we stopped (2026-10-13)
+> Superseded by README.md (2026-10-14); kept as history of the first run.
 
 Branch `claude/peaceful-turing-14vw06` carries all work, in `back` and in each module repo it touched.
 Nothing is on `main`, no pull request is open, submodule pointers in `back` are NOT bumped.

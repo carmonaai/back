@@ -1,0 +1,104 @@
+diff --git a/src/main/java/ai/carmonai/inference/ChatRequest.java b/src/main/java/ai/carmonai/inference/ChatRequest.java
+index 2120156..88d4ab1 100644
+--- a/src/main/java/ai/carmonai/inference/ChatRequest.java
++++ b/src/main/java/ai/carmonai/inference/ChatRequest.java
+@@ -92,11 +92,11 @@ record ChatRequest(InferenceProperties.Model model, ObjectNode upstream, boolean
+     }
+ 
+     // Parameters that change the answer and that the engine path doesn't honour: refused, not dropped.
+-    // user, metadata, store, top_k, min_p and reasoning_effort are not in ALLOWED and stay ignored.
++    // The other OpenAI-only fields are not in ALLOWED and stay ignored.
+     private static void rejectUnsupported(JsonNode root) {
+         JsonNode format = root.get("response_format");
+         if (format != null && !format.isNull() && !"text".equals(format.path("type").asString(""))) {
+-            throw unsupported("response_format");
++            throw ApiError.invalid("unsupported_parameter", "response_format.type must be text.");
+         }
+         JsonNode logprobs = root.get("logprobs");
+         if (logprobs != null && !logprobs.isNull() && !(logprobs.isBoolean() && !logprobs.asBoolean())) {
+diff --git a/src/test/java/ai/carmonai/inference/ChatRequestTest.java b/src/test/java/ai/carmonai/inference/ChatRequestTest.java
+index 5b00d72..1d91efc 100644
+--- a/src/test/java/ai/carmonai/inference/ChatRequestTest.java
++++ b/src/test/java/ai/carmonai/inference/ChatRequestTest.java
+@@ -1,11 +1,17 @@
+ package ai.carmonai.inference;
+ 
+ import static org.assertj.core.api.Assertions.assertThat;
++import static org.assertj.core.api.Assertions.assertThatCode;
+ import static org.assertj.core.api.Assertions.assertThatThrownBy;
+ 
+ import java.util.List;
++import java.util.stream.Stream;
+ 
+ import org.junit.jupiter.api.Test;
++import org.junit.jupiter.params.ParameterizedTest;
++import org.junit.jupiter.params.provider.Arguments;
++import org.junit.jupiter.params.provider.MethodSource;
++import org.junit.jupiter.params.provider.ValueSource;
+ 
+ import tools.jackson.databind.json.JsonMapper;
+ 
+@@ -16,29 +22,46 @@ class ChatRequestTest {
+     private static final InferenceProperties PROPERTIES = new InferenceProperties(List.of(MODEL), null, null, null, null, 1, null, null, null);
+     private static final Caller CALLER = new Caller("org", "key", "standard", null);
+ 
++    @ParameterizedTest
++    @MethodSource("refusals")
++    void refusesParametersThatChangeTheAnswerAndWouldBeDropped(String extra, String field) {
++        assertThatThrownBy(() -> parse(extra)).isInstanceOfSatisfying(ApiError.class, e -> {
++            assertThat(e.getMessage()).contains(field);
++            assertThat(e.code()).isEqualTo("unsupported_parameter");
++        });
++    }
++
++    static Stream<Arguments> refusals() {
++        return Stream.of(
++            Arguments.of(",\"response_format\":{\"type\":\"json_object\"}", "response_format"),
++            Arguments.of(",\"response_format\":{\"type\":\"json_schema\",\"json_schema\":{\"name\":\"x\"}}", "response_format"),
++            Arguments.of(",\"logprobs\":true", "logprobs"),
++            Arguments.of(",\"top_logprobs\":2", "top_logprobs"),
++            Arguments.of(",\"top_logprobs\":0", "top_logprobs"),
++            Arguments.of(",\"logit_bias\":{\"50256\":-100}", "logit_bias"));
++    }
++
+     @Test
+-    void refusesParametersThatChangeTheAnswerAndWouldBeDropped() {
+-        refused(",\"response_format\":{\"type\":\"json_object\"}", "response_format");
+-        refused(",\"response_format\":{\"type\":\"json_schema\",\"json_schema\":{\"name\":\"x\"}}", "response_format");
+-        refused(",\"logprobs\":true", "logprobs");
+-        refused(",\"top_logprobs\":2", "top_logprobs");
+-        refused(",\"top_logprobs\":0", "top_logprobs");
+-        refused(",\"logit_bias\":{\"50256\":-100}", "logit_bias");
++    void aResponseFormatWithoutTypeIsToldToUseText() {
++        assertThatThrownBy(() -> parse(",\"response_format\":{}")).isInstanceOfSatisfying(ApiError.class,
++            e -> assertThat(e.getMessage()).isEqualTo("response_format.type must be text."));
+     }
+ 
+     @Test
+-    void acceptsTextFormatAndFalseLogprobsAndIgnoresTheHarmlessFields() {
+-        ChatRequest request = parse(",\"response_format\":{\"type\":\"text\"},\"logprobs\":false,\"user\":\"u\","
+-            + "\"metadata\":{\"a\":\"b\"},\"store\":true,\"top_k\":5,\"min_p\":0.1,\"reasoning_effort\":\"low\"");
+-        assertThat(request.upstream().propertyNames()).doesNotContain("response_format", "logprobs", "user", "metadata", "store",
+-            "top_k", "min_p", "reasoning_effort");
++    void acceptsTextResponseFormat() {
++        assertThatCode(() -> parse(",\"response_format\":{\"type\":\"text\"}")).doesNotThrowAnyException();
+     }
+ 
+-    private static void refused(String extra, String field) {
+-        assertThatThrownBy(() -> parse(extra)).isInstanceOfSatisfying(ApiError.class, e -> {
+-            assertThat(e.getMessage()).contains(field);
+-            assertThat(e.code()).isEqualTo("unsupported_parameter");
+-        });
++    @Test
++    void acceptsFalseLogprobs() {
++        assertThatCode(() -> parse(",\"logprobs\":false")).doesNotThrowAnyException();
++    }
++
++    @ParameterizedTest
++    @ValueSource(strings = {"\"user\":\"u\"", "\"metadata\":{\"a\":\"b\"}", "\"top_k\":5", "\"min_p\":0.1", "\"reasoning_effort\":\"low\""})
++    void ignoresTheHarmlessFieldsWithoutForwardingThem(String field) {
++        ChatRequest request = parse("," + field);
++        assertThat(request.upstream().has(field.substring(1, field.indexOf('"', 1)))).isFalse();
+     }
+ 
+     private static ChatRequest parse(String extra) {
