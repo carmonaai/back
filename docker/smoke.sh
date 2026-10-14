@@ -1,16 +1,43 @@
 #!/usr/bin/env bash
-# End-to-end check through the gateway. Run after: docker compose up -d --build --wait
+# End-to-end check through the gateway. Run after the stack is up WITH the object-storage overlay, because the batch section
+# needs it: docker compose -f compose.yaml -f compose.minio.yaml up -d --build --wait
+# (add -f compose.gpu.yaml for ENGINE=vllm). The environment or .env must hold every name of .env.example: the usual ones plus
+# GRAFANA_ADMIN_PASSWORD and the MINIO_* / STORAGE_* names, which compose refuses to start without.
+# The simulator image is a local build: run `bash docker/sim/build.sh` once before the first `up`, or compose stops (image not found).
 # It ends by draining this IP's login bucket (refills 1/s): wait ~20 s before running it again.
-# It stops and restarts valkey once (API-key lookups must fail closed with 503), runs chats on the
-# CPU engine (llama.cpp + Qwen3-0.6B), and greps every log and a database dump for a canary string.
-set -euo pipefail
+# It starts by waiting, at most 60 s, until the console login route answers something other than 503: right after `up --wait`
+# the gateway has answered 503 there once in four runs, before any assertion. The wait costs one login attempt of this IP's bucket.
+# It stops and restarts valkey once (API-key lookups must fail closed with 503), runs chats on the engine
+# (the simulator by default, vLLM with ENGINE=vllm), and greps every log and a database dump for a canary string.
+# Run it against another compose project with COMPOSE_PROJECT_NAME=... (compose reads it; the stack must run under it).
+# Continue-on-fail: a failed assertion is counted (note_fail) and the run goes on, so one run lists every failure; the
+# exit status is the number of failures (capped at 1). Later assertions that depend on a failed one can fail as a
+# consequence; read the first FAIL of each chain.
+# The simulator is the patched one (docker/sim/build.sh builds the image compose.yaml uses): it notices a client that hangs
+# up (G1 of work/prototype-sim/FINDINGS-contract.md) and reports usage on every chunk (G3), so the engine-idle-after-a-
+# hang-up and cancelled-stream-billed assertions run on it as on vLLM. Against upstream's own simulator image
+# (ENGINE_IMAGE=ghcr.io/llm-d/llm-d-inference-sim:v0.11.4@sha256:d60f0fb0... when the stack was started) run with SIM_STOCK=1:
+# the two are then printed as `skip-sim` with their reason and counted, and without it they fail, which is how this script
+# shows the patch matters.
+set -uo pipefail
+NFAIL=0
+NSKIP=0
+note_fail() { NFAIL=$((NFAIL+1)); echo "  ^ FAIL #$NFAIL at smoke.sh line ${BASH_LINENO[0]}"; return 0; }
+skip_sim() { NSKIP=$((NSKIP+1)); echo "skip-sim  $1 (NOT RUN: $2)"; }
 G=${GATEWAY:-http://localhost:8080}
-# MODEL/ENGINE pick the engine the inference checks run against: the CPU one by default (CI), or
-# MODEL=carmonai/qwen3-4b ENGINE=vllm with the stack started from compose.yaml + compose.gpu.yaml.
-M=${MODEL:-carmonai/qwen3-0.6b}
-ENGINE=${ENGINE:-llama}
-DC=(docker compose -f "$(dirname "$0")/compose.yaml")
-[[ $ENGINE == vllm ]] && DC+=(-f "$(dirname "$0")/compose.gpu.yaml")
+# ENGINE picks the engine the inference checks run against: the simulator by default (CI, compose.yaml), or
+# ENGINE=vllm with the stack started from compose.yaml + compose.gpu.yaml. Both serve carmonai/qwen3-4b.
+M=${MODEL:-carmonai/qwen3-4b}
+ENGINE=${ENGINE:-sim}
+# batch-service keeps its files in S3 (MinIO in compose): the batch section needs compose.minio.yaml, whose
+# MINIO_* and STORAGE_* variables must be in the environment or .env, as when the stack was started.
+DC=(docker compose -f "$(dirname "$0")/compose.yaml" -f "$(dirname "$0")/compose.minio.yaml")
+if [[ $ENGINE == vllm ]]; then DC+=(-f "$(dirname "$0")/compose.gpu.yaml"); ENGINE_HOST=vllm; else ENGINE_HOST=engine; fi
+# G2 of the findings: the simulator's output length is that of the prompt (echo mode), so a long stream needs a long
+# prompt: 900 words = 905 prompt tokens (the chat template adds 5), so 905 output tokens ~ 22 s at 24 ms per token, well past the
+# 10 s the idle check below allows a stream that nobody reads. The prompt must stay under max_tokens (1000): in echo mode the
+# engine answers 400 if the whole prompt does not fit, which inference records as an error, not a cancel. vLLM is asked to count, as before.
+if [[ $ENGINE == vllm ]]; then LONGP='Count from 1 to 1000, separated by commas.'; else LONGP=$(for i in $(seq 900); do printf 'w%d ' $i; done); fi
 BODY=$(mktemp)
 HDRS=$(mktemp)
 trap 'rm -f "$BODY" "$HDRS"' EXIT
@@ -22,7 +49,7 @@ expect() {
   local got shown
   got=$(curl -s -o "$BODY" -w '%{http_code}' "$@")
   shown=$(sed -E 's/Bearer [^ ]+/Bearer <redacted>/g; s/(carmonai-rt=)[^ ]+/\1<redacted>/g; s/("token":")[^"]+/\1<redacted>/g' <<<"$*")
-  if [[ $got != "$want" ]]; then echo "FAIL want $want got $got: $shown"; cat "$BODY"; echo; exit 1; fi
+  if [[ $got != "$want" ]]; then echo "FAIL want $want got $got: $shown"; head -c 600 "$BODY"; echo; note_fail; return 0; fi
   echo "ok   $want  $shown"
 }
 json() { sed -nE "s/.*\"$1\":\"([^\"]+)\".*/\1/p" "$BODY"; }
@@ -30,11 +57,20 @@ json() { sed -nE "s/.*\"$1\":\"([^\"]+)\".*/\1/p" "$BODY"; }
 pass='correct-horse-battery'
 J=(-H 'Content-Type: application/json')
 
+# Readiness: poll the route the first assertions use (a wrong password is a 401) every 2 s; 503 (not routed yet) and 000 (not listening) mean wait.
+ready=""
+for _ in $(seq 30); do
+  ready=$(curl -s -o /dev/null -w '%{http_code}' "${J[@]}" -X POST "$G/auth/login" -d '{"email":"ready@example.com","password":"wrong-password"}')
+  [[ $ready != 503 && $ready != 000 ]] && break
+  sleep 2
+done
+[[ $ready != 503 && $ready != 000 ]] && echo "ok   the console login route answers ($ready)" || { echo "FAIL the console login route still answers $ready after 60 s"; note_fail; }
+
 # Mailpit, inside the network: every email to $1, newest first, as JSON.
 mails() {
   local id
-  for id in $("${DC[@]}" exec -T llama curl -s "http://mailpit:8025/api/v1/search?query=to:%22${1/@/%40}%22" | grep -oE '"ID":"[^"]+"' | cut -d'"' -f4); do
-    "${DC[@]}" exec -T llama curl -s "http://mailpit:8025/api/v1/message/$id"
+  for id in $("${DC[@]}" exec -T tools curl -s "http://mailpit:8025/api/v1/search?query=to:%22${1/@/%40}%22" | grep -oE '"ID":"[^"]+"' | cut -d'"' -f4); do
+    "${DC[@]}" exec -T tools curl -s "http://mailpit:8025/api/v1/message/$id"
   done
 }
 # The token of the newest {$2} link (verify-email, reset-password) mailed to $1. The emails are captured
@@ -47,7 +83,7 @@ mail_token() {
     [[ -n $token ]] && break
     sleep 0.5
   done
-  [[ -n $token ]] || { echo "FAIL no $2 email for $1"; exit 1; }
+  [[ -n $token ]] || { echo "FAIL no $2 email for $1"; note_fail; }
   echo "$token"
 }
 # The refresh cookie the last response (-D "$HDRS") set.
@@ -68,9 +104,9 @@ account() {
 account
 # A known email answers like a new one (no account enumeration); its owner gets an email instead.
 expect 202 "${J[@]}" -X POST "$G/auth/register" -d "{\"name\":\"Smoke\",\"email\":\"${email^^}\",\"password\":\"$pass\"}"
-for _ in $(seq 20); do all=$(mails "$email"); grep -q 'You already have a Carmonai account' <<<"$all" && break; sleep 0.5; done
-grep -q 'You already have a Carmonai account' <<<"$all" && echo "ok   the owner of the known email was told by email" \
-  || { echo "FAIL no 'already registered' email"; exit 1; }
+for _ in $(seq 20); do all=$(mails "$email"); grep -q 'Você já tem uma conta na Carmonai' <<<"$all" && break; sleep 0.5; done
+grep -q 'Você já tem uma conta na Carmonai' <<<"$all" && echo "ok   the owner of the known email was told by email" \
+  || { echo "FAIL no 'already registered' email"; note_fail; }
 expect 400 "${J[@]}" -X POST "$G/auth/register" -d '{"name":"Smoke","email":"not-an-email","password":"correct-horse"}'
 expect 401 "${J[@]}" -X POST "$G/auth/login" -d "{\"email\":\"$email\",\"password\":\"wrong-password\"}"
 expect 401 "${J[@]}" -X POST "$G/auth/login" -d '{"email":"nobody@example.com","password":"wrong-password"}'
@@ -81,7 +117,7 @@ first=$rt
 expect 200 -D "$HDRS" -X POST "$G/auth/refresh" -H "Cookie: $first"
 rotated=$(cookie)
 [[ -n $(json token) && -n $rotated && $rotated != "$first" ]] && echo "ok   refresh: a new access token and a rotated cookie" \
-  || { echo "FAIL refresh did not rotate"; exit 1; }
+  || { echo "FAIL refresh did not rotate"; note_fail; }
 expect 401 -X POST "$G/auth/refresh" -H "Cookie: $first"                 # used twice: it was copied
 expect 401 -X POST "$G/auth/refresh" -H "Cookie: $rotated"               # so the session is gone for both
 expect 200 -D "$HDRS" "${J[@]}" -X POST "$G/auth/login" -d "{\"email\":\"$email\",\"password\":\"$pass\"}"
@@ -109,11 +145,11 @@ expect 201 "${A[@]}" "${J[@]}" -X POST "$G/organizations" -d '{"name":"Smoke Org
 org=$(json id)
 
 # Internal endpoints have no gateway route: the smoke test reaches them from inside the network (the
-# llama container has curl). Prepaid credit (R$10, in micro-BRL) pays for the chats below.
-internal() { "${DC[@]}" exec -T llama curl -s -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' "$@"; }
+# tools container has curl). Prepaid credit (R$10, in micro-BRL) pays for the chats below.
+internal() { "${DC[@]}" exec -T tools curl -s -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' "$@"; }
 grant() { internal -X POST http://billing:8080/billing/grants -d "{\"organizationId\":\"$1\",\"amountMicroBrl\":$2,\"reason\":\"smoke\",\"idempotencyKey\":\"$3\"}"; }
 code=$(grant "$org" 10000000 smoke-start)
-[[ $code == 200 ]] && echo "ok   200  R\$10 of credit granted (internal)" || { echo "FAIL credit grant got $code"; exit 1; }
+[[ $code == 200 ]] && echo "ok   200  R\$10 of credit granted (internal)" || { echo "FAIL credit grant got $code"; note_fail; }
 expect 200 "${A[@]}" "$G/organizations"
 expect 200 "${A[@]}" "$G/organizations/$org"
 expect 404 "${A[@]}" "$G/organizations/$org/tenant"                 # internal
@@ -125,7 +161,7 @@ key=$(json key)
 key_id=$(json id)
 K=(-H "Authorization: Bearer $key")
 expect 200 "${A[@]}" "$G/organizations/$org/api-keys"
-if grep -q "$key" "$BODY"; then echo "FAIL the key is listed after creation"; exit 1; fi
+if grep -q "$key" "$BODY"; then echo "FAIL the key is listed after creation"; note_fail; fi
 expect 200 "${K[@]}" "$G/v1/models"
 expect 200 "${K[@]}" -H "id-organization: $other" -H "tier: enterprise" "$G/v1/models"   # forged headers stripped
 expect 401 "$G/v1/models"                                            # no key
@@ -149,12 +185,12 @@ expect 200 -H "Authorization: Bearer $key2" "$G/v1/models"
 K2=(-H "Authorization: Bearer $key2")
 chat() { echo "{\"model\":\"$M\",\"messages\":[{\"role\":\"user\",\"content\":\"$1\"}],\"max_tokens\":$2${3:-}}"; }
 expect 200 "${K2[@]}" "$G/v1/models"
-grep -q "\"$M\"" "$BODY" || { echo "FAIL $M is not listed"; exit 1; }
+grep -q "\"$M\"" "$BODY" || { echo "FAIL $M is not listed"; note_fail; }
 expect 200 "${K2[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" -d "$(chat 'Say hi.' 8)"
-grep -q '"usage"' "$BODY" || { echo "FAIL no usage in the answer"; exit 1; }
+grep -q '"usage"' "$BODY" || { echo "FAIL no usage in the answer"; note_fail; }
 stream=$(curl -sN "${K2[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" -d "$(chat 'Count to five.' 16 ',"stream":true')")
 events=$(grep -c '^data:' <<<"$stream" || true)
-if [[ $events -lt 3 ]] || ! grep -qE '^data: ?\[DONE\]' <<<"$stream"; then echo "FAIL stream: $events events"; exit 1; fi
+if [[ $events -lt 3 ]] || ! grep -qE '^data: ?\[DONE\]' <<<"$stream"; then echo "FAIL stream: $events events"; note_fail; fi
 echo "ok   200  streamed $events events, ending in [DONE]"
 expect 404 "${K2[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" -d '{"model":"nope","messages":[{"role":"user","content":"x"}]}'
 expect 400 "${K2[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" -d "$(chat 'x' 8 ',"n":2')"
@@ -164,25 +200,29 @@ expect 400 "${K2[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" -d '{"model":'
 expect 400 "${K2[@]}" "${J[@]}" -H 'Transfer-Encoding: chunked' -X POST "$G/v1/chat/completions" -d "$(chat 'x' 8)"
 expect 400 "${K2[@]}" "$G/v1/models?api_key=cmn_test_x"
 
-# A client that hangs up stops the generation upstream, and is recorded as cancelled.
-curl -sN --max-time 2 "${K2[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" -d "$(chat 'Count from 1 to 1000, separated by commas.' 1000 ',"stream":true,"temperature":0')" >/dev/null || true
-# Requests the engine is generating right now, from its own metrics.
+# A client that hangs up stops the generation upstream, and is recorded as cancelled with the tokens it had received.
+# It hangs up after the first chunks, not after a timer: a cut 2 s after the request once came before the first byte on a slow
+# start (E35 then saw a cancelled row with no tokens). `head` leaves after 12 lines (the role chunk and the first five tokens, two
+# lines each); curl, writing to the closed pipe, closes its connection. --max-time only bounds a stack that never answers.
+curl -sN --max-time 30 "${K2[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" -d "$(chat "$LONGP" 1000 ',"stream":true,"temperature":0')" | head -n 12 >/dev/null || true
+# Requests the engine is generating right now, from its own metrics (the engines have no shell: asked from the tools container).
 engine_busy() {
-  if [[ $ENGINE == vllm ]]; then
-    "${DC[@]}" exec -T vllm python3 -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/metrics').read().decode())" \
-      | sed -nE 's/^vllm:num_requests_running\{[^}]*\} ([0-9.]+).*/\1/p' | head -1
-  else
-    "${DC[@]}" exec -T llama sh -c 'curl -s -H "Authorization: Bearer $LLAMA_API_KEY" http://127.0.0.1:8080/metrics' \
-      | sed -nE 's/^llamacpp:requests_processing ([0-9.]+).*/\1/p'
-  fi
+  "${DC[@]}" exec -T tools curl -s -m 5 "http://$ENGINE_HOST:8000/metrics" \
+    | sed -nE 's/^vllm:num_requests_running\{[^}]*\} ([0-9.]+).*/\1/p' | head -1
 }
-busy=1
-for _ in $(seq 20); do
-  busy=$(engine_busy)
-  [[ ${busy%.*} == 0 ]] && break
-  sleep 0.5
-done
-[[ ${busy%.*} == 0 ]] && echo "ok   engine idle again after the client hung up" || { echo "FAIL engine still busy ($busy)"; exit 1; }
+if [[ $ENGINE == sim && ${SIM_STOCK:-0} == 1 ]]; then
+  skip_sim "engine idle again after the client hung up" "the stock simulator does not notice a hang-up and generates to the end, G1"
+else
+  # A wall-clock 10 s, not a count of polls (each poll is a `docker compose exec`, ~0.5 s): the stream outlives it by about 10 s on
+  # the simulator, so an engine that has not noticed the hang-up is still busy at the deadline and this fails.
+  deadline=$((SECONDS + 10))
+  while :; do
+    busy=$(engine_busy)
+    [[ ${busy%.*} == 0 || $SECONDS -ge $deadline ]] && break
+    sleep 0.5
+  done
+  [[ ${busy%.*} == 0 ]] && echo "ok   engine idle within 10 s of the client hanging up" || { echo "FAIL engine still busy ($busy)"; note_fail; }
+fi
 
 # Usage reaches usage-service once per request that reached the engine: 2 answered, 1 cancelled.
 # The relay in inference-service is a 1 s tick loop: a pass that failed while a dependency restarted is
@@ -194,10 +234,15 @@ for _ in $(seq 20); do
   [[ $usage == "cancelled=1 ok=2 " ]] && break
   sleep 0.5
 done
-[[ $usage == "cancelled=1 ok=2 " ]] && echo "ok   usage recorded once each: $usage" || { echo "FAIL usage rows: '$usage'"; exit 1; }
-cancelled=$(sql "SELECT output_tokens FROM usage.usage_event WHERE organization_id = '$org' AND status = 'cancelled'" | tr -d '\r')
-[[ ${cancelled:-0} -gt 0 ]] && echo "ok   the cancelled stream is billed for its $cancelled generated tokens" \
-  || { echo "FAIL the cancelled stream recorded no output tokens"; exit 1; }
+[[ $usage == "cancelled=1 ok=2 " ]] && echo "ok   usage recorded once each: $usage" || { echo "FAIL usage rows: '$usage'"; note_fail; }
+if [[ $ENGINE == sim && ${SIM_STOCK:-0} == 1 ]]; then
+  skip_sim "the cancelled stream is billed for its generated tokens" "the stock simulator reports usage only in the last chunk, so a cancelled stream has none, G3"
+else
+  cancelled=$(sql "SELECT output_tokens FROM usage.usage_event WHERE organization_id = '$org' AND status = 'cancelled'" | tr -d '\r')
+  [[ ${cancelled:-0} -gt 0 ]] && echo "ok   the cancelled stream is billed for its $cancelled generated tokens" \
+    || { row=$(sql "SELECT concat_ws('|', input_tokens, output_tokens, coalesce(ttft_ms::text, 'NULL'), duration_ms) FROM usage.usage_event WHERE organization_id = '$org' AND status = 'cancelled'" | tr -d '\r' | tr '\n' ' ')
+         echo "FAIL the cancelled stream recorded no output tokens (row input|output|ttft_ms|duration_ms: $row)"; note_fail; }
+fi
 
 # Usage survives a crash: with usage-service down, the events wait in Valkey's stream; inference-service
 # is killed (no graceful flush) and restarted; each event then reaches usage-service once.
@@ -217,44 +262,44 @@ for _ in $(seq 40); do
   sleep 1
 done
 [[ $stored == 3 ]] && echo "ok   usage-service down and inference-service killed: all 3 usage events arrived, once each" \
-  || { echo "FAIL $stored of 3 usage events arrived after the crash"; exit 1; }
+  || { echo "FAIL $stored of 3 usage events arrived after the crash"; note_fail; }
 
-# GPU engine only: tool calls, and the engine's port stays off the host.
-if [[ $ENGINE == vllm ]]; then
+# Tool calls, and the engine's port stays off the host.
+if true; then
   tools='"tools":[{"type":"function","function":{"name":"get_weather","description":"Current weather in a city","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}],"tool_choice":{"type":"function","function":{"name":"get_weather"}}'
   expect 200 "${K2[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" -d "$(chat 'What is the weather in Recife?' 64 ",$tools")"
-  grep -q '"tool_calls"' "$BODY" && grep -q 'get_weather' "$BODY" || { echo "FAIL no tool call in the answer"; cat "$BODY"; exit 1; }
+  grep -q '"tool_calls"' "$BODY" && grep -q 'get_weather' "$BODY" || { echo "FAIL no tool call in the answer"; cat "$BODY"; note_fail; }
   echo "ok   tool call returned"
-  if curl -s -m 2 -o /dev/null http://localhost:8000/health; then echo "FAIL vLLM is reachable from the host"; exit 1; fi
-  echo "ok   vLLM's port is not published"
+  if curl -s -m 2 -o /dev/null http://localhost:8000/health; then echo "FAIL the engine is reachable from the host"; note_fail; fi
+  echo "ok   the engine's port is not published"
 fi
 
 # One request id from the gateway to the answer and the usage event (any client copy is replaced).
 rid=$(curl -s -D - -o /dev/null "${K2[@]}" "${J[@]}" -H 'X-Request-Id: client-chosen' -X POST "$G/v1/chat/completions" -d "$(chat 'Say hi.' 8)" \
   | sed -nE 's/^x-request-id: ([0-9a-f-]{36}).*/\1/ip' | head -1)
-[[ -n $rid ]] && echo "ok   200  X-Request-Id $rid (the gateway's)" || { echo "FAIL no gateway request id"; exit 1; }
+[[ -n $rid ]] && echo "ok   200  X-Request-Id $rid (the gateway's)" || { echo "FAIL no gateway request id"; note_fail; }
 
 ## Admission: rate-limit headers, and each tier only gets its share of the engine
 remaining=$(curl -s -D - -o /dev/null "${K2[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" -d "$(chat 'Say hi.' 8)" | sed -nE 's/^x-ratelimit-remaining-requests: ([0-9]+).*/\1/ip')
-[[ -n $remaining ]] && echo "ok   200  x-ratelimit-remaining-requests: $remaining" || { echo "FAIL no rate-limit headers"; exit 1; }
+[[ -n $remaining ]] && echo "ok   200  x-ratelimit-remaining-requests: $remaining" || { echo "FAIL no rate-limit headers"; note_fail; }
 # Tiers are staff-set (no API yet): an enterprise organization, its tier set before its key is first used.
 expect 201 "${A[@]}" "${J[@]}" -X POST "$G/organizations" -d '{"name":"Smoke Enterprise"}'
 corp=$(json id)
 sql "UPDATE organizations.organization SET tier = 'enterprise' WHERE id = '$corp'" >/dev/null
-[[ $(grant "$corp" 10000000 corp-start) == 200 ]] || { echo "FAIL corp credit grant"; exit 1; }
+[[ $(grant "$corp" 10000000 corp-start) == 200 ]] || { echo "FAIL corp credit grant"; note_fail; }
 expect 201 "${A[@]}" "${J[@]}" -X POST "$G/organizations/$corp/api-keys" -d '{"name":"corp"}'
 K4=(-H "Authorization: Bearer $(json key)")
-# Trial may fill half the engine's slots (llama.cpp 2 -> 1, vLLM 4 -> 2). With those taken, one more trial
-# request is refused at once, while an enterprise one still runs.
-[[ $ENGINE == vllm ]] && share=2 || share=1
+# Trial may fill half the engine's slots (4 -> 2). With those taken, one more trial request is refused at once,
+# while an enterprise one still runs.
+share=2
 for _ in $(seq $share); do
-  curl -sN --max-time 8 "${K2[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" -d "$(chat 'Count from 1 to 1000, separated by commas.' 1000 ',"stream":true,"temperature":0')" >/dev/null &
+  curl -sN --max-time 8 "${K2[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" -d "$(chat "$LONGP" 1000 ',"stream":true,"temperature":0')" >/dev/null &
 done
 sleep 2
 read -r code took < <(curl -s -o "$BODY" -w '%{http_code} %{time_total}\n' "${K2[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" -d "$(chat 'Say hi.' 8)")
 [[ $code == 429 ]] && grep -q '"model_busy"' "$BODY" && awk "BEGIN { exit !($took < 0.5) }" \
   && echo "ok   429  trial over its share of the engine, refused in ${took}s" \
-  || { echo "FAIL trial over its share got $code in ${took}s"; cat "$BODY"; exit 1; }
+  || { echo "FAIL trial over its share got $code in ${took}s"; cat "$BODY"; note_fail; }
 expect 200 "${K4[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" -d "$(chat 'Say hi.' 8)"   # enterprise still served
 wait
 
@@ -276,20 +321,20 @@ for _ in $(seq 120); do
 done
 counts=$(sed -nE 's/.*"request_counts":\{([^}]*)\}.*/\1/p' "$BODY")
 [[ $status == completed && $counts == '"total":3,"completed":2,"failed":1' ]] && echo "ok   batch completed: $counts" \
-  || { echo "FAIL batch $status: $counts"; cat "$BODY"; exit 1; }
+  || { echo "FAIL batch $status: $counts"; cat "$BODY"; note_fail; }
 output_id=$(json output_file_id)
 error_id=$(json error_file_id)
 expect 200 "${K2[@]}" "$G/v1/files/$output_id/content"
-[[ $(grep -c '"status_code":200' "$BODY") == 2 ]] && grep -q '"custom_id":"one"' "$BODY" || { echo "FAIL batch output"; cat "$BODY"; exit 1; }
+[[ $(grep -c '"status_code":200' "$BODY") == 2 ]] && grep -q '"custom_id":"one"' "$BODY" || { echo "FAIL batch output"; cat "$BODY"; note_fail; }
 expect 200 "${K2[@]}" "$G/v1/files/$error_id/content"
-grep -q '"custom_id":"too-long".*"status_code":400' "$BODY" || { echo "FAIL batch error file"; cat "$BODY"; exit 1; }
+grep -q '"custom_id":"too-long".*"status_code":400' "$BODY" || { echo "FAIL batch error file"; cat "$BODY"; note_fail; }
 batch_usage=""
 for _ in $(seq 10); do
   batch_usage=$(sql "SELECT count(*) FROM usage.usage_event WHERE organization_id = '$org' AND mode = 'batch' AND status = 'ok'" | tr -d '\r')
   [[ $batch_usage == 2 ]] && break
   sleep 1
 done
-[[ $batch_usage == 2 ]] && echo "ok   usage: the 2 answered lines, mode=batch" || { echo "FAIL batch usage rows: $batch_usage"; exit 1; }
+[[ $batch_usage == 2 ]] && echo "ok   usage: the 2 answered lines, mode=batch" || { echo "FAIL batch usage rows: $batch_usage"; note_fail; }
 expect 404 "${K4[@]}" "$G/v1/batches/$batch_id"                       # another organization's batch
 expect 404 "${K4[@]}" "$G/v1/files/$output_id/content"                 # and its files
 expect 200 "${K2[@]}" -X DELETE "$G/v1/files/$input_id"
@@ -309,7 +354,7 @@ for _ in $(seq 20); do
   sleep 0.5
 done
 [[ $flex_mode == batch ]] && echo "ok   the flex request is billed in the half-price lane (mode batch)" \
-  || { echo "FAIL flex request usage mode '$flex_mode'"; exit 1; }
+  || { echo "FAIL flex request usage mode '$flex_mode'"; note_fail; }
 
 ## Canary: sync prompts and keys never reach a log, the database or Valkey's file (batch files are stored on purpose, 30 days)
 canary="CANARY-$RANDOM$RANDOM"
@@ -320,7 +365,7 @@ big=$(mktemp)
 chat "$canary $(head -c 70000 /dev/zero | tr '\0' x)" 8 > "$big"
 code=$(curl -s -o /dev/null -w '%{http_code}' "${K2[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" --data-binary @"$big")
 rm -f "$big"
-[[ $code == 413 ]] && echo "ok   413  over-context prompt" || { echo "FAIL over-context prompt got $code"; exit 1; }
+[[ $code == 413 ]] && echo "ok   413  over-context prompt" || { echo "FAIL over-context prompt got $code"; note_fail; }
 curl -sN --max-time 1 "${K2[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" -d "$(chat "$canary Write a long story." 500 ',"stream":true')" >/dev/null || true
 expect 400 "${K2[@]}" "$G/v1/models?api_key=cmn_test_$canary"
 sleep 2   # let batches and logs flush
@@ -329,13 +374,13 @@ valkey_file() { MSYS_NO_PATHCONV=1 "${DC[@]}" exec -T valkey sh -c 'cat /data/ap
 leaks=$( { "${DC[@]}" logs --no-color 2>&1; "${DC[@]}" exec -T db sh -c 'pg_dumpall -U "$POSTGRES_USER"'; access_log; valkey_file; } \
   | grep -acF -e "$canary" -e "Bearer " -e "$key2" -e "api_key=" -e "${keep#*=}" || true)
 [[ $leaks == 0 ]] && echo "ok   the canary, bearer headers, the API key and query strings are in no log (access log included), nowhere in the database and nowhere in Valkey's file" \
-  || { echo "FAIL $leaks lines leak the canary, a bearer header, the key or a query string"; exit 1; }
+  || { echo "FAIL $leaks lines leak the canary, a bearer header, the key or a query string"; note_fail; }
 # Marco Civil access log: the request above, with its ids, in the gateway's own file (not on stdout).
 grep -q "$rid" <(access_log) && grep "$rid" <(access_log) | grep -q "\"organization_id\":\"$org\"" \
-  && echo "ok   access log: request $rid with its organization and key" || { echo "FAIL request $rid not in the access log"; exit 1; }
-"${DC[@]}" logs --no-color gateway 2>&1 | grep -q "$rid" && { echo "FAIL the access log reached stdout"; exit 1; }
+  && echo "ok   access log: request $rid with its organization and key" || { echo "FAIL request $rid not in the access log"; note_fail; }
+"${DC[@]}" logs --no-color gateway 2>&1 | grep -q "$rid" && { echo "FAIL the access log reached stdout"; note_fail; }
 [[ $(sql "SELECT count(*) FROM usage.usage_event WHERE request_id = '$rid'" | tr -d '\r') == 1 ]] \
-  && echo "ok   usage event carries the same request id" || { echo "FAIL usage has no event for $rid"; exit 1; }
+  && echo "ok   usage event carries the same request id" || { echo "FAIL usage has no event for $rid"; note_fail; }
 
 ## Money: sealed usage windows are billed, and a used-up balance gets 402 until credit is added
 balance=""
@@ -345,34 +390,34 @@ for _ in $(seq 60); do
   sleep 1
 done
 [[ -n $balance && $balance -lt 10000000 ]] && echo "ok   usage billed: R\$10 credit is now $balance micro-BRL" \
-  || { echo "FAIL the usage was not billed (balance '$balance')"; exit 1; }
+  || { echo "FAIL the usage was not billed (balance '$balance')"; note_fail; }
 same=$(sql "SELECT (SELECT amount FROM billing.balance WHERE organization_id = '$org') = (SELECT sum(amount) FROM billing.ledger_entry WHERE organization_id = '$org')" | tr -d '\r')
-[[ $same == t ]] && echo "ok   balance = sum of the ledger" || { echo "FAIL balance differs from the ledger"; exit 1; }
+[[ $same == t ]] && echo "ok   balance = sum of the ledger" || { echo "FAIL balance differs from the ledger"; note_fail; }
 
 ## Visible money: a member reads the organization's own balance, usage summary and the books check; another
 ## account and a headerless caller read nothing. The gateway routes for the first two are task C's (see the
 ## reference): until they exist these endpoints are reachable inside the network only, which is what this does.
 ## The balance is bracketed: a debit landing between the two reads must not make this fail (it only falls).
 before=$(sql "SELECT amount FROM billing.balance WHERE organization_id = '$org'" | tr -d '\r')
-visible=$("${DC[@]}" exec -T llama curl -s -H "id-account: $id" "http://billing:8080/billing/organizations/$org/balance" | tr -d '\r')
+visible=$("${DC[@]}" exec -T tools curl -s -H "id-account: $id" "http://billing:8080/billing/organizations/$org/balance" | tr -d '\r')
 after=$(sql "SELECT amount FROM billing.balance WHERE organization_id = '$org'" | tr -d '\r')
 shown=$(sed -nE 's/.*"amountMicroBrl":(-?[0-9]+).*/\1/p' <<<"$visible")
 [[ -n $shown && $shown -le $before && $shown -ge $after && $visible == *'"noCredit":false'* ]] \
   && echo "ok   200  a member reads the balance, the ledger's own number: $visible" \
-  || { echo "FAIL visible balance '$visible' is outside [$after, $before]"; exit 1; }
+  || { echo "FAIL visible balance '$visible' is outside [$after, $before]"; note_fail; }
 code=$(internal -H "id-account: $other" "http://billing:8080/billing/organizations/$org/balance")
-[[ $code == 404 ]] && echo "ok   404  another account reads no balance" || { echo "FAIL a non-member got $code"; exit 1; }
+[[ $code == 404 ]] && echo "ok   404  another account reads no balance" || { echo "FAIL a non-member got $code"; note_fail; }
 code=$(internal "http://billing:8080/billing/organizations/$org/balance")
-[[ $code == 401 ]] && echo "ok   401  no id-account, no numbers" || { echo "FAIL a headerless call got $code"; exit 1; }
+[[ $code == 401 ]] && echo "ok   401  no id-account, no numbers" || { echo "FAIL a headerless call got $code"; note_fail; }
 from=$(date -u -d '-2 hours' +%Y-%m-%dT%H:%M:%SZ)
 to=$(date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ)
-summary=$("${DC[@]}" exec -T llama curl -s -H "id-account: $id" "http://usage:8080/usage/organizations/$org/summary?from=$from&to=$to" | tr -d '\r')
+summary=$("${DC[@]}" exec -T tools curl -s -H "id-account: $id" "http://usage:8080/usage/organizations/$org/summary?from=$from&to=$to" | tr -d '\r')
 grep -qE '"costMicroBrl":[0-9]+' <<<"$summary" && echo "ok   200  a member reads their own usage, priced: $summary" \
-  || { echo "FAIL usage summary '$summary'"; exit 1; }
+  || { echo "FAIL usage summary '$summary'"; note_fail; }
 code=$(internal -H "id-account: $other" "http://usage:8080/usage/organizations/$org/summary?from=$from&to=$to")
-[[ $code == 404 ]] && echo "ok   404  another account reads no usage" || { echo "FAIL a non-member got $code"; exit 1; }
+[[ $code == 404 ]] && echo "ok   404  another account reads no usage" || { echo "FAIL a non-member got $code"; note_fail; }
 code=$(internal "http://billing:8081/actuator/reconcile")
-[[ $code == 200 ]] && echo "ok   200  the books are checked on demand (management port, internal)" || { echo "FAIL reconcile got $code"; exit 1; }
+[[ $code == 200 ]] && echo "ok   200  the books are checked on demand (management port, internal)" || { echo "FAIL reconcile got $code"; note_fail; }
 
 # A second organization gets 1 micro-BRL: one chat uses it up, then /v1 answers 402 until a grant.
 expect 201 "${A[@]}" "${J[@]}" -X POST "$G/organizations" -d '{"name":"Smoke Tiny"}'
@@ -380,7 +425,7 @@ tiny=$(json id)
 expect 201 "${A[@]}" "${J[@]}" -X POST "$G/organizations/$tiny/api-keys" -d '{"name":"tiny"}'
 K3=(-H "Authorization: Bearer $(json key)")
 code=$(grant "$tiny" 1 tiny-start)
-[[ $code == 200 ]] || { echo "FAIL tiny grant got $code"; exit 1; }
+[[ $code == 200 ]] || { echo "FAIL tiny grant got $code"; note_fail; }
 expect 200 "${K3[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" -d "$(chat 'Write two sentences about the sea.' 64)"
 code=""
 for _ in $(seq 60); do
@@ -389,15 +434,15 @@ for _ in $(seq 60); do
   sleep 1
 done
 [[ $code == 402 ]] && grep -q '"insufficient_balance"' "$BODY" && echo "ok   402  balance used up, /v1 refused" \
-  || { echo "FAIL expected 402 after the balance ran out, got $code"; cat "$BODY"; exit 1; }
+  || { echo "FAIL expected 402 after the balance ran out, got $code"; cat "$BODY"; note_fail; }
 code=$(grant "$tiny" 1000000 tiny-topup)
-[[ $code == 200 ]] || { echo "FAIL top-up grant got $code"; exit 1; }
+[[ $code == 200 ]] || { echo "FAIL top-up grant got $code"; note_fail; }
 expect 200 "${K3[@]}" "$G/v1/models"                                 # credit back: allowed at once
 
 ## LGPD access: the account and its organizations, to its owner only
 expect 200 "${A[@]}" "$G/accounts/$id/export"
 grep -q "\"email\":\"$email\"" "$BODY" && grep -q "\"id\":\"$org\"" "$BODY" && ! grep -qi 'password' "$BODY" \
-  || { echo "FAIL export content"; cat "$BODY"; exit 1; }
+  || { echo "FAIL export content"; cat "$BODY"; note_fail; }
 
 ## Someone else's organization is invisible to a stranger
 first_token=$token
@@ -431,13 +476,14 @@ for _ in $(seq 30); do
   [[ $files == 0 ]] && break
   sleep 1
 done
-[[ $files == 0 ]] && echo "ok   closing the organization erased its batch files" || { echo "FAIL $files batch files left after closing"; exit 1; }
+[[ $files == 0 ]] && echo "ok   closing the organization erased its batch files" || { echo "FAIL $files batch files left after closing"; note_fail; }
 expect 204 "${A[@]}" -X DELETE "$G/accounts/$id"
 expect 401 -X POST "$G/auth/refresh" -H "Cookie: $keep"                  # its sessions ended with it
 expect 404 "${A[@]}" "$G/accounts/$id"
 expect 401 "${J[@]}" -X POST "$G/auth/login" -d "{\"email\":\"$first_email\",\"password\":\"$pass\"}"   # erased: gone
 
 codes=$(for _ in $(seq 40); do curl -s -o /dev/null -w '%{http_code}\n' "${J[@]}" -X POST "$G/auth/login" -d '{}'; done)
-grep -q 429 <<<"$codes" && echo "ok   429  burst of 40 logins is rate limited" || { echo "FAIL no 429 in burst"; exit 1; }
+grep -q 429 <<<"$codes" && echo "ok   429  burst of 40 logins is rate limited" || { echo "FAIL no 429 in burst"; note_fail; }
 
-echo "smoke passed"
+echo "smoke finished: $NFAIL failed, $NSKIP skip-sim"
+[[ $NFAIL == 0 ]] && echo "smoke passed" || exit 1

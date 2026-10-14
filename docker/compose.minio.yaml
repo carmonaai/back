@@ -1,0 +1,99 @@
+# Object storage for batch-service's files (B1). An overlay: it adds MinIO and points batch at it.
+#   docker compose -f compose.yaml -f compose.minio.yaml up -d
+# Needs these in .env (no defaults, compose refuses to start without them):
+#   MINIO_ROOT_USER / MINIO_ROOT_PASSWORD  the administrator of MinIO; only minio and minio-init ever see them
+#   STORAGE_BUCKET                         the bucket batch-service writes to, created below
+#   STORAGE_ACCESS_KEY / STORAGE_SECRET_KEY  a user that can use only that bucket (created below); batch gets these
+#                                          (MinIO wants a secret of at least 8 characters)
+# Nothing here is published: minio and batch talk over the internal network. The MinIO console is not exposed.
+#
+# The image is the last one MinIO published (September 2025). MinIO's community edition has been archived since
+# April 2026 and gets no more releases, so this is for development and CI. batch-service speaks plain S3: production
+# points STORAGE_ENDPOINT at any S3-compatible service (or leaves it empty for AWS S3) and needs no code change.
+
+services:
+  # Runs once and exits: hands the data volume to the user MinIO runs as (a fresh named volume belongs to root and MinIO
+  # as a normal user cannot write it). It is the only container here that runs as root: for one chown, with every
+  # capability dropped but CAP_CHOWN, a read-only filesystem and no network.
+  minio-volume:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    user: "0:0"
+    entrypoint: ["chown", "-R", "10001:10001", "/data"]
+    restart: "no"
+    read_only: true
+    network_mode: none
+    cap_drop: [ALL]
+    cap_add: [CHOWN]
+    security_opt: ["no-new-privileges:true"]
+    volumes: [minio-data:/data]
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    user: "10001:10001"
+    command: ["server", "/data"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 512m
+    cpus: 0.5
+    depends_on:
+      minio-volume: { condition: service_completed_successfully }
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set in .env}
+    volumes: [minio-data:/data]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/minio/health/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [internal]
+
+  # Runs once and exits: the bucket, and a user whose policy allows only that bucket's objects. Safe to run again.
+  minio-init:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    restart: "no"
+    user: "10001:10001"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
+    cpus: 0.25
+    depends_on:
+      minio: { condition: service_healthy }
+    environment:
+      MC_CONFIG_DIR: /tmp/.mc   # the unprivileged user has no home directory
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set in .env}
+      STORAGE_BUCKET: ${STORAGE_BUCKET:?set in .env}
+      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:?set in .env}
+      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:?set in .env}
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        mc mb --ignore-existing "local/$$STORAGE_BUCKET"
+        cat > /tmp/policy.json <<POLICY
+        {"Version": "2012-10-17", "Statement": [
+          {"Effect": "Allow",
+           "Action": ["s3:GetBucketLocation", "s3:ListBucket", "s3:ListBucketMultipartUploads"],
+           "Resource": ["arn:aws:s3:::$$STORAGE_BUCKET"]},
+          {"Effect": "Allow",
+           "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"],
+           "Resource": ["arn:aws:s3:::$$STORAGE_BUCKET/*"]}]}
+        POLICY
+        mc admin policy create local batch-files /tmp/policy.json
+        mc admin user add local "$$STORAGE_ACCESS_KEY" "$$STORAGE_SECRET_KEY"
+        mc admin policy attach local batch-files --user "$$STORAGE_ACCESS_KEY" || mc admin user info local "$$STORAGE_ACCESS_KEY" | grep -q batch-files
+    networks: [internal]
+
+  batch:
+    environment:
+      STORAGE_ENDPOINT: http://minio:9000
+      STORAGE_REGION: ${STORAGE_REGION:-us-east-1}   # MinIO ignores it, the S3 client insists on one
+      STORAGE_BUCKET: ${STORAGE_BUCKET:?set in .env}
+      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:?set in .env}
+      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:?set in .env}
+    depends_on:
+      minio-init: { condition: service_completed_successfully }
+
+volumes:
+  minio-data: {}

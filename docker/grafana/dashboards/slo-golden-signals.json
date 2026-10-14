@@ -256,7 +256,7 @@
       "id": 13,
       "type": "timeseries",
       "title": "Engine requests running / waiting",
-      "description": "The engine's own view, scraped directly every 15 s (recording rules engine:requests_running / engine:requests_waiting; llama.cpp requests_processing / requests_deferred, vLLM num_requests_running / num_requests_waiting). SLO: waiting stays at or below the configured depth — 2 for llama.cpp, 8 for vLLM's backstop (EngineQueueSustained alert).",
+      "description": "The engine's own view, scraped directly every 15 s (recording rules engine:requests_running / engine:requests_waiting, from vllm:num_requests_running / vllm:num_requests_waiting, which the simulator and vLLM both report; the maximum over a fleet's replicas). SLO: waiting stays below the engine's backstop of 8, the queue-full point where the engine refuses the next request (red from 8; EngineQueueSustained alert).",
       "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"h": 7, "w": 8, "x": 8, "y": 24},
       "fieldConfig": {
@@ -265,7 +265,7 @@
           "min": 0,
           "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 8, "showPoints": "never"},
           "color": {"mode": "palette-classic"},
-          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 3}]}
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 8}]}
         },
         "overrides": []
       },
@@ -279,7 +279,7 @@
       "id": 14,
       "type": "timeseries",
       "title": "Engine KV cache usage",
-      "description": "A 0-1 ratio on both engines: llama.cpp reports kv_cache_usage_ratio, vLLM v0.30.0 kv_cache_usage_perc (its help text: 1 means 100 percent usage). No threshold: the engine evicts and keeps serving, so the useful reading is the trend and where TTFT starts to climb with it.",
+      "description": "A 0-1 ratio: vLLM v0.30.0 reports kv_cache_usage_perc (its help text: 1 means 100 percent usage); the simulator reports the same series, at 0 unless it runs with --enable-kvcache. No threshold: the engine evicts and keeps serving, so the useful reading is the trend and where TTFT starts to climb with it.",
       "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"h": 7, "w": 8, "x": 16, "y": 24},
       "fieldConfig": {

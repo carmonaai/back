@@ -1,4 +1,9 @@
 # Build the jars first: mvn package (from back/). Secrets come from .env (see .env.example).
+#
+# The model engine is a SIMULATOR (llm-d-inference-sim) that speaks vLLM's contract (ADR 0002: no CPU engine, dev and CI
+# run a simulated one). compose.gpu.yaml swaps in the real vLLM on the laptop GPU. The `fleet` profile adds a fleet
+# (many simulators behind a stand-in, several gateway and inference replicas):
+#   docker compose --env-file .env --env-file fleet.env --profile fleet up -d --build --wait
 name: carmonai
 
 x-readiness: &readiness
@@ -21,6 +26,13 @@ x-valkey: &valkey
   VALKEY_PORT: 6379
   VALKEY_PASSWORD: ${VALKEY_PASSWORD:?set in .env}
 
+# The simulated engine: llm-d-inference-sim v0.11.4 plus docker/sim/disconnect.patch (a client that hangs up stops the
+# generation, usage on every chunk). A LOCAL image: build it once with `bash docker/sim/build.sh` (see there), compose never
+# pulls it. ENGINE_IMAGE swaps in another, for example upstream's own, pinned by digest (the tag alone is not a pin, G11 of
+# work/prototype-sim/FINDINGS-contract.md): ghcr.io/llm-d/llm-d-inference-sim:v0.11.4@sha256:d60f0fb00ac62d0eb7c100e7a6816b8acec487aa06f0f38dba72b0ab1754e8f6
+# (then run smoke.sh with SIM_STOCK=1: that engine cannot pass the two assertions below).
+x-engine-image: &engine-image ${ENGINE_IMAGE:-carmonai/llm-d-inference-sim:v0.11.4-disconnect.1}
+
 services:
   db:
     image: postgres:17.11-bookworm@sha256:639ab7ceb90e13123085b741fb31ef493fba25463002f6da665352e7b534b652
@@ -39,9 +51,31 @@ services:
   # API-key lookups, credit flags and rate buckets (each rebuilt on its own when lost), and the usage
   # events inference-service writes before relaying them to usage-service: those must survive a restart,
   # so an append-only file, fsynced every second, in a volume (a crash of Valkey itself loses ~1 s).
+  # Before this step valkey ran as root, so a valkey-data volume from an earlier checkout is root-owned (0700) and uid 999
+  # cannot write its append-only file: valkey would exit 1 and take inference, gateway and usage with it. One chown fixes
+  # it, and the events waiting in the file survive. Same shape as minio-volume: root for that chown only, read-only
+  # filesystem, no network, and only the capabilities it needs: CHOWN, and DAC_READ_SEARCH because on every run after the
+  # first the directory is already valkey's (mode 0700) and root without it cannot even list it (exit 1, which then
+  # blocks `up valkey`, as smoke.sh does when it restarts valkey).
+  valkey-volume:
+    image: valkey/valkey:9.0.6@sha256:63346cb24a61221e76bdf41acce99b3968a9fa83d8122144deab45394b27b4f2
+    user: "0:0"
+    entrypoint: ["chown", "-R", "999:999", "/data"]
+    restart: "no"
+    read_only: true
+    network_mode: none
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_READ_SEARCH]
+    security_opt: ["no-new-privileges:true"]
+    volumes: [valkey-data:/data]
+
   valkey:
     image: valkey/valkey:9.0.6@sha256:63346cb24a61221e76bdf41acce99b3968a9fa83d8122144deab45394b27b4f2
+    depends_on:
+      valkey-volume: { condition: service_completed_successfully }
     command: ["sh", "-c", "exec valkey-server --requirepass \"$$VALKEY_PASSWORD\" --save '' --appendonly yes --appendfsync everysec"]
+    # `sh -c` as the command skips the image entrypoint's step down to the valkey user, so the user is set here.
+    user: "999:999"
     volumes: [valkey-data:/data]
     environment:
       VALKEY_PASSWORD: ${VALKEY_PASSWORD:?set in .env}
@@ -56,6 +90,7 @@ services:
   # on the internal network (smoke.sh reads the links from it).
   mailpit:
     image: axllent/mailpit:v1.31.4@sha256:b68349e3a014b90c5610bfb26b2ae36f3892d7b8cf25ee140c6c71c98d2fcf48
+    user: "65532:65532"                 # the image runs as root; nothing here needs it (ports above 1024, mail kept in memory)
     healthcheck:
       test: ["CMD", "/mailpit", "readyz"]
       interval: 5s
@@ -96,24 +131,78 @@ services:
     healthcheck: *readiness
     networks: [internal]
 
-  # CPU dev engine: llama.cpp serving Qwen3-0.6B (OpenAI-compatible). Internal only; the first start
-  # downloads the model (~640 MB) into the models volume. Thinking is off at the template, and the
-  # API key comes from env (LLAMA_API_KEY), not the command line.
-  llama:
-    image: ghcr.io/ggml-org/llama.cpp:server@sha256:970168341efef973da5666ea5c362fa428ee66ba0dfa621b0f69bf3feb3320f7
-    command: ["-hf", "Qwen/Qwen3-0.6B-GGUF:Q8_0", "--host", "0.0.0.0", "--port", "8080", "--jinja",
-              "--chat-template-kwargs", "{\"enable_thinking\":false}", "-c", "8192", "-np", "2",
-              "--metrics", "--no-slots", "--no-webui", "--alias", "carmonai/qwen3-0.6b"]
-    environment:
-      LLAMA_CACHE: /models
-      LLAMA_API_KEY: ${ENGINE_API_KEY:?set in .env}   # llama.cpp reads this one for --api-key (not LLAMA_ARG_API_KEY)
-    volumes: [models:/models]
+  # The default engine: llm-d-inference-sim, shaped like the measured vLLM GPU profile (compose.gpu.yaml): model
+  # carmonai/qwen3-4b, 4 running + 8 waiting, a 4096 window, latency calibrated to the laptop measurements (TTFT p95
+  # 0.8 s, 24 ms per token). The defaults of the simulator (5 slots, 1024 window, queue 1000) are traps: every flag is set.
+  # Echo mode makes the output as long as the prompt, so long streams (smoke's hang-up and tier-share steps, the
+  # fairness drill) do not depend on a random output length; the usage the engine counts is still its own.
+  # Known limits (FINDINGS-contract.md): it ignores `priority` and `cache_salt`. The disconnect patch closes G1 (it used to
+  # generate to the end for a client that had hung up) and G3 (usage only in the last chunk), so smoke runs the two
+  # assertions that need them. Distroless: no shell, so no in-container healthcheck (G4); inference-service starts
+  # when it has started and the scrape and every call have timeouts. Scalable (no container_name): ENGINE_REPLICAS.
+  engine:
+    image: *engine-image
+    pull_policy: never                  # a local build (docker/sim/build.sh): a missing image is an error, not a pull from a registry
+    command:
+      - --model=carmonai/qwen3-4b
+      - --port=8000
+      - --mode=echo
+      - --max-num-seqs=4
+      - --max-waiting-queue-length=8
+      - --max-model-len=4096
+      - --latency-calculator=constant
+      - --time-to-first-token=600ms
+      - --time-to-first-token-std-dev=100ms
+      - --inter-token-latency=24ms
+      - --inter-token-latency-std-dev=4ms
+      - --seed=42
+    deploy:
+      replicas: ${ENGINE_REPLICAS:-1}
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    stop_grace_period: 35s              # it drains in-flight streams on SIGTERM
+    networks: [internal]
+
+  # fleet profile: STAND-IN for the replica picker, between inference-service and the simulators only (the gateway
+  # reaches the inference replicas directly, so its own balancing is what runs). Set ENGINE_URL=http://engine-lb:8000
+  # and ENGINE_SLOTS / ENGINE_QUEUE to the fleet's sums (fleet.env does). Not a product component.
+  engine-lb:
+    profiles: ["fleet"]
+    image: nginx:1.28-alpine@sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236
+    user: "101:101"                     # nginx; its pid and temp files are in /tmp (nginx.conf)
+    volumes: ["./engine-lb/nginx.conf:/etc/nginx/nginx.conf:ro"]
+    tmpfs: [/tmp]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    depends_on:
+      engine: { condition: service_started }
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8000/health"]
       interval: 5s
       timeout: 3s
-      retries: 30
-      start_period: 600s
+      retries: 10
+    mem_limit: 128m
+    networks: [internal]
+
+  # Script host on the compose network (curl, bash, python3): smoke.sh, the benches and the scorecard drivers run from
+  # here, because the JRE images have no curl and internal endpoints have no gateway route. Built from tools/.
+  tools:
+    build: ./tools
+    command: ["sleep", "infinity"]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "true"]
+      interval: 10s
+      timeout: 2s
+      retries: 3
+    mem_limit: 256m
+    stop_grace_period: 1s
     networks: [internal]
 
   # The prototype bills in 10 s windows so a debit is visible within seconds (service defaults: 5 min, 60 s).
@@ -143,14 +232,31 @@ services:
 
   inference:
     build: ../api/inference-service
+    # One model, set through the environment (Spring replaces the model of application.yaml). Single simulator: url
+    # http://engine:8000 and the simulator's 4 slots + 2 queued; a fleet sets ENGINE_URL, ENGINE_SLOTS and ENGINE_QUEUE
+    # (the sums over the simulators) and INFERENCE_REPLICAS (each replica divides the slots by it while Valkey is down).
     environment:
       <<: *valkey
-      ENGINE_URL: http://llama:8080
-      ENGINE_API_KEY: ${ENGINE_API_KEY:?set in .env}
+      # Spring replaces a whole list from the first source that defines any element of it, so the environment states
+      # every field of the model (application.yaml's list is not merged with it).
+      CARMONAI_INFERENCE_MODELS_0_ID: carmonai/qwen3-4b
+      CARMONAI_INFERENCE_MODELS_0_URL: ${ENGINE_URL:-http://engine:8000}
+      CARMONAI_INFERENCE_MODELS_0_APIKEY: ${ENGINE_API_KEY:?set in .env}
+      CARMONAI_INFERENCE_MODELS_0_CONTEXTWINDOW: 4096
+      CARMONAI_INFERENCE_MODELS_0_MAXOUTPUT: 1024
+      CARMONAI_INFERENCE_MODELS_0_SLOTS: ${ENGINE_SLOTS:-4}
+      CARMONAI_INFERENCE_MODELS_0_QUEUE: ${ENGINE_QUEUE:-2}
+      CARMONAI_INFERENCE_EXPECTEDREPLICAS: ${INFERENCE_REPLICAS:-1}
+      CARMONAI_INFERENCE_RECONCILEEVERY: ${RECONCILE_EVERY:-1h}
       CARMONAI_INFERENCE_USAGECLAIMAFTER: 10s   # a killed instance's unconfirmed usage events go out within seconds (default 60 s)
+    deploy:
+      replicas: ${INFERENCE_REPLICAS:-1}
     depends_on:
       valkey: { condition: service_healthy }
-      llama: { condition: service_healthy }
+      engine: { condition: service_started }
+      # fleet profile only: inference-service reads the engine at startup (vllm:cache_config_info), so on the fleet it must
+      # start after the stand-in answers. Without the profile this service does not exist and `required: false` skips it.
+      engine-lb: { condition: service_healthy, required: false }
       usage: { condition: service_healthy }
     healthcheck: *readiness
     networks: [internal]
@@ -170,11 +276,17 @@ services:
 
   gateway:
     build: ../api/gateway-service
-    ports: ["8080:8080"]
+    # The only published port, on loopback. Exactly 8080 by default: with a range, Docker picks any free port in it (not
+    # the lowest), and a script then talks to whatever else listens on 8080. fleet.env sets a range for several replicas;
+    # see the ports with `docker compose ps`. The scorecard drivers run in the tools container, at http://gateway:8080.
+    ports: ["${GATEWAY_PORTS:-127.0.0.1:8080:8080}"]
+    deploy:
+      replicas: ${GATEWAY_REPLICAS:-1}
     volumes: ["access-logs:/var/log/carmonai"]   # Marco Civil access log, 6 months (logback-spring.xml)
     environment:
       <<: *valkey
       CONSOLE_ORIGINS: http://localhost:3000     # the only Origin allowed on login/register/refresh/logout
+      CARMONAI_GATEWAY_REGISTRATIONOPEN: "true"  # the harness registers through the gateway; production must not set this
     depends_on:
       valkey: { condition: service_healthy }
       auth: { condition: service_healthy }
@@ -192,9 +304,9 @@ services:
   # container. Limits are tight on purpose: this VM also runs twelve services.
   prometheus:
     image: prom/prometheus:v3.15.0@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e
-    # The engine's /metrics answers to the engine key. Prometheus expands no environment variables in a
-    # scrape config, so the entrypoint writes the key -- from the environment, never a repo file, never a
-    # default -- to the file the config's bearer_token_file points at, then execs prometheus.
+    # An engine may want its key on /metrics (the simulator ignores it). Prometheus expands no environment
+    # variables in a scrape config, so the entrypoint writes the key -- from the environment, never a repo file,
+    # never a default -- to the file the config's bearer_token_file points at, then execs prometheus.
     # ponytail: 15 days of local TSDB and no remote write -- long-term storage is infrastructure nobody has
     # asked for yet, and a restart keeps the history that matters (named volume). Upgrade: remote write plus
     # a store, when someone needs a quarter of history.
@@ -250,5 +362,4 @@ volumes:
   db-data: {}
   valkey-data: {}
   access-logs: {}
-  models: {}
   prometheus-data: {}

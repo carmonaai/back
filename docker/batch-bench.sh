@@ -24,7 +24,7 @@ RESULTS=${TMPDIR:-/tmp}/carmonai-batch-bench.txt   # interactive requests; kept 
 json() { sed -nE "s/.*\"$1\":\"?([^\",}]+)\"?.*/\1/p" <<<"$2"; }
 sql() { "${DC[@]}" exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tA -c "$1"' sh "$1" | tr -d '\r'; }
 grant() {
-  "${DC[@]}" exec -T llama curl -s -o /dev/null -H 'Content-Type: application/json' -X POST http://billing:8080/billing/grants \
+  "${DC[@]}" exec -T tools curl -s -o /dev/null -H 'Content-Type: application/json' -X POST http://billing:8080/billing/grants \
     -d "{\"organizationId\":\"$1\",\"amountMicroBrl\":100000000,\"reason\":\"bench\",\"idempotencyKey\":\"bench\"}"
 }
 
@@ -32,8 +32,8 @@ grant() {
 verify_email() {
   local token="" id
   for _ in $(seq 20); do
-    for id in $("${DC[@]}" exec -T llama curl -s "http://mailpit:8025/api/v1/search?query=to:%22${1/@/%40}%22" | grep -oE '"ID":"[^"]+"' | cut -d'"' -f4); do
-      token=$("${DC[@]}" exec -T llama curl -s "http://mailpit:8025/api/v1/message/$id" | grep -oE '/verify-email\?token=[A-Za-z0-9_-]+' | sed -n '1s/.*=//p')
+    for id in $("${DC[@]}" exec -T tools curl -s "http://mailpit:8025/api/v1/search?query=to:%22${1/@/%40}%22" | grep -oE '"ID":"[^"]+"' | cut -d'"' -f4); do
+      token=$("${DC[@]}" exec -T tools curl -s "http://mailpit:8025/api/v1/message/$id" | grep -oE '/verify-email\?token=[A-Za-z0-9_-]+' | sed -n '1s/.*=//p')
       [[ -n $token ]] && break 2
     done
     sleep 0.5
@@ -74,11 +74,11 @@ start=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 began=$SECONDS
 echo "bench: $LINES-line batch $batch, with enterprise and trial traffic alongside ..."
 
-# Interactive workers in the llama container until /tmp/stop-bench appears; one line per request:
+# Interactive workers in the tools container until /tmp/stop-bench appears; one line per request:
 # tier status ttfb_s total_s output_tokens
-MSYS_NO_PATHCONV=1 "${DC[@]}" exec -T llama rm -f /tmp/stop-bench
-trap 'MSYS_NO_PATHCONV=1 "${DC[@]}" exec -T llama touch /tmp/stop-bench >/dev/null 2>&1 || true' EXIT   # workers stop however this ends
-"${DC[@]}" exec -T -e ENTERPRISE="${KEY[enterprise]}" -e TRIAL="${KEY[trial]}" -e M="$M" llama bash -c '
+MSYS_NO_PATHCONV=1 "${DC[@]}" exec -T tools rm -f /tmp/stop-bench
+trap 'MSYS_NO_PATHCONV=1 "${DC[@]}" exec -T tools touch /tmp/stop-bench >/dev/null 2>&1 || true' EXIT   # workers stop however this ends
+"${DC[@]}" exec -T -e ENTERPRISE="${KEY[enterprise]}" -e TRIAL="${KEY[trial]}" -e M="$M" tools bash -c '
   body="{\"model\":\"$M\",\"messages\":[{\"role\":\"user\",\"content\":\"Count from 1 to 200, separated by commas.\"}],"
   body+="\"max_tokens\":128,\"temperature\":0,\"stream\":true,\"stream_options\":{\"include_usage\":true}}"
   worker() {   # tier key pause
@@ -119,7 +119,7 @@ while [[ $status == in_progress ]] && (( SECONDS - began < 5400 )); do
     echo "       batch-service killed and started again"
   fi
 done
-MSYS_NO_PATHCONV=1 "${DC[@]}" exec -T llama touch /tmp/stop-bench
+MSYS_NO_PATHCONV=1 "${DC[@]}" exec -T tools touch /tmp/stop-bench
 wait "$workers" || true
 elapsed=$((SECONDS - began))
 # Each run the kill cut short is logged by inference-service (ids only) and runs again.

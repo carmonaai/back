@@ -1,0 +1,140 @@
+# Unit tests for rules.yml, run with the pinned Prometheus image's promtool (no stack needed): bash docker/check-prometheus.sh
+# Each case fails if the alert expression regresses to the earlier one.
+rule_files: [rules.yml]
+evaluation_interval: 15s
+
+tests:
+  # The engine has no target at all (every replica removed, or its name stopped resolving): DNS service discovery yields none
+  # and Prometheus writes no `up{job="engine"}` at all. `up == 0` alone is an empty vector here; the absent() branch fires.
+  - name: EngineUnreachable fires when the engine has no target at all
+    interval: 15s
+    input_series:
+      - {series: 'up{job="prometheus"}', values: '1x10'}
+    alert_rule_test:
+      - {eval_time: 30s, alertname: EngineUnreachable, exp_alerts: []}
+      - eval_time: 2m
+        alertname: EngineUnreachable
+        exp_alerts:
+          - exp_labels: {severity: critical, job: engine}
+            exp_annotations:
+              summary: "no model engine is reachable (engine target down)"
+              description: >-
+                Every engine scrape is failing: inference-service will answer 503 once its one retry is spent.
+                Check the engine container (the real one downloads the model on first start, which is slow but
+                the container reports starting, not failing) and confirm the key in .env still matches the one
+                the engine was started with.
+
+  # A target that exists and fails its scrape is the other shape of the same outage.
+  - name: EngineUnreachable fires when every engine target fails its scrape
+    interval: 15s
+    input_series:
+      - {series: 'up{job="engine", instance="a"}', values: '0x10'}
+      - {series: 'up{job="engine", instance="b"}', values: '0x10'}
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: EngineUnreachable
+        exp_alerts:
+          - exp_labels: {severity: critical, job: engine}
+            exp_annotations:
+              summary: "no model engine is reachable (engine target down)"
+              description: >-
+                Every engine scrape is failing: inference-service will answer 503 once its one retry is spent.
+                Check the engine container (the real one downloads the model on first start, which is slow but
+                the container reports starting, not failing) and confirm the key in .env still matches the one
+                the engine was started with.
+
+  # One simulator of a fleet down is not the outage; and vllm having no series (it has none on the simulator stack)
+  # must not make the absent() branch fire while `engine` is up.
+  - name: EngineUnreachable stays quiet while any replica answers
+    interval: 15s
+    input_series:
+      - {series: 'up{job="engine", instance="a"}', values: '1x10'}
+      - {series: 'up{job="engine", instance="b"}', values: '0x10'}
+    alert_rule_test:
+      - {eval_time: 2m, alertname: EngineUnreachable, exp_alerts: []}
+
+  # The simulator refuses past --max-waiting-queue-length=8, so its gauge tops out at 8: the alert must fire AT 8.
+  - name: EngineQueueSustained fires at the full queue the engine can report
+    interval: 15s
+    input_series:
+      - {series: 'vllm:num_requests_waiting{job="engine", instance="a"}', values: '8x20'}
+    alert_rule_test:
+      - {eval_time: 1m, alertname: EngineQueueSustained, exp_alerts: []}
+      - eval_time: 3m
+        alertname: EngineQueueSustained
+        exp_alerts:
+          - exp_labels: {severity: warning, job: engine}
+            exp_annotations:
+              summary: "engine queue full (8 waiting) for 2m"
+              description: >-
+                The engine has as many requests waiting as it is configured to hold (and refuses the next): admission
+                is letting more through than the engine can start, and the waiting requests are paying for it in TTFT. Check
+                TTFT p95 and the refusals on the SLO dashboard; if the engine is healthy, C (slots) is the
+                number to revisit.
+
+  - name: EngineQueueSustained stays quiet below the full queue
+    interval: 15s
+    input_series:
+      - {series: 'vllm:num_requests_waiting{job="engine", instance="a"}', values: '7x20'}
+    alert_rule_test:
+      - {eval_time: 3m, alertname: EngineQueueSustained, exp_alerts: []}
+
+  # One replica of a replicated service down is visible on its own series (dns_sd gives one `up` per replica); the one that
+  # still answers is not named. A static single name had one series, so this could not be told apart.
+  - name: ServiceDown names the one replica that is down
+    interval: 15s
+    input_series:
+      - {series: 'up{job="inference", instance="10.0.0.2:8081"}', values: '1x20'}
+      - {series: 'up{job="inference", instance="10.0.0.3:8081"}', values: '0x20'}
+      - {series: 'up{job="gateway", instance="10.0.0.4:8081"}', values: '1x20'}
+      - {series: 'up{job="gateway", instance="10.0.0.5:8081"}', values: '1x20'}
+    alert_rule_test:
+      - {eval_time: 1m, alertname: ServiceDown, exp_alerts: []}
+      - eval_time: 3m
+        alertname: ServiceDown
+        exp_alerts:
+          - exp_labels: {severity: critical, job: inference, instance: "10.0.0.3:8081"}
+            exp_annotations:
+              summary: "inference 10.0.0.3:8081 has not answered a scrape for 2m"
+              description: >-
+                Prometheus cannot reach 10.0.0.3:8081/actuator/prometheus (inference; one series per
+                replica for inference and gateway, so this names the replica). The container may be down,
+                still starting, or its management port not listening. Check the container's own health status
+                and its logs. No metrics for this service means no SLI either.
+
+  # Every replica removed: the name stops resolving and there is no `up` series, so ServiceDown is silent; the absence alert is not.
+  - name: ReplicatedServiceAbsent fires when a replicated service has no target at all
+    interval: 15s
+    input_series:
+      - {series: 'up{job="inference", instance="10.0.0.2:8081"}', values: '1x20'}
+    alert_rule_test:
+      - {eval_time: 1m, alertname: ReplicatedServiceAbsent, exp_alerts: []}
+      - eval_time: 3m
+        alertname: ReplicatedServiceAbsent
+        exp_alerts:
+          - exp_labels: {severity: critical, job: gateway}
+            exp_annotations:
+              summary: "gateway has no scrape target at all for 2m"
+              description: >-
+                No replica of gateway resolves any more (removed, or never started), so Prometheus has no target
+                and no `up` series to alert on. Check `docker compose ps gateway`.
+
+  # One replica of two leaves discovery (its name stopped resolving): no series for it, no `up == 0`, ServiceDown is silent.
+  # Fires once the count stays below the 30 m maximum; stays quiet while both answer.
+  - name: ReplicaMissing fires when one of two replicas leaves discovery
+    interval: 15s
+    input_series:
+      - {series: 'up{job="inference", instance="10.0.0.2:8081"}', values: '1x240'}
+      - {series: 'up{job="inference", instance="10.0.0.3:8081"}', values: '1x40 _x200'}
+    alert_rule_test:
+      - {eval_time: 8m, alertname: ReplicaMissing, exp_alerts: []}
+      - eval_time: 20m
+        alertname: ReplicaMissing
+        exp_alerts:
+          - exp_labels: {severity: warning, job: inference}
+            exp_annotations:
+              summary: "inference has fewer scrape targets than it had in the last 30m"
+              description: >-
+                A replica of inference no longer resolves or no longer exists, and the rest still answer, so no `up == 0`
+                exists to alert on. Compare `docker compose ps inference` with the replicas you asked for.
+      - {eval_time: 20m, alertname: ServiceDown, exp_alerts: []}

@@ -6,7 +6,7 @@
 #   trial:      12 workers (3 x C), a pause of 1.5 s (keeps it under the gateway's 10 requests/s per key)
 # Each request streams up to 128 tokens. Pass: every trial 429 in < 100 ms, enterprise goodput >= 95%
 # (TTFT <= 2 s and TPOT <= 100 ms), and no request hits inference-service's TTFT timeout.
-# Workers are curl in the llama container, not vllm bench: a second Python/torch process next to vLLM
+# Workers are curl in the tools container, not vllm bench: a second Python/torch process next to vLLM
 # ran the laptop's Docker VM out of memory. TTFT = time to the first byte (inference-service sends the
 # headers with the first event). Laptop numbers: they size the caps, they are not prices.
 # Run after: docker compose -f compose.yaml -f compose.gpu.yaml up -d --build --wait
@@ -23,7 +23,7 @@ RESULTS=${TMPDIR:-/tmp}/carmonai-bench.txt   # kept for a closer look; the next 
 json() { sed -nE "s/.*\"$1\":\"([^\"]+)\".*/\1/p" <<<"$2"; }
 sql() { "${DC[@]}" exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tA -c "$1"' sh "$1" >/dev/null; }
 grant() {
-  "${DC[@]}" exec -T llama curl -s -o /dev/null -H 'Content-Type: application/json' -X POST http://billing:8080/billing/grants \
+  "${DC[@]}" exec -T tools curl -s -o /dev/null -H 'Content-Type: application/json' -X POST http://billing:8080/billing/grants \
     -d "{\"organizationId\":\"$1\",\"amountMicroBrl\":100000000,\"reason\":\"bench\",\"idempotencyKey\":\"bench\"}"
 }
 
@@ -31,8 +31,8 @@ grant() {
 verify_email() {
   local token="" id
   for _ in $(seq 20); do
-    for id in $("${DC[@]}" exec -T llama curl -s "http://mailpit:8025/api/v1/search?query=to:%22${1/@/%40}%22" | grep -oE '"ID":"[^"]+"' | cut -d'"' -f4); do
-      token=$("${DC[@]}" exec -T llama curl -s "http://mailpit:8025/api/v1/message/$id" | grep -oE '/verify-email\?token=[A-Za-z0-9_-]+' | sed -n '1s/.*=//p')
+    for id in $("${DC[@]}" exec -T tools curl -s "http://mailpit:8025/api/v1/search?query=to:%22${1/@/%40}%22" | grep -oE '"ID":"[^"]+"' | cut -d'"' -f4); do
+      token=$("${DC[@]}" exec -T tools curl -s "http://mailpit:8025/api/v1/message/$id" | grep -oE '/verify-email\?token=[A-Za-z0-9_-]+' | sed -n '1s/.*=//p')
       [[ -n $token ]] && break 2
     done
     sleep 0.5
@@ -60,7 +60,7 @@ start=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 echo "bench: enterprise 4 workers, standard 4, trial 12, for ${DURATION}s through the gateway ..."
 # One line per request: tier status ttfb_s total_s output_tokens error_code started_at
 "${DC[@]}" exec -T -e TRIAL="${KEY[trial]}" -e STANDARD="${KEY[standard]}" -e ENTERPRISE="${KEY[enterprise]}" \
-  -e M="$M" -e END="$DURATION" llama bash -c '
+  -e M="$M" -e END="$DURATION" tools bash -c '
   body="{\"model\":\"$M\",\"messages\":[{\"role\":\"user\",\"content\":\"Count from 1 to 200, separated by commas.\"}],"
   body+="\"max_tokens\":128,\"temperature\":0,\"stream\":true,\"stream_options\":{\"include_usage\":true}}"
   worker() {   # tier key pause

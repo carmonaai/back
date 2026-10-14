@@ -1,0 +1,1711 @@
+Carmonai patch for llm-d-inference-sim v0.11.4 (commit db3e12bdf8ccf500d93309dc73015fb811296404), applied by docker/sim/build.sh.
+Closes G1 (a client that hangs up is not noticed) and G3 (no usage before the last chunk) of work/prototype-sim/FINDINGS-contract.md.
+
+What it does:
+ 1. Every chat/completions request gets a context (HandleRequestCtx) that http.go cancels when the client hangs up or the
+    response is over. conncheck_linux.go finds a hang-up while nothing is being written (queue, prefill) by peeking at the
+    socket every 25 ms (MSG_PEEK, no byte is consumed); a stream that is being written finds out at its next write.
+ 2. The simulated sleeps (first token, between tokens) wait on that context: the worker stops at its next token, frees its
+    slot, and a request that is still in the waiting queue leaves it at once (dropWaiting).
+ 3. An aborted request is counted by the simulator: finish_reason "abort" in vllm:request_success_total, the prompt tokens
+    if the prefill was done, the tokens produced so far in the token counters. A hang-up before the first token counts nothing.
+    The abort series is simulator-only: the repo's own measurement (phase-6-progress.md, line 39) left
+    request_success_total{finished_reason="abort"} at 0 on vLLM v0.30.0.
+ 4. stream_options.continuous_usage_stats (with include_usage) puts the usage so far on every chat chunk, the role chunk
+    first (prompt tokens, 0 completion tokens), as vLLM does.
+ 5. A failed write to a client that hung up is no longer answered with sendError on the fasthttp context: by then the
+    context serves another request, and stock v0.11.4 made that one (seen: a /metrics scrape) answer 500.
+ Not done: continuous usage for /v1/completions, /v1/responses and /v1/messages; hang-up detection on gRPC and on TLS or
+ non-Linux sockets (the next write still finds it); the omni-mode image delay stays uninterruptible, as in stock.
+ Tests: pkg/communication/disconnect_test.go and pkg/simulator/disconnect_test.go. Every guard, early return and cleanup
+ call this patch has is covered by a spec that fails when only that one is removed (the table of mutations is in
+ pass-2-har-progress.md, step H5); what no spec could fail was deleted. The sendStream guard for a client that is gone
+ matters for n > 1 only (inference-service sends n = 1).
+
+diff --git a/pkg/api/request.go b/pkg/api/request.go
+index a07bc3e..fcf5c89 100644
+--- a/pkg/api/request.go
++++ b/pkg/api/request.go
+@@ -193,6 +193,8 @@ type KVTransferParams struct {
+ type StreamOptions struct {
+ 	// IncludeUsage is a boolean value, defines whether response contain usage statistics
+ 	IncludeUsage bool `json:"include_usage"`
++	// ContinuousUsageStats (a vLLM extension) puts the usage so far on every chunk, not only on the last one
++	ContinuousUsageStats bool `json:"continuous_usage_stats,omitempty"`
+ }
+ 
+ // PromptInput is a single prompt as it arrived on the wire. Exactly one of
+@@ -378,6 +380,12 @@ func (b *baseCompletionsRequest) IncludeUsage() bool {
+ 	return !b.Stream || (b.StreamOptions != nil && b.StreamOptions.IncludeUsage)
+ }
+ 
++// ContinuousUsageStats returns true if every chunk of a stream carries the usage so far (vLLM extension, needs
++// include_usage as well)
++func (b *baseCompletionsRequest) ContinuousUsageStats() bool {
++	return b.StreamOptions != nil && b.StreamOptions.IncludeUsage && b.StreamOptions.ContinuousUsageStats
++}
++
+ // GetN returns the number of completion choices to generate, defaulting to 1.
+ func (b *baseCompletionsRequest) GetN() int {
+ 	if b.N == nil || *b.N <= 0 {
+diff --git a/pkg/communication/client_link.go b/pkg/communication/client_link.go
+new file mode 100644
+index 0000000..c77274c
+--- /dev/null
++++ b/pkg/communication/client_link.go
+@@ -0,0 +1,111 @@
++/*
++Copyright 2025 The llm-d-inference-sim Authors.
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++    http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++// Carmonai patch (docker/sim/disconnect.patch): the simulator learns that its client has gone.
++
++package communication
++
++import (
++	"context"
++	"net"
++	"time"
++
++	"github.com/llm-d/llm-d-inference-sim/pkg/api"
++	"github.com/llm-d/llm-d-inference-sim/pkg/simulator"
++)
++
++// statusClientClosedRequest is the 499 of nginx: the status of a request nobody waits for any more. Only logs see it.
++const statusClientClosedRequest = 499
++
++// clientPollEvery is how often a request that has written nothing yet looks at its connection. A stream that is
++// being written finds out at its next write; this covers the time in the queue and before the first token.
++// ponytail: a hang-up is found up to 25 ms late, so a cancelled request may produce a token or two more than the client
++// saw (the accounting tolerance H2/H3 use). Upgrade path: a smaller period (the cost is CPU per request in flight), or
++// the epoll loop named at watchClient.
++const clientPollEvery = 25 * time.Millisecond
++
++// clientLink ties one request to its client. ctx is done when the client has hung up, or when the response is
++// complete or has failed (cancel is called on every way out); the simulator stops generating for a done ctx.
++type clientLink struct {
++	ctx             context.Context
++	cancel          context.CancelFunc
++	continuousUsage bool
++}
++
++// continuousUsageRequester is implemented by the completion requests that carry stream_options.
++// ponytail: continuous usage is for the chat chunks of /v1/chat/completions only (the one endpoint inference-service
++// uses); /v1/responses and /v1/messages requests do not implement this and /v1/completions chunks are not stamped.
++// Upgrade: implement it on those request types and teach stamp their chunk types.
++type continuousUsageRequester interface{ ContinuousUsageStats() bool }
++
++func newClientLink(req simulator.Request) *clientLink {
++	ctx, cancel := context.WithCancel(context.Background())
++	cu, _ := req.(continuousUsageRequester)
++	return &clientLink{ctx: ctx, cancel: cancel, continuousUsage: cu != nil && cu.ContinuousUsageStats()}
++}
++
++// gone reports that the client hung up (or the request is over).
++func (l *clientLink) gone() bool { return l.ctx.Err() != nil }
++
++// stop ends the request: the client is gone, or the response is complete.
++func (l *clientLink) stop() { l.cancel() }
++
++// watchClient cancels the request once the client's connection is closed or reset, until the request is over.
++// fasthttp tells a handler nothing about the connection while it runs, and a request that is waiting in the
++// queue or being prefilled writes nothing, so the socket is looked at (peerGone) every clientPollEvery.
++// ponytail: one goroutine and one 25 ms poll per request in flight (the engine runs a dozen at a time). Upgrade
++// path if that ever matters: one epoll loop over all sockets, or a read-side wrapper on the connection.
++func (c *Communication) watchClient(conn net.Conn, link *clientLink) {
++	t := time.NewTicker(clientPollEvery) // no Stop: go.mod says go 1.26, which collects an unreferenced ticker
++	for {
++		select {
++		case <-link.ctx.Done():
++			return
++		case <-t.C:
++			if peerGone(conn) {
++				link.cancel() // the next turn of the loop sees ctx.Done and returns
++			}
++		}
++	}
++}
++
++// stamp puts the usage so far on a chat chunk when the client asked for continuous_usage_stats (a vLLM extension:
++// the first, role chunk has the prompt tokens and 0 completion tokens; every later chunk the tokens sent so far).
++func (st *streamState) stamp(chunk sseChunk) sseChunk {
++	if !st.continuousUsage {
++		return chunk
++	}
++	j, ok := chunk.(*jsonDataChunk)
++	if !ok {
++		return chunk
++	}
++	var cc *api.ChatCompletionsRespChunk
++	switch v := j.data.(type) { // createChunk boxes a pointer in a pointer
++	case *api.ChatCompletionsRespChunk:
++		cc = v
++	case **api.ChatCompletionsRespChunk:
++		cc = *v
++	}
++	if cc != nil {
++		cc.Usage = &api.Usage{
++			PromptTokens:        st.prompt.PromptTokens,
++			CompletionTokens:    st.completion,
++			TotalTokens:         st.prompt.PromptTokens + st.completion,
++			PromptTokensDetails: st.prompt.PromptTokensDetails,
++		}
++	}
++	return chunk
++}
+diff --git a/pkg/communication/conncheck_linux.go b/pkg/communication/conncheck_linux.go
+new file mode 100644
+index 0000000..708bd03
+--- /dev/null
++++ b/pkg/communication/conncheck_linux.go
+@@ -0,0 +1,68 @@
++//go:build linux
++
++/*
++Copyright 2025 The llm-d-inference-sim Authors.
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++    http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++package communication
++
++import (
++	"errors"
++	"net"
++	"os"
++	"syscall"
++
++	"github.com/soheilhy/cmux"
++)
++
++// peerGone looks at the socket without reading from it (MSG_PEEK, so no byte is consumed; Go makes every socket it
++// opens non-blocking, so the recv never waits either): zero bytes means the client closed its side, an error other than "nothing yet" means the
++// connection is broken or was closed here. A connection that has no socket to look at (TLS) is never "gone":
++// the next write finds out.
++// ponytail: Linux only (conncheck_other.go); peeking after a TLS handshake would need the underlying socket.
++func peerGone(conn net.Conn) bool {
++	if mc, ok := conn.(*cmux.MuxConn); ok { // the listener is cmux's: the socket is inside
++		conn = mc.Conn
++	}
++	sc, ok := conn.(syscall.Conn)
++	if !ok {
++		return false
++	}
++	raw, err := sc.SyscallConn()
++	if err != nil {
++		return false // cannot look: not gone, a healthy request must never be cut on a doubt
++	}
++	var (
++		n    int
++		rerr error
++		buf  [1]byte
++	)
++	if err := raw.Read(func(fd uintptr) bool {
++		n, _, rerr = syscall.Recvfrom(int(fd), buf[:], syscall.MSG_PEEK)
++		return true // never wait for readability: this is a poll
++	}); err != nil {
++		// RawRead refuses while a read deadline has passed (cmux sets one while it sniffs a new connection): that is
++		// not a hang-up. Anything else (the connection is closed here) is the end of the request either way.
++		return !errors.Is(err, os.ErrDeadlineExceeded)
++	}
++	switch rerr {
++	case nil:
++		return n == 0
++	case syscall.EAGAIN: // nothing to read yet (a non-blocking recv is never interrupted, so no EINTR)
++		return false
++	default:
++		return true
++	}
++}
+diff --git a/pkg/communication/conncheck_other.go b/pkg/communication/conncheck_other.go
+new file mode 100644
+index 0000000..ba12aea
+--- /dev/null
++++ b/pkg/communication/conncheck_other.go
+@@ -0,0 +1,25 @@
++//go:build !linux
++
++/*
++Copyright 2025 The llm-d-inference-sim Authors.
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++    http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++package communication
++
++import "net"
++
++// peerGone is only implemented for Linux (the container): elsewhere a hang-up is found by the next write.
++// ponytail: so on a non-Linux build a request in the queue or in prefill runs to its end, as in stock v0.11.4.
++func peerGone(net.Conn) bool { return false }
+diff --git a/pkg/communication/disconnect_test.go b/pkg/communication/disconnect_test.go
+new file mode 100644
+index 0000000..47b5e14
+--- /dev/null
++++ b/pkg/communication/disconnect_test.go
+@@ -0,0 +1,775 @@
++/*
++Copyright 2025 The llm-d-inference-sim Authors.
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++    http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++// Carmonai patch (docker/sim/disconnect.patch): a client that hangs up stops the generation, and
++// stream_options.continuous_usage_stats puts the usage so far on every chunk.
++
++package communication
++
++import (
++	"bufio"
++	"bytes"
++	"context"
++	"encoding/json"
++	"errors"
++	"fmt"
++	"io"
++	"net"
++	"net/http"
++	"os"
++	"runtime/pprof"
++	"strconv"
++	"strings"
++	"syscall"
++	"time"
++
++	. "github.com/onsi/ginkgo/v2"
++	. "github.com/onsi/gomega"
++	"github.com/soheilhy/cmux"
++	"github.com/valyala/fasthttp"
++	"k8s.io/klog/v2"
++
++	"github.com/llm-d/llm-d-inference-sim/pkg/api"
++	"github.com/llm-d/llm-d-inference-sim/pkg/common"
++	"github.com/llm-d/llm-d-inference-sim/pkg/simulator"
++	"github.com/llm-d/llm-d-inference-sim/pkg/tokenizer"
++)
++
++// slowServer runs a real simulator behind a real HTTP server on cmux, as main does: one slot, a queue of 4,
++// 300 ms before the first token and 20 ms per token, echo mode (the answer is as long as the prompt).
++func slowServer(ctx context.Context) (addr string, sim *simulator.Simulator) {
++	return slowServerWith(ctx, common.ModeEcho, "20ms")
++}
++
++// slowServerWith is slowServer with another mode (random is what makes tool calls), another time between tokens and
++// more flags.
++func slowServerWith(ctx context.Context, mode, interToken string, extra ...string) (addr string, sim *simulator.Simulator) {
++	oldArgs := os.Args
++	defer func() { os.Args = oldArgs }()
++	os.Args = append([]string{"cmd", "--model", common.TestModelName, "--mode", mode,
++		"--max-num-seqs=1", "--max-waiting-queue-length=4", "--latency-calculator=constant",
++		"--time-to-first-token=300ms", "--inter-token-latency=" + interToken}, extra...)
++	config, err := common.ParseCommandParamsAndLoadConfig()
++	Expect(err).NotTo(HaveOccurred())
++
++	sim, err = simulator.New(klog.Background())
++	Expect(err).NotTo(HaveOccurred())
++	sim.Context.SetConfig(config)
++	sim.Context.Tokenizer = tokenizer.NewSimpleTokenizer()
++	Expect(sim.InitializeSim(ctx)).To(Succeed())
++
++	listener, err := net.Listen("tcp4", "127.0.0.1:0")
++	Expect(err).NotTo(HaveOccurred())
++	m := cmux.New(listener)
++	m.SetReadTimeout(500 * time.Millisecond) // main sets 5 s; cmux puts a read deadline on every new connection
++	httpL := m.Match(cmux.Any())
++	go m.Serve()                                               //nolint:errcheck
++	go New(klog.Background(), sim).StartHTTPServer(ctx, httpL) //nolint:errcheck
++	DeferCleanup(func() { listener.Close() })                  //nolint:errcheck
++	return listener.Addr().String(), sim
++}
++
++// chatBody is a streaming chat request whose echoed answer is about words tokens long.
++func chatBody(words int, streamOptions string) string {
++	prompt := strings.TrimSpace(strings.Repeat("w ", words))
++	return fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":%q}],"max_tokens":%d,"stream":true%s}`,
++		common.TestModelName, prompt, words*3, streamOptions)
++}
++
++// continuous is the stream_options that ask for the usage so far on every chunk.
++const continuous = `,"stream_options":{"include_usage":true,"continuous_usage_stats":true}`
++
++// toolsBody is a streaming chat request that must end in a call of get_weather.
++func toolsBody(streamOptions string) string {
++	return fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"weather in Recife?"}],"max_tokens":200,"stream":true,`+
++		`"tools":[{"type":"function","function":{"name":"get_weather","description":"Weather in a city","parameters":`+
++		`{"type":"object","properties":{"city":{"type":"string"},"unit":{"type":"string"}},"required":["city","unit"]}}}],`+
++		`"tool_choice":"required"%s}`, common.TestModelName, streamOptions)
++}
++
++// serverFor starts a slowServerWith that is stopped when the spec is over.
++func serverFor(mode, interToken string, extra ...string) (string, *simulator.Simulator) {
++	ctx, cancel := context.WithCancel(context.Background())
++	DeferCleanup(cancel)
++	return slowServerWith(ctx, mode, interToken, extra...)
++}
++
++// seen is one chunk of a streamed answer: its usage (nil if null), its choices and what they carry.
++type seen struct {
++	raw      string
++	usage    map[string]any
++	choices  int
++	content  string
++	finish   string
++	toolCall bool
++	modality string
++}
++
++// readChunks posts body (with headers given as "Name: value") and returns every chunk of the stream, [DONE] left out.
++func readChunks(addr, body string, headers ...string) []seen {
++	req, err := http.NewRequest(http.MethodPost, "http://"+addr+"/v1/chat/completions", strings.NewReader(body))
++	Expect(err).NotTo(HaveOccurred())
++	req.Header.Set("Content-Type", "application/json")
++	for _, h := range headers {
++		name, value, _ := strings.Cut(h, ": ")
++		req.Header.Set(name, value)
++	}
++	resp, err := http.DefaultClient.Do(req)
++	Expect(err).NotTo(HaveOccurred())
++	defer resp.Body.Close() //nolint:errcheck
++	var out []seen
++	sc := bufio.NewScanner(resp.Body)
++	sc.Buffer(make([]byte, 1<<20), 1<<20)
++	for sc.Scan() {
++		data, ok := strings.CutPrefix(sc.Text(), "data: ")
++		if !ok || data == "[DONE]" {
++			continue
++		}
++		var v struct {
++			Usage    map[string]any `json:"usage"`
++			Modality string         `json:"modality"`
++			Choices  []struct {
++				FinishReason *string `json:"finish_reason"`
++				Delta        struct {
++					Content   json.RawMessage `json:"content"`
++					ToolCalls []any           `json:"tool_calls"`
++				} `json:"delta"`
++			} `json:"choices"`
++		}
++		Expect(json.Unmarshal([]byte(data), &v)).To(Succeed())
++		c := seen{raw: data, usage: v.Usage, choices: len(v.Choices), modality: v.Modality}
++		if len(v.Choices) > 0 {
++			var text string
++			_ = json.Unmarshal(v.Choices[0].Delta.Content, &text) // an array in omni mode: not text
++			c.content = text
++			c.toolCall = len(v.Choices[0].Delta.ToolCalls) > 0
++			if v.Choices[0].FinishReason != nil {
++				c.finish = *v.Choices[0].FinishReason
++			}
++		}
++		out = append(out, c)
++	}
++	Expect(sc.Err()).NotTo(HaveOccurred())
++	return out
++}
++
++// send opens a connection and writes one chat request on it, without reading anything.
++func send(addr, body string) net.Conn {
++	conn, err := net.Dial("tcp", addr)
++	Expect(err).NotTo(HaveOccurred())
++	Expect(conn.SetDeadline(time.Now().Add(20 * time.Second))).To(Succeed()) // a wrongly cut request fails a spec, it does not hang it
++	_, err = fmt.Fprintf(conn, "POST /v1/chat/completions HTTP/1.1\r\nHost: sim\r\nContent-Type: application/json\r\n"+
++		"Content-Length: %d\r\n\r\n%s", len(body), body)
++	Expect(err).NotTo(HaveOccurred())
++	return conn
++}
++
++// readUntil reads from conn until marker has arrived, the connection ends or d is over.
++func readUntil(conn net.Conn, marker string, d time.Duration) string {
++	Expect(conn.SetReadDeadline(time.Now().Add(d))).To(Succeed())
++	var got strings.Builder
++	buf := make([]byte, 4096)
++	for !strings.Contains(got.String(), marker) {
++		n, err := conn.Read(buf)
++		got.Write(buf[:n])
++		if err != nil {
++			break
++		}
++	}
++	return got.String()
++}
++
++// metric sums a Prometheus series of the simulator over its label sets; lines must contain match.
++func metric(addr, name, match string) float64 {
++	resp, err := http.Get("http://" + addr + "/metrics")
++	Expect(err).NotTo(HaveOccurred())
++	defer resp.Body.Close() //nolint:errcheck
++	sum := 0.0
++	sc := bufio.NewScanner(resp.Body)
++	for sc.Scan() {
++		line := sc.Text()
++		if !strings.HasPrefix(line, name+"{") || !strings.Contains(line, match) {
++			continue
++		}
++		v, err := strconv.ParseFloat(line[strings.LastIndex(line, " ")+1:], 64)
++		Expect(err).NotTo(HaveOccurred())
++		sum += v
++	}
++	return sum
++}
++
++// inGoroutines counts the goroutines of this process that are inside the Communication method fn right now.
++func inGoroutines(fn string) int {
++	var dump bytes.Buffer
++	Expect(pprof.Lookup("goroutine").WriteTo(&dump, 2)).To(Succeed())
++	return strings.Count(dump.String(), "\ngithub.com/llm-d/llm-d-inference-sim/pkg/communication.(*Communication)."+fn+"(")
++}
++
++// testLink is a clientLink with no connection behind it: done already, or live until stop.
++func testLink(done bool) *clientLink {
++	l := &clientLink{}
++	l.ctx, l.cancel = context.WithCancel(context.Background())
++	if done {
++		l.stop()
++	}
++	return l
++}
++
++var _ = Describe("a client that hangs up", func() {
++	var (
++		addr string
++		sim  *simulator.Simulator
++	)
++	running := func() float64 { return metric(addr, "vllm:num_requests_running", "") }
++	waiting := func() float64 { return metric(addr, "vllm:num_requests_waiting", "") }
++	generated := func() float64 { return metric(addr, "vllm:generation_tokens_total", "") }
++	aborted := func() float64 { return metric(addr, "vllm:request_success_total", `finish_reason="abort"`) }
++	prompted := func() float64 { return metric(addr, "vllm:prompt_tokens_total", "") }
++
++	BeforeEach(func() {
++		ctx, cancel := context.WithCancel(context.Background())
++		DeferCleanup(cancel)
++		addr, sim = slowServer(ctx)
++	})
++
++	It("stops a running stream at its next token and counts only the tokens produced", func() {
++		conn := send(addr, chatBody(150, "")) // 150 tokens would take 3.3 s
++		br := bufio.NewReader(conn)
++		for { // read until the first content chunk, then hang up
++			line, err := br.ReadString('\n')
++			Expect(err).NotTo(HaveOccurred())
++			if strings.Contains(line, `"content":"`) {
++				break
++			}
++		}
++		Expect(running()).To(Equal(1.0))
++		Expect(conn.Close()).To(Succeed())
++
++		Eventually(running, "500ms", "20ms").Should(Equal(0.0)) // stock v0.11.4: still 1 after 3 s
++		Eventually(aborted, "500ms", "20ms").Should(Equal(1.0))
++		Expect(generated()).To(BeNumerically(">", 0), "the tokens produced before the hang-up are not counted")
++		Expect(generated()).To(BeNumerically("<", 40), "generation went on after the hang-up")
++		Expect(prompted()).To(BeNumerically(">", 150), "the processed prompt is not counted") // 150 words
++		Consistently(generated, "400ms", "100ms").Should(Equal(generated()))
++		Expect(sim.OpenRequests()).To(BeZero())
++	})
++
++	It("stops a request that is still waiting for its first token, and counts nothing for it", func() {
++		conn := send(addr, chatBody(150, ""))
++		Eventually(running, "300ms", "10ms").Should(Equal(1.0))
++		Expect(conn.Close()).To(Succeed()) // before the 300 ms of prefill are over
++
++		Eventually(running, "300ms", "20ms").Should(Equal(0.0))
++		Expect(generated()).To(BeZero())
++		Expect(prompted()).To(BeZero())
++		Expect(aborted()).To(BeZero())
++	})
++
++	It("stops a tool-call stream at its next token and counts the tool tokens produced", func() {
++		addr, _ = serverFor(common.ModeRandom, "200ms") // a call is many tokens: 200 ms each is far longer than the checks below
++		conn := send(addr, toolsBody(""))
++		br := bufio.NewReader(conn)
++		for { // read until the first tool-call chunk, then hang up
++			line, err := br.ReadString('\n')
++			Expect(err).NotTo(HaveOccurred())
++			if strings.Contains(line, `"tool_calls"`) {
++				break
++			}
++		}
++		Expect(running()).To(Equal(1.0))
++		Expect(conn.Close()).To(Succeed())
++
++		Eventually(running, "300ms", "20ms").Should(Equal(0.0)) // the rest of the call would take over a second
++		Eventually(aborted, "500ms", "20ms").Should(Equal(1.0))
++		Expect(generated()).To(BeNumerically(">", 0), "the tool tokens produced before the hang-up are not counted")
++		Expect(generated()).To(BeNumerically("<", 4), "generation went on after the hang-up")
++	})
++
++	It("leaves the queue at once, without touching the request that is running", func() {
++		first := send(addr, chatBody(40, "")) // takes the only slot, about 1.1 s
++		Eventually(running, "300ms", "10ms").Should(Equal(1.0))
++		queued := send(addr, chatBody(40, ""))
++		Eventually(waiting, "300ms", "10ms").Should(Equal(1.0))
++		Expect(queued.Close()).To(Succeed())
++
++		Eventually(waiting, "300ms", "20ms").Should(Equal(0.0))
++		Expect(running()).To(Equal(1.0))
++		Expect(aborted()).To(BeZero()) // it never started
++
++		// the first request still gets all of its answer: the last event is [DONE]
++		Expect(readUntil(first, "data: [DONE]", 5*time.Second)).To(ContainSubstring("data: [DONE]"))
++		Eventually(running, "500ms", "20ms").Should(Equal(0.0))
++		Expect(sim.OpenRequests()).To(BeZero())
++	})
++
++	It("takes its own place out of the queue, not the one in front of it", func() {
++		first := send(addr, chatBody(40, "")) // takes the only slot, about 1.1 s
++		Eventually(running, "300ms", "10ms").Should(Equal(1.0))
++		ahead := send(addr, chatBody(10, ""))
++		Eventually(waiting, "300ms", "10ms").Should(Equal(1.0))
++		behind := send(addr, chatBody(10, ""))
++		Eventually(waiting, "300ms", "10ms").Should(Equal(2.0))
++		Expect(behind.Close()).To(Succeed())
++
++		Eventually(waiting, "300ms", "20ms").Should(Equal(1.0))
++		for _, conn := range []net.Conn{first, ahead} { // the one that stayed is still answered to the end
++			Expect(readUntil(conn, "data: [DONE]", 5*time.Second)).To(ContainSubstring("data: [DONE]"))
++		}
++	})
++
++	It("leaves the queue gauge alone for a request that waited, ran and finished", func() {
++		first := send(addr, chatBody(10, "")) // about 0.5 s
++		Eventually(running, "300ms", "10ms").Should(Equal(1.0))
++		second := send(addr, chatBody(10, ""))
++		Eventually(waiting, "300ms", "10ms").Should(Equal(1.0))
++		for _, conn := range []net.Conn{first, second} {
++			Expect(readUntil(conn, "data: [DONE]", 5*time.Second)).To(ContainSubstring("data: [DONE]"))
++		}
++		// its callback (dropWaiting) runs when the request is over, and must find nothing to drop
++		Eventually(running, "500ms", "20ms").Should(Equal(0.0))
++		Consistently(waiting, "300ms", "50ms").Should(Equal(0.0))
++		Expect(aborted()).To(BeZero())
++	})
++
++	// The guards below (link.stop() on every way out of a request, signalDone in dropWaiting) are invisible in the
++	// metrics: without them a goroutine per request is leaked, or a handler never returns.
++	It("leaves no watcher behind once a response is complete, stream or not, on a connection that stays open", func() {
++		watchers := func() int { return inGoroutines("watchClient") }
++		before := watchers()                 // what earlier specs left (nothing, unless a guard is missing)
++		probe := send(addr, chatBody(5, "")) // the probe itself: a request in flight has a watcher
++		Eventually(watchers, "1s", "10ms").Should(BeNumerically(">", before))
++		Expect(readUntil(probe, "data: [DONE]", 5*time.Second)).To(ContainSubstring("data: [DONE]"))
++		Expect(probe.Close()).To(Succeed())
++
++		client := &http.Client{Transport: &http.Transport{}} // keep-alive: the connection stays open and idle
++		DeferCleanup(client.CloseIdleConnections)
++		post := func(body string) {
++			resp, err := client.Post("http://"+addr+"/v1/chat/completions", "application/json", strings.NewReader(body))
++			Expect(err).NotTo(HaveOccurred())
++			_, err = io.ReadAll(resp.Body)
++			Expect(err).NotTo(HaveOccurred())
++			Expect(resp.Body.Close()).To(Succeed())
++		}
++		for range 6 {
++			post(chatBody(5, ""))
++		}
++		post(strings.Replace(chatBody(5, ""), `"stream":true`, `"stream":false`, 1))
++
++		Eventually(watchers, "1s", "20ms").Should(BeNumerically("<=", before),
++			"a watchClient goroutine outlived its request; it polls the socket until the client closes it")
++	})
++
++	It("leaves no watcher behind when the engine refuses a stream request (429, queue full), on a connection that stays open", func() {
++		watchers := func() int { return inGoroutines("watchClient") }
++		before := watchers()
++		var fillers []net.Conn // 1 slot + 4 queue places
++		for range 5 {
++			fillers = append(fillers, send(addr, chatBody(40, "")))
++		}
++		Eventually(waiting, "500ms", "10ms").Should(Equal(4.0))
++
++		client := &http.Client{Transport: &http.Transport{}} // keep-alive: the connection stays open and idle
++		DeferCleanup(client.CloseIdleConnections)
++		for range 3 {
++			resp, err := client.Post("http://"+addr+"/v1/chat/completions", "application/json", strings.NewReader(chatBody(5, "")))
++			Expect(err).NotTo(HaveOccurred())
++			_, err = io.ReadAll(resp.Body)
++			Expect(err).NotTo(HaveOccurred())
++			Expect(resp.Body.Close()).To(Succeed())
++			Expect(resp.StatusCode).To(Equal(http.StatusTooManyRequests))
++		}
++		for _, c := range fillers {
++			Expect(c.Close()).To(Succeed())
++		}
++
++		Eventually(watchers, "2s", "20ms").Should(BeNumerically("<=", before),
++			"a watchClient goroutine outlived its refused (429) stream request; it polls the socket until the client closes it")
++	})
++
++	It("leaves no watcher behind when the engine refuses a request before it is queued (404, unknown model), on a connection that stays open", func() {
++		watchers := func() int { return inGoroutines("watchClient") }
++		before := watchers()
++		client := &http.Client{Transport: &http.Transport{}} // keep-alive: the connection stays open and idle
++		DeferCleanup(client.CloseIdleConnections)
++		for range 3 {
++			resp, err := client.Post("http://"+addr+"/v1/chat/completions", "application/json",
++				strings.NewReader(strings.Replace(chatBody(5, ""), common.TestModelName, "no-such-model", 1)))
++			Expect(err).NotTo(HaveOccurred())
++			_, err = io.ReadAll(resp.Body)
++			Expect(err).NotTo(HaveOccurred())
++			Expect(resp.Body.Close()).To(Succeed())
++			Expect(resp.StatusCode).To(Equal(http.StatusNotFound))
++		}
++		Consistently(watchers, "200ms", "20ms").Should(BeNumerically("<=", before),
++			"a watchClient goroutine was started for a request the engine refused before queueing it")
++	})
++
++	It("lets the handler of a queued request return when its client leaves", func() {
++		first := send(addr, chatBody(40, ""))                                            // takes the only slot
++		Expect(readUntil(first, "data: ", 2*time.Second)).To(ContainSubstring("data: ")) // its own handler is past handleStream
++		handlers := func() int { return inGoroutines("handleStream") }
++		before := handlers() // what earlier specs left (nothing, unless a guard is missing)
++		queued := send(addr, chatBody(40, ""))
++		Eventually(waiting, "300ms", "10ms").Should(Equal(1.0))
++		Eventually(handlers, "300ms", "10ms").Should(BeNumerically(">", before),
++			"the queued request's handler waits for its first response")
++		Expect(queued.Close()).To(Succeed())
++
++		Eventually(handlers, "500ms", "20ms").Should(BeNumerically("<=", before),
++			"the handler of the departed request is still blocked on its response channel")
++		Expect(readUntil(first, "data: [DONE]", 5*time.Second)).To(ContainSubstring("data: [DONE]"))
++	})
++
++	It("does not hurt a client that stays: a stream longer than cmux's read timeout, then the connection is reused", func() {
++		for _, words := range []int{60, 10} { // the first takes 1.5 s, three times cmux's 500 ms deadline
++			resp, err := http.Post("http://"+addr+"/v1/chat/completions", "application/json",
++				strings.NewReader(chatBody(words, "")))
++			Expect(err).NotTo(HaveOccurred())
++			all, err := io.ReadAll(resp.Body)
++			Expect(err).NotTo(HaveOccurred())
++			Expect(resp.Body.Close()).To(Succeed())
++			Expect(string(all)).To(ContainSubstring("data: [DONE]"))
++		}
++		Expect(aborted()).To(BeZero())
++	})
++})
++
++var _ = Describe("a response for a client that is gone", func() {
++	// Stock v0.11.4 answered a failed write with sendError on the fasthttp context, which by then belongs to the next
++	// request on that worker: a hang-up mid-stream made some other request (a /metrics scrape, seen live) answer 500.
++	It("is not written to the fasthttp context when the pipe is closed", func() {
++		pr, pw := io.Pipe()
++		Expect(pr.Close()).To(Succeed()) // what fasthttp does with the body stream when the client has gone
++
++		httpCtx := &fasthttp.RequestCtx{}
++		c := &Communication{logger: klog.Background()}
++		ok := c.sendOrFail(httpCtx, bufio.NewWriter(pw), &jsonDataChunk{data: map[string]string{"a": "b"}}, "Sending stream chunk failed, ")
++
++		Expect(ok).To(BeFalse())
++		Expect(httpCtx.Response.StatusCode()).To(Equal(fasthttp.StatusOK))
++		Expect(httpCtx.Response.Body()).To(BeEmpty())
++	})
++
++	It("is not built: no error body for a request nobody waits for", func() {
++		channel := common.Channel[*simulator.ResponseInfo]{Channel: make(chan *simulator.ResponseInfo)}
++		close(channel.Channel) // the request was stopped before it produced anything
++		link := testLink(true)
++
++		httpCtx := &fasthttp.RequestCtx{}
++		(&Communication{logger: klog.Background()}).sendNonStream(httpCtx, channel, nil, 1, link)
++
++		Expect(httpCtx.Response.StatusCode()).To(Equal(fasthttp.StatusOK))
++		Expect(httpCtx.Response.Body()).To(BeEmpty())
++	})
++
++	It("is answered 499 and nothing else when the request ended before its first token (stream)", func() {
++		for _, gone := range []bool{true, false} { // the link is done already, or the channel closing is all that tells
++			channel := common.Channel[*simulator.ResponseInfo]{Channel: make(chan *simulator.ResponseInfo)}
++			close(channel.Channel) // left the queue, or stopped in prefill: closed with nothing in it
++			link := testLink(gone)
++
++			httpCtx := &fasthttp.RequestCtx{}
++			(&Communication{logger: klog.Background()}).handleStream(httpCtx, channel, nil, 1, link)
++
++			Expect(httpCtx.Response.StatusCode()).To(Equal(499), "link done: %v", gone)
++			Expect(httpCtx.Response.Body()).To(BeEmpty())
++			Expect(httpCtx.Response.IsBodyStream()).To(BeFalse(), "no stream was started for a request nobody waits for")
++			Expect(link.gone()).To(BeTrue(), "the watcher of this request would poll until the client closes the socket")
++		}
++	})
++
++	// The guard in sendStream matters for n > 1 (inference-service sends n = 1): when the client leaves, a choice that never
++	// started has no entry, and the missing-choice check would answer 500 on the fasthttp context, which by then serves the
++	// next request of that worker (the same mistake as the failed write above).
++	It("is not answered with the missing-choice 500 when the client left before one of two choices started", func() {
++		sim := newRunningSim(context.Background())
++		req := &simulator.TextCompletionsParsedRequest{}
++		req.RequestID = "gone-stream"
++		req.Model = common.TestModelName
++		req.Prompt = []api.PromptInput{{Text: "hi there"}}
++		req.Stream = true
++		n := 2
++		req.N = &n
++		numChoices, _, respChan, topErr, _ := sim.HandleRequest(req)
++		Expect(topErr).To(BeNil())
++		first := <-respChan.Channel
++		Expect(first).NotTo(BeNil())
++		missingChoice := 1 - first.ChoiceIdx
++		rest := common.Channel[*simulator.ResponseInfo]{Channel: make(chan *simulator.ResponseInfo, 100), Name: "rest"}
++		for response := range respChan.Channel { // the other choice produced nothing: its worker stopped at the hang-up
++			if response.ChoiceIdx != missingChoice {
++				rest.Channel <- response
++			}
++		}
++		close(rest.Channel)
++
++		httpCtx := &fasthttp.RequestCtx{}
++		httpCtx.SetStatusCode(fasthttp.StatusOK)
++		(&Communication{logger: klog.Background()}).sendStream(httpCtx, rest, &textComplHTTPRespBuilder{}, numChoices, first, testLink(true))
++
++		body, err := io.ReadAll(httpCtx.Response.BodyStream())
++		Expect(err).NotTo(HaveOccurred(), "sendError abandoned the stream for a 500 body")
++		Expect(string(body)).To(ContainSubstring("data: "), "the chunks before the hang-up are sent")
++		Expect(string(body)).NotTo(ContainSubstring("[DONE]"))
++		Expect(httpCtx.Response.StatusCode()).To(Equal(fasthttp.StatusOK))
++	})
++})
++
++var _ = Describe("stream_options.continuous_usage_stats", func() {
++	var addr string
++	BeforeEach(func() { addr, _ = serverFor(common.ModeEcho, "20ms") })
++
++	It("puts the usage so far on every chunk, the role chunk first", func() {
++		chunks := readChunks(addr, chatBody(8, continuous))
++		Expect(len(chunks)).To(BeNumerically(">", 8))
++		last := -1.0
++		contentChunks := 0
++		for i, c := range chunks {
++			Expect(c.usage).NotTo(BeNil(), "chunk %d has no usage", i)
++			done := c.usage["completion_tokens"].(float64)
++			Expect(done).To(BeNumerically(">=", last), "completion tokens went back at chunk %d", i)
++			Expect(c.usage["prompt_tokens"].(float64)).To(BeNumerically(">", 0))
++			Expect(c.usage["total_tokens"]).To(Equal(c.usage["prompt_tokens"].(float64) + done))
++			last = done
++			if c.content != "" {
++				contentChunks++
++				Expect(done).To(Equal(float64(contentChunks)), "the n-th token chunk reports n tokens")
++			}
++		}
++		Expect(chunks[0].usage["completion_tokens"]).To(BeZero(), "the role chunk has produced nothing yet")
++		// the usage chunk at the end (no choices) is the total
++		Expect(chunks[len(chunks)-1].choices).To(BeZero())
++		Expect(last).To(Equal(float64(contentChunks)))
++	})
++
++	It("leaves the chunks without usage when only include_usage is asked", func() {
++		chunks := readChunks(addr, chatBody(8, `,"stream_options":{"include_usage":true}`))
++		for _, c := range chunks[:len(chunks)-1] {
++			Expect(c.usage).To(BeNil())
++		}
++		Expect(chunks[len(chunks)-1].usage).NotTo(BeNil())
++	})
++
++	It("ignores it without include_usage, as vLLM does", func() {
++		for _, c := range readChunks(addr, chatBody(8, `,"stream_options":{"continuous_usage_stats":true}`)) {
++			Expect(c.usage).To(BeNil())
++		}
++	})
++
++	It("puts the usage so far on every chunk of a tool-call stream, counting the tool tokens", func() {
++		addr, _ := serverFor(common.ModeRandom, "20ms")
++		toolChunks := 0
++		for i, c := range readChunks(addr, toolsBody(continuous)) {
++			Expect(c.usage).NotTo(BeNil(), "chunk %d has no usage: %s", i, c.raw)
++			if c.toolCall {
++				toolChunks++
++				Expect(c.usage["completion_tokens"]).To(Equal(float64(toolChunks)), "the n-th tool chunk reports n tokens")
++			}
++		}
++		Expect(toolChunks).To(BeNumerically(">", 1))
++	})
++
++	It("puts the usage so far on the finish chunk of a cache_threshold answer, which has no tokens", func() {
++		finish := 0
++		for i, c := range readChunks(addr, chatBody(8, continuous), "X-Cache-Threshold-Finish-Reason: true") {
++			Expect(c.usage).NotTo(BeNil(), "chunk %d has no usage: %s", i, c.raw)
++			if c.finish == "cache_threshold" {
++				finish++
++			}
++		}
++		Expect(finish).To(BeNumerically(">", 0), "no chunk finished with cache_threshold")
++	})
++
++	It("puts the usage so far on the image chunk of an omni answer", func() {
++		addr, _ := serverFor(common.ModeRandom, "20ms", "--omni")
++		images := 0
++		for i, c := range readChunks(addr, chatBody(8, continuous), "X-Send-Image: true") {
++			Expect(c.usage).NotTo(BeNil(), "chunk %d has no usage: %s", i, c.raw)
++			if c.modality == "image" {
++				images++
++			}
++		}
++		Expect(images).To(Equal(1), "one image chunk")
++	})
++})
++
++var _ = Describe("clientLink.stamp", func() {
++	state := func() *streamState {
++		return &streamState{continuousUsage: true, prompt: &api.Usage{PromptTokens: 7}, completion: 3}
++	}
++	stamped := func(c sseChunk) *api.Usage {
++		switch v := c.(*jsonDataChunk).data.(type) {
++		case *api.ChatCompletionsRespChunk:
++			return v.Usage
++		case **api.ChatCompletionsRespChunk:
++			return (*v).Usage
++		}
++		return nil
++	}
++
++	It("stamps a chat chunk whether the data is boxed once or twice", func() {
++		for _, boxed := range []func(*api.ChatCompletionsRespChunk) any{
++			func(cc *api.ChatCompletionsRespChunk) any { return cc },
++			func(cc *api.ChatCompletionsRespChunk) any { return &cc },
++		} {
++			u := stamped(state().stamp(&jsonDataChunk{data: boxed(&api.ChatCompletionsRespChunk{})}))
++			Expect(u).NotTo(BeNil())
++			Expect([]int{u.PromptTokens, u.CompletionTokens, u.TotalTokens}).To(Equal([]int{7, 3, 10}))
++		}
++	})
++
++	It("leaves alone what is not a chat chunk: nothing, the [DONE] marker, other data", func() {
++		s := state()
++		Expect(s.stamp(nil)).To(BeNil())
++		done := &doneMarker{}
++		Expect(s.stamp(done)).To(BeIdenticalTo(done))
++		other := &jsonDataChunk{data: map[string]string{"a": "b"}}
++		Expect(s.stamp(other)).To(BeIdenticalTo(other))
++		Expect(other.data).To(Equal(map[string]string{"a": "b"}))
++	})
++
++	It("leaves a chat chunk alone when the client did not ask for the usage", func() {
++		s := state()
++		s.continuousUsage = false
++		Expect(stamped(s.stamp(&jsonDataChunk{data: &api.ChatCompletionsRespChunk{}}))).To(BeNil())
++	})
++})
++
++var _ = Describe("ContinuousUsageStats of a chat request", func() {
++	ask := func(opts *api.StreamOptions) bool {
++		req := &api.ChatCompletionsRequest{}
++		req.StreamOptions = opts
++		return req.ContinuousUsageStats()
++	}
++
++	It("needs stream_options with both include_usage and continuous_usage_stats, as vLLM does", func() {
++		Expect(ask(nil)).To(BeFalse())
++		Expect(ask(&api.StreamOptions{ContinuousUsageStats: true})).To(BeFalse())
++		Expect(ask(&api.StreamOptions{IncludeUsage: true})).To(BeFalse())
++		Expect(ask(&api.StreamOptions{IncludeUsage: true, ContinuousUsageStats: true})).To(BeTrue())
++	})
++})
++
++var _ = Describe("newClientLink", func() {
++	It("asks for no continuous usage of a request that cannot carry stream_options", func() {
++		Expect(newClientLink(nil).continuousUsage).To(BeFalse()) // a nil Request is not a continuousUsageRequester
++	})
++})
++
++// tcpPair returns a connected pair: the server's side of a connection, and the client's.
++func tcpPair() (server, client *net.TCPConn) {
++	l, err := net.Listen("tcp4", "127.0.0.1:0")
++	Expect(err).NotTo(HaveOccurred())
++	defer l.Close() //nolint:errcheck
++	dialed := make(chan *net.TCPConn, 1)
++	go func() {
++		c, err := net.Dial("tcp4", l.Addr().String())
++		if err != nil {
++			dialed <- nil
++			return
++		}
++		dialed <- c.(*net.TCPConn)
++	}()
++	accepted, err := l.Accept()
++	Expect(err).NotTo(HaveOccurred())
++	client = <-dialed
++	Expect(client).NotTo(BeNil())
++	DeferCleanup(func() { accepted.Close(); client.Close() }) //nolint:errcheck
++	return accepted.(*net.TCPConn), client
++}
++
++// brokenConn is a connection whose socket cannot be looked at.
++type brokenConn struct{ net.Conn }
++
++func (brokenConn) SyscallConn() (syscall.RawConn, error) { return nil, errors.New("no socket") }
++
++var _ = Describe("peerGone", func() {
++	// look runs peerGone and fails the spec if it blocks: it must never wait for the socket
++	look := func(conn net.Conn) bool {
++		res := make(chan bool, 1)
++		go func() {
++			defer GinkgoRecover() // a panic in peerGone fails this spec, it does not end the run
++			res <- peerGone(conn)
++		}()
++		var gone bool
++		Eventually(res, "1s").Should(Receive(&gone))
++		return gone
++	}
++
++	It("is false for a connection whose client is there and silent, and does not block on it", func() {
++		server, _ := tcpPair()
++		Expect(look(server)).To(BeFalse())
++	})
++
++	It("is false while the client has sent something, and does not consume it", func() {
++		server, client := tcpPair()
++		_, err := client.Write([]byte("x"))
++		Expect(err).NotTo(HaveOccurred())
++		time.Sleep(100 * time.Millisecond) // on loopback it has arrived long before this
++		Expect(look(server)).To(BeFalse())
++		Expect(look(server)).To(BeFalse())
++		Expect(server.SetReadDeadline(time.Now().Add(time.Second))).To(Succeed())
++		buf := make([]byte, 1)
++		n, err := server.Read(buf)
++		Expect(err).NotTo(HaveOccurred())
++		Expect(n).To(Equal(1), "the byte was consumed by the look")
++	})
++
++	It("is true once the client has closed its side", func() {
++		server, client := tcpPair()
++		Expect(client.Close()).To(Succeed())
++		Eventually(func() bool { return look(server) }, "1s", "10ms").Should(BeTrue())
++	})
++
++	It("is true once the client has reset the connection", func() {
++		server, client := tcpPair()
++		Expect(client.SetLinger(0)).To(Succeed()) // close sends a RST, not a FIN
++		Expect(client.Close()).To(Succeed())
++		time.Sleep(100 * time.Millisecond) // on loopback it has arrived long before this
++		// the first look after a reset gets ECONNRESET (the next ones get "closed"): the error itself must say "gone"
++		Expect(look(server)).To(BeTrue())
++	})
++
++	It("is true for a connection this side has closed", func() {
++		server, _ := tcpPair()
++		Expect(server.Close()).To(Succeed())
++		Expect(look(server)).To(BeTrue())
++	})
++
++	It("is false while a read deadline has passed: cmux sets one while it sniffs a new connection", func() {
++		server, client := tcpPair()
++		Expect(client.Close()).To(Succeed()) // even for a client that has gone: the deadline is not a hang-up
++		Expect(server.SetReadDeadline(time.Now().Add(-time.Second))).To(Succeed())
++		Expect(look(server)).To(BeFalse())
++	})
++
++	It("looks inside cmux's connection", func() {
++		server, client := tcpPair()
++		Expect(client.Close()).To(Succeed())
++		wrapped := &cmux.MuxConn{Conn: server}
++		Eventually(func() bool { return look(wrapped) }, "1s", "10ms").Should(BeTrue())
++	})
++
++	It("is false for a connection it cannot look at: TLS or a pipe (no socket), a socket that will not open", func() {
++		a, b := net.Pipe()
++		DeferCleanup(func() { a.Close(); b.Close() }) //nolint:errcheck
++		Expect(b.Close()).To(Succeed())               // even a pipe whose other side has gone
++		Expect(look(a)).To(BeFalse())
++		server, client := tcpPair()
++		Expect(client.Close()).To(Succeed())
++		Expect(look(brokenConn{server})).To(BeFalse())
++	})
++})
+diff --git a/pkg/communication/http.go b/pkg/communication/http.go
+index c3bf91b..ecec59f 100644
+--- a/pkg/communication/http.go
++++ b/pkg/communication/http.go
+@@ -22,6 +22,7 @@ import (
+ 	"compress/gzip"
+ 	"context"
+ 	"encoding/json"
++	"errors"
+ 	"fmt"
+ 	"io"
+ 	"net"
+@@ -274,22 +275,27 @@ func (c *Communication) handleHTTP(req simulator.Request, respBuilder responseBu
+ 		req.SetSendImage(sendImg)
+ 	}
+ 
+-	numChoices, isStream, channel, err, errInjected := c.simulator.HandleRequest(req)
++	// The request lives as long as its client does (carmonai patch): link.ctx is done when the client hangs up, or
++	// when the response is complete. Done stops the generation; stock v0.11.4 ran every request to its end.
++	link := newClientLink(req)
++	numChoices, isStream, channel, err, errInjected := c.simulator.HandleRequestCtx(link.ctx, req)
+ 	if err != nil {
+-		c.sendError(ctx, err, errInjected)
++		c.sendError(ctx, err, errInjected) // refused before a sub-request exists: nothing holds link.ctx
+ 		return
+ 	}
++	go c.watchClient(ctx.Conn(), link)
+ 
+ 	c.logger.V(logging.DEBUG).Info("Received", "new HTTP", req.AsString())
+ 
+ 	c.addResponseHeaders(ctx, req.GetRequestID())
+ 
+ 	if isStream {
+-		c.handleStream(ctx, *channel, respBuilder, numChoices)
++		c.handleStream(ctx, *channel, respBuilder, numChoices, link)
+ 	} else {
++		defer link.stop()
+ 		ctx.SetStatusCode(fasthttp.StatusOK)
+ 		ctx.SetContentType("application/json")
+-		c.sendNonStream(ctx, *channel, respBuilder, numChoices)
++		c.sendNonStream(ctx, *channel, respBuilder, numChoices, link)
+ 	}
+ }
+ 
+@@ -301,9 +307,16 @@ func (c *Communication) handleHTTP(req simulator.Request, respBuilder responseBu
+ // error caught only once processing starts) still be reported with its real
+ // HTTP status instead of being forced into a 200 SSE error frame.
+ func (c *Communication) handleStream(ctx *fasthttp.RequestCtx, channel common.Channel[*simulator.ResponseInfo],
+-	respBuilder responseBuilder, numChoices int) {
+-	first := <-channel.Channel
++	respBuilder responseBuilder, numChoices int, link *clientLink) {
++	first, open := <-channel.Channel
++	if !open {
++		// Closed with nothing in it: the client left while the request waited or was being prefilled.
++		link.stop()
++		ctx.SetStatusCode(statusClientClosedRequest)
++		return
++	}
+ 	if first != nil && first.Err != nil {
++		link.stop()
+ 		go drainResponseChannel(channel)
+ 		c.sendError(ctx, first.Err, false)
+ 		return
+@@ -312,11 +325,11 @@ func (c *Communication) handleStream(ctx *fasthttp.RequestCtx, channel common.Ch
+ 	ctx.SetStatusCode(fasthttp.StatusOK)
+ 	ctx.SetContentType("text/event-stream")
+ 
+-	c.sendStream(ctx, channel, respBuilder, numChoices, first)
++	c.sendStream(ctx, channel, respBuilder, numChoices, first, link)
+ }
+ 
+ func (c *Communication) sendNonStream(ctx *fasthttp.RequestCtx, channel common.Channel[*simulator.ResponseInfo],
+-	respBuilder responseBuilder, numChoices int) {
++	respBuilder responseBuilder, numChoices int, link *clientLink) {
+ 	tokens := make([]api.Tokenized, numChoices)
+ 	for i := range tokens {
+ 		tokens[i] = api.Tokenized{
+@@ -340,6 +353,9 @@ func (c *Communication) sendNonStream(ctx *fasthttp.RequestCtx, channel common.C
+ 			respCtxPerChoice[response.ChoiceIdx] = response.RespCtx
+ 		}
+ 	}
++	if link.gone() {
++		return // the client left; the generation stopped and nobody is waiting for an answer
++	}
+ 
+ 	for choiceIdx, rc := range respCtxPerChoice {
+ 		if rc == nil {
+@@ -386,6 +402,10 @@ type streamState struct {
+ 	lastToolCall     []*api.ToolCall
+ 	toolCallIndex    []int
+ 	respCtxPerChoice []simulator.ResponseContext
++	// continuousUsage: every chunk carries the usage so far (stream_options.continuous_usage_stats)
++	continuousUsage bool
++	prompt          *api.Usage // the request's usage: prompt tokens and cached prompt tokens
++	completion      int        // tokens sent so far, over all choices
+ }
+ 
+ // newStreamState allocates per-choice slices for numChoices choices. The
+@@ -413,21 +433,27 @@ func (c *Communication) sendOrFail(ctx *fasthttp.RequestCtx, w *bufio.Writer, ch
+ 		return true
+ 	}
+ 	if err := c.sendChunk(w, chunk); err != nil {
+-		c.chunkSendFailed(ctx, failMsg, err)
++		// A closed pipe is a client that hung up (fasthttp closed the body stream): nobody to tell.
++		if !errors.Is(err, io.ErrClosedPipe) {
++			c.chunkSendFailed(ctx, failMsg, err)
++		}
+ 		return false
+ 	}
+ 	return true
+ }
+ 
+ func (c *Communication) sendStream(ctx *fasthttp.RequestCtx, channel common.Channel[*simulator.ResponseInfo],
+-	respBuilder responseBuilder, numChoices int, first *simulator.ResponseInfo) {
++	respBuilder responseBuilder, numChoices int, first *simulator.ResponseInfo, link *clientLink) {
+ 	pr, pw := io.Pipe()
+ 
+ 	go func() {
+ 		w := bufio.NewWriter(pw)
+ 		var respCtx simulator.ResponseContext
+ 		state := newStreamState(numChoices)
++		state.continuousUsage = link.continuousUsage
+ 
++		// However the stream ends (complete, failed, client gone) the request is over: stop generating for it.
++		defer link.stop()
+ 		defer func() {
+ 			w.Flush()  //nolint:errcheck
+ 			pw.Close() //nolint:errcheck
+@@ -456,6 +482,7 @@ func (c *Communication) sendStream(ctx *fasthttp.RequestCtx, channel common.Chan
+ 			if state.first {
+ 				respCtx = response.RespCtx
+ 				respCtx.SetCreationTime(time.Now().Unix())
++				state.prompt = respCtx.UsageData()
+ 				state.first = false
+ 			}
+ 
+@@ -487,6 +514,10 @@ func (c *Communication) sendStream(ctx *fasthttp.RequestCtx, channel common.Chan
+ 			}
+ 		}
+ 
++		if link.gone() {
++			return // the client left and the generation stopped: nobody to send the rest to
++		}
++
+ 		for choiceIdx, rc := range state.respCtxPerChoice {
+ 			if rc == nil {
+ 				err := api.NewError(fmt.Sprintf("Response body creation failed: no tokens for choice index: %d", choiceIdx),
+@@ -498,7 +529,7 @@ func (c *Communication) sendStream(ctx *fasthttp.RequestCtx, channel common.Chan
+ 
+ 		if respCtx.SendImage() {
+ 			for i := range state.respCtxPerChoice {
+-				if !c.sendOrFail(ctx, w, respBuilder.createImageChunk(respCtx, i), "Sending image chunk failed, ") {
++				if !c.sendOrFail(ctx, w, state.stamp(respBuilder.createImageChunk(respCtx, i)), "Sending image chunk failed, ") {
+ 					return
+ 				}
+ 			}
+@@ -521,11 +552,12 @@ func (c *Communication) emitResponseChunks(ctx *fasthttp.RequestCtx, w *bufio.Wr
+ 	if response.Tokens != nil {
+ 		// In chat completion the first chunk contains the role.
+ 		if state.firstTokens[choiceIdx] {
+-			if !c.sendOrFail(ctx, w, respBuilder.createFirstChunk(respCtx, choiceIdx), "Sending first stream chunk failed, ") {
++			if !c.sendOrFail(ctx, w, state.stamp(respBuilder.createFirstChunk(respCtx, choiceIdx)), "Sending first stream chunk failed, ") {
+ 				return false, false
+ 			}
+ 			state.firstTokens[choiceIdx] = false
+ 		}
++		state.completion++
+ 		if response.ToolCall != nil {
+ 			if state.lastToolCall[choiceIdx] != response.ToolCall {
+ 				state.toolCallIndex[choiceIdx] = 0
+@@ -533,7 +565,7 @@ func (c *Communication) emitResponseChunks(ctx *fasthttp.RequestCtx, w *bufio.Wr
+ 				state.toolCallIndex[choiceIdx]++
+ 			}
+ 			if err := c.sendStreamedTools(respCtx, respBuilder, w, response.Tokens.Strings, response.ToolCall,
+-				state.toolCallIndex[choiceIdx], choiceIdx); err != nil {
++				state.toolCallIndex[choiceIdx], choiceIdx, state); err != nil {
+ 				c.chunkSendFailed(ctx, "Sending tools chunk failed, ", err)
+ 				return false, false
+ 			}
+@@ -545,13 +577,13 @@ func (c *Communication) emitResponseChunks(ctx *fasthttp.RequestCtx, w *bufio.Wr
+ 		if lastTokensChunk && respBuilder.sendFinishReasonWithTokens() {
+ 			finishReason = respCtx.FinishReason()
+ 		}
+-		return c.sendOrFail(ctx, w, respBuilder.createChunk(respCtx, response.Tokens, nil, "", finishReason, choiceIdx),
++		return c.sendOrFail(ctx, w, state.stamp(respBuilder.createChunk(respCtx, response.Tokens, nil, "", finishReason, choiceIdx)),
+ 			"Sending stream chunk failed, "), false
+ 	}
+ 
+ 	if respCtx.FinishReason() != nil && *respCtx.FinishReason() == common.CacheThresholdFinishReason {
+ 		// No tokens to stream but we still need to emit a finish chunk for cache_threshold.
+-		return c.sendOrFail(ctx, w, respBuilder.createChunk(respCtx, nil, nil, "", respCtx.FinishReason(), choiceIdx),
++		return c.sendOrFail(ctx, w, state.stamp(respBuilder.createChunk(respCtx, nil, nil, "", respCtx.FinishReason(), choiceIdx)),
+ 			"Sending finish chunk failed, "), true
+ 	}
+ 
+@@ -565,7 +597,7 @@ func (c *Communication) emitResponseChunks(ctx *fasthttp.RequestCtx, w *bufio.Wr
+ func (c *Communication) finalizeStream(ctx *fasthttp.RequestCtx, w *bufio.Writer, respBuilder responseBuilder,
+ 	state *streamState, respContext simulator.ResponseContext) {
+ 	for i, rc := range state.respCtxPerChoice {
+-		if !c.sendOrFail(ctx, w, respBuilder.createLastChunk(respContext, *rc.FinishReason(), i),
++		if !c.sendOrFail(ctx, w, state.stamp(respBuilder.createLastChunk(respContext, *rc.FinishReason(), i)),
+ 			"Sending last stream chunk failed, ") {
+ 			return
+ 		}
+@@ -586,7 +618,7 @@ func (c *Communication) chunkSendFailed(ctx *fasthttp.RequestCtx, msg string, er
+ }
+ 
+ func (c *Communication) sendStreamedTools(respCtx simulator.ResponseContext, respBuilder responseBuilder,
+-	w *bufio.Writer, tokens []string, tc *api.ToolCall, index int, choiceIdx int) error {
++	w *bufio.Writer, tokens []string, tc *api.ToolCall, index int, choiceIdx int, state *streamState) error {
+ 	tokensStr := strings.Join(tokens, "")
+ 
+ 	toolChunkInsert := &api.ToolCall{
+@@ -607,7 +639,7 @@ func (c *Communication) sendStreamedTools(respCtx simulator.ResponseContext, res
+ 		*respCtx.FinishReason() == common.CacheThresholdFinishReason) {
+ 		finishReasonToSend = respCtx.FinishReason()
+ 	}
+-	return c.sendChunk(w, respBuilder.createChunk(respCtx, nil, toolChunkInsert, "", finishReasonToSend, choiceIdx))
++	return c.sendChunk(w, state.stamp(respBuilder.createChunk(respCtx, nil, toolChunkInsert, "", finishReasonToSend, choiceIdx)))
+ }
+ 
+ func (c *Communication) sendChunk(w *bufio.Writer, chunk sseChunk) error {
+diff --git a/pkg/communication/send_response_test.go b/pkg/communication/send_response_test.go
+index cdf9812..331f266 100644
+--- a/pkg/communication/send_response_test.go
++++ b/pkg/communication/send_response_test.go
+@@ -87,7 +87,7 @@ var _ = Describe("sendNonStream missing-choice guard", func() {
+ 
+ 		c := &Communication{logger: klog.Background()}
+ 		httpCtx := &fasthttp.RequestCtx{}
+-		c.sendNonStream(httpCtx, filtered, nil, numChoices)
++		c.sendNonStream(httpCtx, filtered, nil, numChoices, testLink(false))
+ 
+ 		Expect(httpCtx.Response.StatusCode()).To(Equal(fasthttp.StatusInternalServerError))
+ 		Expect(string(httpCtx.Response.Body())).To(ContainSubstring("no tokens for choice index: 1"))
+@@ -145,7 +145,7 @@ var _ = Describe("sendStream missing-choice guard", func() {
+ 		httpCtx.SetStatusCode(fasthttp.StatusOK)
+ 		httpCtx.SetContentType("text/event-stream")
+ 
+-		c.sendStream(httpCtx, filtered, &textComplHTTPRespBuilder{}, numChoices, first)
++		c.sendStream(httpCtx, filtered, &textComplHTTPRespBuilder{}, numChoices, first, testLink(false))
+ 
+ 		// sendStream's own goroutine runs concurrently with this one. Hitting the
+ 		// nil-check calls sendError, whose SetBody closes the response's body
+diff --git a/pkg/simulator/context.go b/pkg/simulator/context.go
+index d688514..bb10515 100644
+--- a/pkg/simulator/context.go
++++ b/pkg/simulator/context.go
+@@ -252,7 +252,20 @@ func (s *SimContext) getDisplayedModelName(reqModel string) string {
+ 	return s.Config().ServedModelNames[0]
+ }
+ 
+-func (s *SimContext) simulateTTFT(respCtx ResponseContext) {
++// sleepCtx waits for d or until ctx is done; false means ctx was done first (the client is gone). With a zero d and a
++// done ctx either may win: a zero delay is not a profile any drill runs.
++func sleepCtx(ctx context.Context, d time.Duration) bool {
++	t := time.NewTimer(d) // no Stop: go.mod says go 1.26, which collects an unreferenced timer
++	select {
++	case <-t.C:
++		return true
++	case <-ctx.Done():
++		return false
++	}
++}
++
++// simulateTTFT returns false if the client left before the first token.
++func (s *SimContext) simulateTTFT(ctx context.Context, respCtx ResponseContext) bool {
+ 	startPrefill := time.Now()
+ 	// time to first token delay
+ 	params := TTFTParams{
+@@ -262,10 +275,13 @@ func (s *SimContext) simulateTTFT(respCtx ResponseContext) {
+ 		RunningReqs:        s.metrics.nRunningReqs.Load(),
+ 	}
+ 	ttft := s.latencyCalc().GetTimeToFirstToken(&params)
+-	time.Sleep(ttft)
++	if !sleepCtx(ctx, ttft) {
++		return false
++	}
+ 	// report ttft in seconds
+ 	common.WriteToChannel(s.metrics.ttftChan, ttft.Seconds(), s.logger)
+ 	common.WriteToChannel(s.metrics.reqPrefillTimeChan, time.Since(startPrefill).Seconds(), s.logger)
++	return true
+ }
+ 
+ func (s *SimContext) simulateImageGenerationLatency() {
+@@ -275,13 +291,17 @@ func (s *SimContext) simulateImageGenerationLatency() {
+ 	}
+ }
+ 
+-func (s *SimContext) simulateInterTokenLatency() {
++// simulateInterTokenLatency returns false if the client left before the next token.
++func (s *SimContext) simulateInterTokenLatency(ctx context.Context) bool {
+ 	perTokenLatency := s.latencyCalc().GetInterTokenLatency(&InterTokenParams{
+ 		RunningReqs: s.metrics.nRunningReqs.Load()})
+-	time.Sleep(perTokenLatency)
++	if !sleepCtx(ctx, perTokenLatency) {
++		return false
++	}
+ 
+ 	// report tpot in seconds
+ 	common.WriteToChannel(s.metrics.tpotChan, perTokenLatency.Seconds(), s.logger)
++	return true
+ }
+ 
+ // CreateModelsResponse creates and returns ModelResponse for the current state, returned array of models contains the base model + LoRA adapters if exist
+diff --git a/pkg/simulator/disconnect_test.go b/pkg/simulator/disconnect_test.go
+new file mode 100644
+index 0000000..d4f5b99
+--- /dev/null
++++ b/pkg/simulator/disconnect_test.go
+@@ -0,0 +1,85 @@
++/*
++Copyright 2025 The llm-d-inference-sim Authors.
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++    http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++// Carmonai patch (docker/sim/disconnect.patch): the simulated sleeps and the waiting queue follow the client.
++// The end-to-end specs of a hang-up are in pkg/communication/disconnect_test.go.
++
++package simulator
++
++import (
++	"context"
++	"sync"
++	"time"
++
++	. "github.com/onsi/ginkgo/v2"
++	. "github.com/onsi/gomega"
++)
++
++var _ = Describe("sleepCtx", func() {
++	// ask runs sleepCtx and fails the spec if it does not return within a second (a wrong one would sleep for d)
++	ask := func(ctx context.Context, d time.Duration) bool {
++		res := make(chan bool, 1)
++		go func() { res <- sleepCtx(ctx, d) }()
++		var ok bool
++		Eventually(res, "1s").Should(Receive(&ok))
++		return ok
++	}
++
++	It("is false at once for a context that is done, whatever the delay", func() {
++		ctx, cancel := context.WithCancel(context.Background())
++		cancel()
++		Expect(ask(ctx, time.Hour)).To(BeFalse())
++	})
++
++	It("is false as soon as the context is done while it waits", func() {
++		ctx, cancel := context.WithCancel(context.Background())
++		time.AfterFunc(30*time.Millisecond, cancel)
++		Expect(ask(ctx, time.Hour)).To(BeFalse())
++	})
++
++	It("waits the whole delay on a context that stays live, and is true", func() {
++		start := time.Now()
++		Expect(ask(context.Background(), 40*time.Millisecond)).To(BeTrue())
++		Expect(time.Since(start)).To(BeNumerically(">=", 40*time.Millisecond))
++		Expect(ask(context.Background(), 0)).To(BeTrue())
++	})
++})
++
++var _ = Describe("a waiting request whose client leaves", func() {
++	count := func(m *sync.Map) (n int) {
++		m.Range(func(_, _ any) bool { n++; return true })
++		return n
++	}
++
++	It("leaves waiting_lora_adapters, and running_lora_adapters is not touched", func() {
++		sim := newHandleRequestTestSim(context.Background(), 4, "--lora-modules", `{"name":"lora1","path":"/path/to/lora1"}`)
++		sim.queueCapacity = 4 // InitializeSim sets it, and the test sim skips that
++		ctx, cancel := context.WithCancel(context.Background())
++		DeferCleanup(cancel)
++		req := newTextCompletionsRequestWithChoices("lora-wait", 1)
++		req.Model = "lora1"
++		_, _, respChan, topErr, _ := sim.HandleRequestCtx(ctx, req)
++		Expect(topErr).To(BeNil())
++		sim.addRequestToQueue(<-sim.newRequests.Channel) // no worker takes it: it waits
++
++		Eventually(func() int { return count(&sim.Context.metrics.waitingLoras) }, "1s", "10ms").Should(Equal(1))
++		cancel()
++
++		Eventually(respChan.Channel, "1s").Should(BeClosed()) // dropWaiting signalled done
++		Eventually(func() int { return count(&sim.Context.metrics.waitingLoras) }, "1s", "10ms").Should(BeZero())
++		Expect(count(&sim.Context.metrics.runningLoras)).To(BeZero())
++	})
++})
+diff --git a/pkg/simulator/metrics.go b/pkg/simulator/metrics.go
+index 6462ef6..973c10a 100644
+--- a/pkg/simulator/metrics.go
++++ b/pkg/simulator/metrics.go
+@@ -64,6 +64,8 @@ const (
+ 	waitingUsageState loraUsageState = iota
+ 	runningUsageState
+ 	doneUsageState
++	// droppedUsageState: a waiting request left the queue without ever running (carmonai patch)
++	droppedUsageState
+ )
+ 
+ type loraUsageState int
+@@ -693,6 +695,8 @@ func (s *SimContext) lorasUpdater(ctx context.Context) {
+ 				s.incrementLoraRefCount(loraUpdate.name, &s.metrics.runningLoras)
+ 			case doneUsageState:
+ 				s.decrementLoraRefCount(loraUpdate.name, &s.metrics.runningLoras)
++			case droppedUsageState:
++				s.decrementLoraRefCount(loraUpdate.name, &s.metrics.waitingLoras)
+ 			}
+ 			s.reportLoras()
+ 		}
+diff --git a/pkg/simulator/request.go b/pkg/simulator/request.go
+index eb7c5ee..5ab92ae 100644
+--- a/pkg/simulator/request.go
++++ b/pkg/simulator/request.go
+@@ -17,6 +17,7 @@ limitations under the License.
+ package simulator
+ 
+ import (
++	"context"
+ 	"fmt"
+ 	"time"
+ 
+@@ -76,6 +77,9 @@ type requestContext interface {
+ 	encode() ([]uint32, []string, *api.RenderMMFeatures, error)
+ 	choiceIndex() int
+ 	signalDone()
++	// cancelCtx is done once the client of the request has gone (carmonai patch)
++	cancelCtx() context.Context
++	setCancelCtx(ctx context.Context)
+ }
+ 
+ type baseRequestContext struct {
+@@ -85,6 +89,8 @@ type baseRequestContext struct {
+ 	respChannel     common.Channel[*ResponseInfo]
+ 	idx             int
+ 	doneFn          func()
++	// cancel is done once the client has gone; HandleRequestCtx sets it on every request context it builds
++	cancel context.Context
+ }
+ 
+ func newBaseRequestContext(simCtx *SimContext, channel common.Channel[*ResponseInfo], choiceIdx int, doneFn func()) baseRequestContext {
+@@ -111,6 +117,14 @@ func (b *baseRequestContext) signalDone() {
+ 	}
+ }
+ 
++func (b *baseRequestContext) cancelCtx() context.Context {
++	return b.cancel
++}
++
++func (b *baseRequestContext) setCancelCtx(ctx context.Context) {
++	b.cancel = ctx
++}
++
+ func (b *baseRequestContext) startProcessingTime() time.Time {
+ 	return b.startProcessing
+ }
+diff --git a/pkg/simulator/simulator.go b/pkg/simulator/simulator.go
+index 797236d..742aafc 100644
+--- a/pkg/simulator/simulator.go
++++ b/pkg/simulator/simulator.go
+@@ -333,6 +333,11 @@ func (s *Simulator) addRequestToQueue(reqCtx requestContext) {
+ 	}
+ 	// increment the waiting requests metric
+ 	common.WriteToChannel(s.Context.metrics.waitingReqChan, common.MetricInfo{Value: 1}, s.Context.logger)
++	// a waiting request whose client leaves frees its place in the queue at once (carmonai patch)
++	// ponytail: the callback also runs, and finds nothing to drop, for a request that waited and then ran to its end
++	// (one short goroutine per queued request); call the stop func of AfterFunc when a worker takes the request
++	// if that ever shows in a profile.
++	context.AfterFunc(reqCtx.cancelCtx(), func() { s.dropWaiting(reqCtx) })
+ 	// update loraInfo metrics with the new waiting request
+ 	if s.Context.isLora(reqCtx.request().GetDisplayedModel()) {
+ 		common.WriteToChannel(s.Context.metrics.lorasChan, loraUsage{reqCtx.request().GetDisplayedModel(), waitingUsageState},
+@@ -340,6 +345,29 @@ func (s *Simulator) addRequestToQueue(reqCtx requestContext) {
+ 	}
+ }
+ 
++// dropWaiting takes a request out of the waiting queue because its client has gone. A request that a worker
++// already took is not in the queue; the worker stops it (processRequest).
++func (s *Simulator) dropWaiting(reqCtx requestContext) {
++	s.queueLock.Lock()
++	found := false
++	for elem := s.waitingQueue.Front(); elem != nil; elem = elem.Next() {
++		if elem.Value.(waitingQueueItem).reqCtx == reqCtx { // the queue holds nothing else
++			s.waitingQueue.Remove(elem) // clears elem.next: the loop ends here
++			found = true
++		}
++	}
++	s.queueLock.Unlock()
++	if !found {
++		return
++	}
++	common.WriteToChannel(s.Context.metrics.waitingReqChan, common.MetricInfo{Value: -1}, s.Context.logger)
++	if model := reqCtx.request().GetDisplayedModel(); s.Context.isLora(model) {
++		common.WriteToChannel(s.Context.metrics.lorasChan, loraUsage{model, droppedUsageState}, s.Context.logger)
++	}
++	// no response was produced: signalDone lets the response channel close
++	reqCtx.signalDone()
++}
++
+ // HandleRequest validates and enqueues req. On success it returns the number
+ // of sub-requests (== number of choices in the eventual response), whether the
+ // caller asked for a streamed response, and the channel that workers will
+@@ -347,6 +375,14 @@ func (s *Simulator) addRequestToQueue(reqCtx requestContext) {
+ // non-nil error; errInjected indicates whether the failure came from the
+ // failure-injection path so the caller can attribute it correctly.
+ func (s *Simulator) HandleRequest(req Request) (numChoices int, isStream bool,
++	channel *common.Channel[*ResponseInfo], err *api.Error, errInjected bool) {
++	return s.HandleRequestCtx(context.Background(), req)
++}
++
++// HandleRequestCtx is HandleRequest for a client that can hang up: once ctx is done a waiting request leaves
++// the queue and a running one stops generating at its next token (carmonai patch; stock v0.11.4 ran every
++// request to its end whether or not anyone was listening).
++func (s *Simulator) HandleRequestCtx(ctx context.Context, req Request) (numChoices int, isStream bool,
+ 	channel *common.Channel[*ResponseInfo], err *api.Error, errInjected bool) {
+ 	// Check if we should inject a failure
+ 	if shouldInjectFailure(s.Context.Config(), s.Context.Random) {
+@@ -386,6 +422,7 @@ func (s *Simulator) HandleRequest(req Request) (numChoices int, isStream bool,
+ 	wg.Add(len(subReqs))
+ 	for i, subReq := range subReqs {
+ 		reqCtx := subReq.buildRequestContext(&s.Context, *respChan, i, wg.Done)
++		reqCtx.setCancelCtx(ctx)
+ 		if err := common.WriteToChannelWithError(s.newRequests, reqCtx); err != nil {
+ 			s.Context.logger.Error(err, "failed to enqueue request")
+ 			err := api.NewError("Failed to enqueue request, "+err.Error(),
+@@ -446,15 +483,30 @@ func (s *Simulator) dequeue() requestContext {
+ 	return nil
+ }
+ 
+-func (s *Simulator) simulateResponseProcessing(respCtx ResponseContext) {
++// processingOutcome says how far simulateResponseProcessing got.
++type processingOutcome struct {
++	// cancelled: the client left, so nothing more was generated
++	cancelled bool
++	// prefilled: the first-token delay elapsed, i.e. the prompt was processed
++	prefilled bool
++	// generated is the number of tokens produced (sent to the response channel)
++	generated int
++}
++
++func (s *Simulator) simulateResponseProcessing(respCtx ResponseContext) (out processingOutcome) {
+ 	reqCtx := respCtx.RequestContext()
++	ctx := reqCtx.cancelCtx()
+ 	choiceIdx := reqCtx.choiceIndex()
+ 	// Skip delays if finish reason is cache_threshold (immediate return)
+ 	if respCtx.FinishReason() != nil && *respCtx.FinishReason() == common.CacheThresholdFinishReason {
+ 		common.WriteToChannel(reqCtx.responseChannel(), &ResponseInfo{RespCtx: respCtx, ChoiceIdx: choiceIdx},
+ 			s.Context.logger)
+ 	} else {
+-		s.Context.simulateTTFT(respCtx)
++		if !s.Context.simulateTTFT(ctx, respCtx) {
++			out.cancelled = true
++			return out
++		}
++		out.prefilled = true
+ 
+ 		// Response started
+ 		common.WriteToChannel(reqCtx.responseChannel(),
+@@ -470,7 +522,10 @@ func (s *Simulator) simulateResponseProcessing(respCtx ResponseContext) {
+ 			if respCtx.responseTokens() != nil {
+ 				for i, token := range respCtx.responseTokens().Tokens {
+ 					if i != 0 {
+-						s.Context.simulateInterTokenLatency()
++						if !s.Context.simulateInterTokenLatency(ctx) {
++							out.cancelled = true
++							return out
++						}
+ 						nTokens++
+ 					}
+ 
+@@ -486,6 +541,7 @@ func (s *Simulator) simulateResponseProcessing(respCtx ResponseContext) {
+ 						respInfo.Status = ResponseEndOfTokens
+ 					}
+ 					common.WriteToChannel(reqCtx.responseChannel(), &respInfo, s.Context.logger)
++					out.generated++
+ 				}
+ 			} else {
+ 				toolCalls := respCtx.ToolCalls()
+@@ -495,7 +551,10 @@ func (s *Simulator) simulateResponseProcessing(respCtx ResponseContext) {
+ 					args := tc.Function.TokenizedArguments()
+ 					for i, token := range args.Tokens {
+ 						if i != 0 {
+-							s.Context.simulateInterTokenLatency()
++							if !s.Context.simulateInterTokenLatency(ctx) {
++								out.cancelled = true
++								return out
++							}
+ 							nTokens++
+ 						}
+ 						respInfo := ResponseInfo{
+@@ -508,6 +567,7 @@ func (s *Simulator) simulateResponseProcessing(respCtx ResponseContext) {
+ 							respInfo.Status = ResponseEndOfTokens
+ 						}
+ 						common.WriteToChannel(reqCtx.responseChannel(), &respInfo, s.Context.logger)
++						out.generated++
+ 					}
+ 				}
+ 			}
+@@ -521,9 +581,12 @@ func (s *Simulator) simulateResponseProcessing(respCtx ResponseContext) {
+ 		common.WriteToChannel(s.Context.metrics.reqDecodeTimeChan, decodeTime, s.Context.logger)
+ 
+ 		if reqCtx.request().SendImage() {
++			// ponytail: not interruptible, as in stock v0.11.4. Omni mode only (not used here), and for a stream the
++			// response is complete by now, so ctx is already done. Upgrade: sleepCtx(ctx, ...) once something needs it.
+ 			s.Context.simulateImageGenerationLatency()
+ 		}
+ 	}
++	return out
+ }
+ 
+ // request processing finished
+diff --git a/pkg/simulator/worker.go b/pkg/simulator/worker.go
+index ea3691f..7ed03d8 100644
+--- a/pkg/simulator/worker.go
++++ b/pkg/simulator/worker.go
+@@ -25,6 +25,9 @@ import (
+ 	"github.com/llm-d/llm-d-inference-sim/pkg/common/logging"
+ )
+ 
++// abortFinishReason is the finish_reason the simulator counts for a request whose client left.
++const abortFinishReason = "abort"
++
+ // worker runs simulators requests
+ type worker struct {
+ 	ctx    context.Context
+@@ -70,7 +73,23 @@ func (s *Simulator) processRequest(reqCtx requestContext) {
+ 		return
+ 	}
+ 
+-	s.simulateResponseProcessing(respCtx)
++	if out := s.simulateResponseProcessing(respCtx); out.cancelled {
++		// The client left (carmonai patch). The simulator's own accounting of an aborted request: the prompt once it was
++		// processed, the tokens produced so far, finish_reason "abort". The repo's own measurement (phase-6-progress.md:39)
++		// left request_success_total{finished_reason="abort"} at 0 on vLLM v0.30.0.
++		s.Context.logger.V(logging.DEBUG).Info("Client gone, request aborted", "id", req.GetRequestID(), "tokens", out.generated)
++		if out.prefilled {
++			common.WriteToChannel(s.Context.metrics.requestSuccessChan,
++				requestSuccessEvent{
++					promptTokens:       respCtx.UsageData().PromptTokens,
++					generationTokens:   out.generated,
++					genTokensPerChoice: []int{out.generated},
++					maxTokens:          req.GetMaxCompletionTokens(),
++					finishReason:       abortFinishReason},
++				s.Context.logger)
++		}
++		return
++	}
+ 	s.Context.logger.V(logging.DEBUG).Info("Finished processing request", "id", req.GetRequestID())
+ 
+ 	common.WriteToChannel(s.Context.metrics.requestSuccessChan,

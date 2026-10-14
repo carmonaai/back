@@ -1,9 +1,13 @@
-# GPU engine on top of compose.yaml, for machines with an NVIDIA GPU (the laptop's RTX 3050 6 GB):
+# The real engine on top of compose.yaml, for machines with an NVIDIA GPU (the laptop's RTX 3050 6 GB):
 #   docker compose -f compose.yaml -f compose.gpu.yaml up -d --build --wait
-#   MODEL=carmonai/qwen3-4b ENGINE=vllm bash smoke.sh
-# vLLM serves Qwen3-4B-Instruct-2507 (4-bit AWQ); inference-service lists it next to the CPU model.
-# CI keeps the CPU engine only: GitHub's runners have no GPU.
+#   ENGINE=vllm bash smoke.sh      # runs the assertions the simulator cannot (engine idle after a hang-up)
+# vLLM serves Qwen3-4B-Instruct-2507 (4-bit AWQ) as the only model, in place of the simulator (profiled out below).
+# CI keeps the simulator: GitHub's runners have no GPU.
 services:
+  # The simulator is the default engine; with the real one it is not started, and nothing may wait for it.
+  engine:
+    profiles: ["simulator-off"]
+
   vllm:
     image: vllm/vllm-openai:v0.30.0@sha256:8a69ffad015f138d7170c4ddc429e230a3bc1c1719f67e14324749df200a4b90
     # Sized for 6 GB, of which Windows keeps ~1 GB for the desktop (vLLM refused 0.85: 5.03 GiB free):
@@ -44,10 +48,13 @@ services:
 
   inference:
     environment:
-      SPRING_PROFILES_ACTIVE: gpu
-      VLLM_URL: http://vllm:8000
-      VLLM_API_KEY: ${VLLM_API_KEY:?set in .env}
-    depends_on:
+      # The same model as the simulator's, at vLLM (the whole list is stated: see compose.yaml). 4 slots and 2 queued
+      # are C and q from the phase-3 bench, the defaults of compose.yaml.
+      CARMONAI_INFERENCE_MODELS_0_URL: http://vllm:8000
+      CARMONAI_INFERENCE_MODELS_0_APIKEY: ${VLLM_API_KEY:?set in .env}
+    depends_on: !override
+      valkey: { condition: service_healthy }
+      usage: { condition: service_healthy }
       vllm: { condition: service_healthy }
 
 volumes:

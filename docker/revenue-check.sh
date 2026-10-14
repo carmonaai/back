@@ -7,8 +7,8 @@
 set -euo pipefail
 DC=(docker compose -f "$(dirname "$0")/compose.yaml")
 
-# The JRE images have no curl; the llama container does (smoke.sh asks the internal network from there too).
-answer=$("${DC[@]}" exec -T llama curl -sS -w '\n%{http_code}' http://billing:8081/actuator/reconcile)
+# The JRE images have no curl; the tools container does (smoke.sh asks the internal network from there too).
+answer=$("${DC[@]}" exec -T tools curl -sS -w '\n%{http_code}' http://billing:8081/actuator/reconcile)
 code=${answer##*$'\n'}
 body=${answer%$'\n'*}
 [[ $code == 200 ]] || { echo "FAIL reconcile got $code"; echo "$body"; exit 1; }

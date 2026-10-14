@@ -31,9 +31,18 @@ scrape_configs:
     metrics_path: /actuator/prometheus
     static_configs: [{targets: ["billing:8081"]}]
 
+  # inference and gateway are the replicated services (INFERENCE_REPLICAS, GATEWAY_REPLICAS): DNS service discovery gives
+  # one target, and so one `up` and one `instance`, per replica. A static `inference:8081` is one target whatever the replica
+  # count, and each scrape lands on whichever replica Docker's DNS returns, so per-replica series would merge. The rest
+  # have no replica knob and stay static: a container that is gone then still has a target, `up == 0`, and ServiceDown sees it.
+  # What a replica that goes away looks like is not one thing (progress document, H1a review fixes): in the live run a
+  # stopped replica left Docker's DNS at once and its target was dropped on the next refresh with no `up == 0` sample
+  # (ReplicaMissing sees it); the reviewers saw the name keep resolving, time out and a stale target read up == 0
+  # (ServiceDown sees it). The rules cover both; ReplicatedServiceAbsent covers every replica gone.
   - job_name: inference
     metrics_path: /actuator/prometheus
-    static_configs: [{targets: ["inference:8081"]}]
+    dns_sd_configs:
+      - {names: [inference], type: A, port: 8081, refresh_interval: 15s}
 
   - job_name: batch
     metrics_path: /actuator/prometheus
@@ -41,24 +50,27 @@ scrape_configs:
 
   - job_name: gateway
     metrics_path: /actuator/prometheus
-    static_configs: [{targets: ["gateway:8081"]}]
+    dns_sd_configs:
+      - {names: [gateway], type: A, port: 8081, refresh_interval: 15s}
 
-  # The CPU engine's own counters, the only queue-depth and KV-cache reading that refreshes faster than
-  # inference-service's hourly reconcile. llama.cpp answers /metrics with the engine key (--api-key), which
-  # compose writes to the file below at container start; /etc/prometheus is mounted read-only, so the key
-  # never reaches a repo file and has no default.
-  # The GPU stack (compose.gpu.yaml) runs vLLM beside llama: copy this block with job_name vllm and target
-  # vllm:8000 (the token file is the same). Its series are num_requests_running, num_requests_waiting and
-  # kv_cache_usage_perc (v0.30.0; the older name gpu_cache_usage_perc is gone) and they are already in
-  # rules.yml and the dashboards.
-  # ponytail: one engine, because the two stacks do not run the same set — a vLLM target here would sit DOWN
-  # on every CPU stack, and "every target UP" is worth more than one fewer copy-paste. Upgrade: add the
-  # block (as above) when vLLM is the stack being watched, or task A's carmonai_engine_* gauges, which
-  # follow whichever engine inference-service is configured with.
-  - job_name: llama
+  # The engine's own counters, the only queue-depth and KV-cache reading that refreshes faster than
+  # inference-service's hourly reconcile. Job `engine` is the simulator (the default engine, series named as vLLM
+  # names them); job `vllm` is the real one under compose.gpu.yaml. Each stack runs one of them: DNS service discovery
+  # yields no target for a name that does not resolve, so the other job has no series and no alert, never a DOWN
+  # target. It also yields one target per replica, so a fleet is scraped replica by replica (rules aggregate with
+  # `max by (job)`). An engine that wants its key on /metrics gets it from the file compose writes at container
+  # start (/etc/prometheus is read-only, so the key never reaches a repo file and has no default).
+  - job_name: engine
     metrics_path: /metrics
     bearer_token_file: /tmp/engine-key
-    static_configs: [{targets: ["llama:8080"]}]
+    dns_sd_configs:
+      - {names: [engine], type: A, port: 8000, refresh_interval: 15s}
+
+  - job_name: vllm
+    metrics_path: /metrics
+    bearer_token_file: /tmp/engine-key
+    dns_sd_configs:
+      - {names: [vllm], type: A, port: 8000, refresh_interval: 15s}
 
   # Prometheus itself: its own health and TSDB size, which is what the memory ceiling is spent on.
   - job_name: prometheus
