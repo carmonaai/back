@@ -1,11 +1,22 @@
 # Builds every module, runs unit + Testcontainers tests, then the stack and smoke.sh.
 # A broken migration, a Resource/Feign mismatch or a security regression in the smoke test fails it.
+#
+# The documentation site is excluded: it has its own workflow (docs.yaml), and a prose-only change should
+# not spend seven minutes of Testcontainers to prove that no Java changed.
 name: ci
 
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - docs/**
+      - mkdocs.yml
+      - requirements.txt
   pull_request:
+    paths-ignore:
+      - docs/**
+      - mkdocs.yml
+      - requirements.txt
 
 permissions:
   contents: read
@@ -57,6 +68,10 @@ jobs:
             echo "VALKEY_PASSWORD=$(openssl rand -hex 24)"
             echo "ENGINE_API_KEY=$(openssl rand -hex 24)"
             echo "JWT_PRIVATE_KEY=$(openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 | grep -v -- ----- | tr -d '\r\n')"
+          # The observability stack's Grafana requires this (compose asserts on it), so the generated .env
+          # must carry it too: without the line, compose aborts at variable interpolation before any
+          # container starts.
+          echo "GRAFANA_ADMIN_PASSWORD=$(openssl rand -base64 18)"
           } > .env
 
       - name: Start the stack
