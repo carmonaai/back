@@ -58,6 +58,6 @@ Later phases (nginx, Redis, Kafka, K8s, CI): read [references/platform.md](refer
 A change is done when each item holds:
 
 - Every hardening override above is met.
-- `grep -ri store` over the changed modules returns nothing.
+- `grep -ri store` over the changed modules returns nothing, except the OpenAI request field `store` (and its tests), which the API must name; the rule exists to catch file and class names left over from the example project (owner, 2026-10-14).
 - No `latest` image tag, no default password, no unbounded collection endpoint.
 - No personal data in logs, events or caches that outlive an erasure.
