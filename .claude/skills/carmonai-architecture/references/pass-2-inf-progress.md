@@ -20,7 +20,7 @@ What changed, from the independent review of `lease-take.lua`, `lease-renew.lua`
 3. **Config validation, at startup.** `InferenceProperties` and `Model` refuse to be built when: there is no model, a model id is blank or
    repeated (lease keys are named after it), a replica url is repeated within a model (its slots would count twice), a replica has fewer
    than 1 slot, a negative queue, or a `kv-tokens` below 1 (0 means "unknown, not checked" to the script, so a configured budget is positive),
-   a tier has `max-in-flight` below 1, `lease-ttl` is missing or under 3 ms (a third of it is the renewal interval), `expected-replicas` is
+   a tier has `max-in-flight` below 1, `lease-ttl` is missing or under 3 ms (a third of it is the renewal interval; since BE-02, 2026-10-14, the floor is 1 s and six more durations have it), `expected-replicas` is
    below 1 (`Leases` no longer clamps it silently).
 4. **Parallel-take fuzz** (`InferenceServiceIT.parallelTakesBreakNoGuardAndLeaveNoKeysBehind`).
 
@@ -60,7 +60,7 @@ I5 fuzz enterprise: 32 threads x 150 asks over 2 replicas, 6 organizations (cap 
 - **Which candidate when the two sampled do not fit.** The best of the others by the same order (lower used fraction of the token budget,
   then fewer leases, then the lower place), not the first: the extra cost (the sum over each replica's members) only exists near
   saturation, where a request would otherwise be refused.
-- **Minimum `lease-ttl` of 3 ms** is a mechanical bound (the renewal interval is a third of it and `Flux.interval` rejects 0), not a
+- **Minimum `lease-ttl` of 3 ms** (raised to 1 s by BE-02, 2026-10-14: a bare `30` is 30 ms to Spring Boot, and a lease that short frees its slot before its request has run) is a mechanical bound (the renewal interval is a third of it and `Flux.interval` rejects 0), not a
   recommendation; the default is 30 s.
 - **Leases from a build before I5** have no expiry on their sets. Nothing is deployed yet; a set that old is given one by the next take or
   renewal that writes to it, and the rest is a one-off `lease:*` cleanup if it ever mattered.
@@ -108,7 +108,7 @@ For section 7, replacing the "in-memory caps" statements (the first bullets of "
 > (slots >= 1, queue >= 0); (2) the VTC counters stay per inference-service replica (ADR 0001 keeps leases to capacity, not ordering);
 > (3) the token budget is read once per start, so an engine restarted with another cache size needs a restart of the service. The
 > configuration is validated at startup (no model, repeated model or replica, no slot, `max-in-flight` or `expected-replicas` below 1,
-> `lease-ttl` missing or under 3 ms). Proven by a parallel-take fuzz over two `Admission` instances and one Valkey (fleet cap, replica places,
+> `lease-ttl` missing or under 3 ms; BE-02 made it 1 s, with the same floor on six other durations). Proven by a parallel-take fuzz over two `Admission` instances and one Valkey (fleet cap, replica places,
 > token budget, organization cap, no key left after the ttl). Semantics checked against the Valkey 9.0 source: `PEXPIRE` on a set that
 > `ZREMRANGEBYSCORE` emptied returns 0 (the key is gone) and a later `ZADD` recreates it without an expiry, so the expiry follows every
 > `ZADD`; scripts replicate as effects (`PEXPIRE` becomes `PEXPIREAT`), so reading `TIME` is safe; every key of a script must share a slot.

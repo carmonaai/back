@@ -23,7 +23,7 @@ adjustable to 30, file size limit decided in the spec). Branch `ai/p2-bat`, modu
   file row is inserted. The file id derives from the batch id, so a retried finish overwrites the same object.
 - Deleting a file (`DELETE /v1/files/{id}`), the hourly expiry sweep and the erasure of a closed organization all delete
   the object first and the row second. A failed object delete leaves the row, so the next call or sweep finds it again.
-  (B2 builds the retention rules and its own tests on this.)
+  (The retention rules came later: `carmonai.batch.file-retention`, BE-20c; the orphan sweep did not.)
 - The finisher no longer stops at the first batch that cannot finish: with the bucket down, every batch needs it, but one
   failure must not hide the others' state changes.
 
@@ -102,11 +102,17 @@ running batches live in `batch_line`, so those batches still finish and write th
 3. Deletion: the file row and its object are removed together, object first; a failed delete leaves the row and is retried
    by the next call or sweep (hourly for expiry, every minute for closed organizations). An object without a row is never
    served. It is avoided on ordinary failures: upload deletes its object when the row insert fails; the finisher deletes
-   the files it wrote when its transaction rolls back (not when the commit itself failed, see R2); and a batch of a closed organization (erase) deletes its two
-   deterministic output and error keys before it ends, so an object left by an earlier failed cleanup is removed (a
-   failed delete rolls back and is retried). What is left is a crash between put and row insert, or a cleanup delete that
-   fails because the bucket is down too; those wait for the B2 reconcile sweep and are bounded by such double failures,
-   not by traffic.
+   nothing after a failed finish, on any branch (R2 below: once its rollback has released the batch's row lock a second
+   instance can write the same deterministic keys, and a cleanup delete would remove the object under a committed row),
+   so the next run finishes the batch again and overwrites the same keys; and a batch of a closed organization (erase)
+   deletes its two deterministic output and error keys before it ends, so an object left by an earlier failed cleanup
+   is removed (a failed delete rolls back and is retried). What is left is a crash between put and row insert, a
+   cleanup delete that fails because the bucket is down too, and the objects of a batch that never finishes again.
+   **No orphan sweep exists.** The "B2 reconcile sweep" that this item, the ceilings below and the `ponytail:` comments in
+   `Bucket`, `BatchService` and `BatchFinisher` name was never built (checked 2026-10-15, LAT-14), and the expiry sweep
+   cannot find these objects because it walks file rows. Until one is built they stay in the bucket, bounded by such
+   double failures and not by traffic. (Item rewritten 2026-10-15, BE-22: it used to say the finisher deletes the files
+   it wrote when its transaction rolls back, which R2 reversed.)
 4. Not logged: content, prompts, answers. Logs carry file ids, organization ids, exception class names (the SDK's messages
    name hosts and keys).
 5. Not done here: encryption at rest (a property of the storage service or volume; production must enable server-side encryption and
@@ -117,7 +123,7 @@ running batches live in `batch_line`, so those batches still finish and write th
 
 - 8 MiB of heap per upload in flight; a pooled buffer or smaller part when uploads run in the hundreds.
 - Static keys from the environment; the default credential chain when hosting is decided.
-- Orphan objects after a crash, or after a failed cleanup delete, wait for the B2 reconcile sweep; a failed multipart
+- Orphan objects after a crash, or after a failed cleanup delete, stay until an orphan sweep is built (none exists, see the threat model); a failed multipart
   abort leaves parts until a lifecycle rule exists. A row insert that fails but did commit (connection lost during the
   commit) loses its object: the file then answers 404.
 - A JSONL line is held whole while validated (a file without newlines is one line); B3's size limit bounds it.
@@ -142,8 +148,8 @@ Review of B1 found five things; each is fixed with a test that fails on the B1 c
    so a second instance can lock the batch, write the same deterministic keys, commit the file rows, and then the first
    instance's cleanup deletes the second one's objects under committed rows (the paid output 404s for good). Now nothing is
    deleted on any failure: the next run finishes the batch again and overwrites the same keys (file id derives from the batch
-   id), and a closed organization's erase path deletes those two keys. Objects of a batch that never finishes again wait for
-   the B2 reconcile sweep. Test: `BatchFinisherTest` (rollback, commit failure and second-file failure all assert that no
+   id), and a closed organization's erase path deletes those two keys. Objects of a batch that never finishes again stay
+   until an orphan sweep is built (none exists). Test: `BatchFinisherTest` (rollback, commit failure and second-file failure all assert that no
    `delete` or `discard` is called).
 3. **Slow readers could take the shared S3 pool.** A download streams from the S3 HTTP stream to the client and keeps its
    connection checked out until the client has read everything; 50 slow readers are the whole pool (default 50, acquisition
@@ -221,9 +227,9 @@ Review of B1 found five things; each is fixed with a test that fails on the B1 c
 - The permit gauge/metric is not exported; Prometheus cannot yet alert on `storage_busy`.
 - A download deadline is checked on each read, so one read can overshoot by up to the 30 s socket timeout.
 - After a failed commit the objects stay: if the commit really failed and the batch is never finished again (its organization
-  closes, which deletes the two keys; or the batch is dropped), an object could wait for the reconcile sweep of B2.
+  closes, which deletes the two keys; or the batch is dropped), an object could stay for good (no orphan sweep exists).
 - `CompleteMultipartUpload` is retried by the SDK; if the first try succeeded and its answer was lost, the retry fails with
-  `NoSuchUpload`, the upload fails, and the completed object stays without a row (an orphan for the B2 sweep).
+  `NoSuchUpload`, the upload fails, and the completed object stays without a row (an orphan; no orphan sweep exists).
 
 ### Built (paragraph for `inference-plan.md`, in the voice of its progress blocks)
 
