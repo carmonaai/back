@@ -245,6 +245,7 @@ services:
       # Spring replaces a whole list from the first source that defines any element of it, so the environment states
       # every field of the model (application.yaml's list is not merged with it).
       CARMONAI_INFERENCE_MODELS_0_ID: carmonai/qwen3-4b
+      CARMONAI_INFERENCE_MODELS_0_CREATED: 2026-10-01T00:00:00Z   # BE-12: required, shown as Unix seconds by GET /v1/models/{id}
       CARMONAI_INFERENCE_MODELS_0_URL: ${ENGINE_URL:-http://engine:8000}
       CARMONAI_INFERENCE_MODELS_0_APIKEY: ${ENGINE_API_KEY:?set in .env}
       CARMONAI_INFERENCE_MODELS_0_CONTEXTWINDOW: 4096
