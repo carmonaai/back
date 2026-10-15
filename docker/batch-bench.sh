@@ -24,7 +24,7 @@ RESULTS=${TMPDIR:-/tmp}/carmonai-batch-bench.txt   # interactive requests; kept 
 json() { sed -nE "s/.*\"$1\":\"?([^\",}]+)\"?.*/\1/p" <<<"$2"; }
 sql() { "${DC[@]}" exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tA -c "$1"' sh "$1" | tr -d '\r'; }
 grant() {
-  "${DC[@]}" exec -T tools curl -s -o /dev/null -H @/run/secrets/internal_token -H 'Content-Type: application/json' -X POST http://billing:8080/billing/grants \
+  MSYS_NO_PATHCONV=1 "${DC[@]}" exec -T tools curl -s -o /dev/null -H @/run/secrets/internal_token -H 'Content-Type: application/json' -X POST http://billing:8080/billing/grants \
     -d "{\"organizationId\":\"$1\",\"amountMicroBrl\":100000000,\"reason\":\"bench\",\"idempotencyKey\":\"bench\"}"
 }
 

@@ -147,7 +147,7 @@ org=$(json id)
 
 # Internal endpoints have no gateway route: the smoke test reaches them from inside the network (the
 # tools container has curl). Prepaid credit (R$10, in micro-BRL) pays for the chats below.
-internal() { "${DC[@]}" exec -T tools curl -s -o /dev/null -w '%{http_code}' -H @/run/secrets/internal_token -H 'Content-Type: application/json' "$@"; }
+internal() { MSYS_NO_PATHCONV=1 "${DC[@]}" exec -T tools curl -s -o /dev/null -w '%{http_code}' -H @/run/secrets/internal_token -H 'Content-Type: application/json' "$@"; }
 grant() { internal -X POST http://billing:8080/billing/grants -d "{\"organizationId\":\"$1\",\"amountMicroBrl\":$2,\"reason\":\"smoke\",\"idempotencyKey\":\"$3\"}"; }
 # S15 (BE-24): a guarded internal call without the shared secret is refused and changes nothing; with it, it is not refused.
 # The tools container holds the file, so the no-secret call is made WITHOUT -H and the wrong-secret call with a made-up value.
