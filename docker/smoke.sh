@@ -3,6 +3,7 @@
 # needs it: docker compose -f compose.yaml -f compose.minio.yaml up -d --build --wait
 # (add -f compose.gpu.yaml for ENGINE=vllm). The environment or .env must hold every name of .env.example: the usual ones plus
 # GRAFANA_ADMIN_PASSWORD and the MINIO_* / STORAGE_* names, which compose refuses to start without.
+# The internal secret file must exist before `up` (BE-24): run `bash docker/init-secrets.sh` once.
 # The simulator image is a local build: run `bash docker/sim/build.sh` once before the first `up`, or compose stops (image not found).
 # It ends by draining this IP's login bucket (refills 1/s): wait ~20 s before running it again.
 # It starts by waiting, at most 60 s, until the console login route answers something other than 503: right after `up --wait`
@@ -146,8 +147,16 @@ org=$(json id)
 
 # Internal endpoints have no gateway route: the smoke test reaches them from inside the network (the
 # tools container has curl). Prepaid credit (R$10, in micro-BRL) pays for the chats below.
-internal() { "${DC[@]}" exec -T tools curl -s -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' "$@"; }
+internal() { "${DC[@]}" exec -T tools curl -s -o /dev/null -w '%{http_code}' -H @/run/secrets/internal_token -H 'Content-Type: application/json' "$@"; }
 grant() { internal -X POST http://billing:8080/billing/grants -d "{\"organizationId\":\"$1\",\"amountMicroBrl\":$2,\"reason\":\"smoke\",\"idempotencyKey\":\"$3\"}"; }
+# S15 (BE-24): a guarded internal call without the shared secret is refused and changes nothing; with it, it is not refused.
+# The tools container holds the file, so the no-secret call is made WITHOUT -H and the wrong-secret call with a made-up value.
+code=$("${DC[@]}" exec -T tools curl -s -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -X POST http://billing:8080/billing/grants -d '{}')
+[[ $code == 401 ]] && echo "ok   401  S15 grant without the internal secret is refused" || { echo "FAIL S15 grant without the secret got $code"; note_fail; }
+code=$("${DC[@]}" exec -T tools curl -s -o /dev/null -w '%{http_code}' -H 'X-Internal-Token: 0000000000000000000000000000000000000000000000000000000000000000' -H 'Content-Type: application/json' -X POST http://billing:8080/billing/grants -d '{}')
+[[ $code == 401 ]] && echo "ok   401  S15 grant with a wrong internal secret is refused" || { echo "FAIL S15 grant with a wrong secret got $code"; note_fail; }
+code=$(internal -X POST http://billing:8080/billing/grants -d '{}')
+[[ $code != 401 ]] && echo "ok   $code  S15 grant with the internal secret passes the lock (an empty body is a validation error, not a 401)" || { echo "FAIL S15 grant with the secret got 401"; note_fail; }
 code=$(grant "$org" 10000000 smoke-start)
 [[ $code == 200 ]] && echo "ok   200  R\$10 of credit granted (internal)" || { echo "FAIL credit grant got $code"; note_fail; }
 expect 200 "${A[@]}" "$G/organizations"

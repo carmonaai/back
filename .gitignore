@@ -1,4 +1,5 @@
 docker/.env
+docker/secrets/
 demo/workflow.webp
 demo/*.mp4
 

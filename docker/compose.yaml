@@ -99,6 +99,7 @@ services:
     networks: [internal]
 
   account:
+    secrets: [internal_token]   # BE-24: the internal-endpoint secret; the gateway has no such line on purpose
     build: ../api/account-service
     environment:
       <<: *database
@@ -111,6 +112,7 @@ services:
     networks: [internal]
 
   organization:
+    secrets: [internal_token]   # BE-24: the internal-endpoint secret; the gateway has no such line on purpose
     build: ../api/organization-service
     environment: *database
     depends_on:
@@ -119,6 +121,7 @@ services:
     networks: [internal]
 
   auth:
+    secrets: [internal_token]   # BE-24: the internal-endpoint secret; the gateway has no such line on purpose
     build: ../api/auth-service
     environment:
       <<: [*database, *valkey]
@@ -190,6 +193,7 @@ services:
   # Script host on the compose network (curl, bash, python3): smoke.sh, the benches and the scorecard drivers run from
   # here, because the JRE images have no curl and internal endpoints have no gateway route. Built from tools/.
   tools:
+    secrets: [internal_token]   # BE-24: the internal-endpoint secret; the gateway has no such line on purpose
     build: ./tools
     command: ["sleep", "infinity"]
     read_only: true
@@ -219,6 +223,7 @@ services:
     networks: [internal]
 
   billing:
+    secrets: [internal_token]   # BE-24: the internal-endpoint secret; the gateway has no such line on purpose
     build: ../api/billing-service
     environment:
       <<: [*database, *valkey]
@@ -354,6 +359,12 @@ services:
     mem_limit: 384m
     cpus: 0.5
     networks: [internal]
+
+# BE-24 (SEC-04): one shared secret, one line "X-Internal-Token: <64 hex>", created by `bash init-secrets.sh` before the first `up`.
+# billing, organization, account and auth refuse to start without it; the gateway and every other service never see it.
+secrets:
+  internal_token:
+    file: ./secrets/internal_token
 
 networks:
   internal: {}

@@ -74,6 +74,11 @@ jobs:
           echo "GRAFANA_ADMIN_PASSWORD=$(openssl rand -base64 18)"
           } > .env
 
+      # BE-24: billing, organization, account and auth refuse to start without the internal secret file.
+      - name: Create the internal secret
+        working-directory: docker
+        run: bash init-secrets.sh
+
       - name: Start the stack
         id: stack
         working-directory: docker
