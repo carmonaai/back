@@ -160,7 +160,7 @@ request can be admitted into the engine's own queue, where it waits a step or tw
 That is the trade enterprise is paid for: a little waiting instead of a refusal.
 
 **The per-organization cap is the second line, and today it never fires.** `max-in-flight` is 2, 4 and 16 for
-the three tiers, and the tier ceiling is checked first: for `carmonai/qwen3-4b` the ceilings are 2, 3 and 6.
+the three tiers, and the tier ceiling is checked first: for `carmona/qwen3-4b` the ceilings are 2, 3 and 6.
 Since every organization cap is at or above its tier's ceiling, no organization can reach its own cap while
 the tier ceiling is doing the work. It is a limit waiting for a bigger engine, and it is worth saying so
 rather than implying it is load-bearing.
@@ -187,12 +187,12 @@ that honours the millisecond header does not back off by a second for a wait of 
   pipeline. A production `C` has to be re-measured on the hardware that will serve customers.
 - **The virtual token counter is in-process.** It orders waiters within one replica; across replicas the
   equivalent is DRR or flow control in a router, which does not exist here.
-- **`metrics` reports the ceiling per tier** as `carmonai_inference_capacity`, so a dashboard can show how
+- **`metrics` reports the ceiling per tier** as `carmona_inference_capacity`, so a dashboard can show how
   close each tier is to its line — but only for the replica that served the request.
 
 ## Where to look
 
-- [`Admission.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmonai/inference/Admission.java)
+- [`Admission.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Admission.java)
   — `tierCap`, the two in-flight checks and the order they run in.
 - [`application-gpu.yaml`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/resources/application-gpu.yaml)
   — `slots: 4`, `queue: 2`, and the bench they came from.
@@ -200,7 +200,7 @@ that honours the millisecond header does not back off by a second for a wait of 
   — the engine's side of the same limit: `--max-num-seqs`, `--max-num-queued-reqs`, `--kv-cache-dtype fp8`.
 - [`application.yaml`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/resources/application.yaml)
   — the three tiers' per-minute budgets and `max-in-flight`, with the prototype note on them.
-- [`Metrics.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmonai/inference/Metrics.java)
+- [`Metrics.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Metrics.java)
   — the in-flight gauge and the capacity gauge a dashboard reads.
 
 **Back to:** [Batching and response routing](batching.md) for why one model serves four requests at once at

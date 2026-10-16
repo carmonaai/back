@@ -77,7 +77,7 @@ RouterFunctions.route()
     .POST("/v1/chat/completions", chat::chat)
 ```
 
-`GET /v1/models` is built from `carmonai.inference.models` in configuration — the model list is configuration,
+`GET /v1/models` is built from `carmona.inference.models` in configuration — the model list is configuration,
 not code, so adding a model is adding a YAML entry with its engine URL, context window, output cap, slots and
 queue. `POST /v1/chat/completions` is the one that matters. There is no `GET /v1/embeddings`: it is not hidden
 or unimplemented behind a flag, it does not exist, and an OpenAI SDK that calls it gets a 404.
@@ -161,7 +161,7 @@ Three details are decisions rather than plumbing:
 
 The event goes to the Valkey stream `usage:events`; a relay delivers batches to usage-service every second and
 deletes them once they are stored. A killed instance loses nothing: the stream is append-only on disk, and an
-entry that was never confirmed is claimed again after `carmonai.inference.usage-claim-after` (60 s).
+entry that was never confirmed is claimed again after `carmona.inference.usage-claim-after` (60 s).
 [Metering](metering.md) takes it from there.
 
 ## Why it is like this
@@ -187,7 +187,7 @@ that is over rather than one in flight.
 - **Flex usage is recorded in mode `batch`.** That is what the half-price lane prices, so it is correct today
   and wrong the moment flex needs a price or a report of its own — a `flex` mode, with the migrations that go
   with it.
-- **One engine endpoint per model.** `carmonai.inference.models` maps a model id to a single URL. Routing
+- **One engine endpoint per model.** `carmona.inference.models` maps a model id to a single URL. Routing
   across replicas needs more GPUs and a different model of capacity.
 - **In-flight caps live in one JVM's memory.** Admission's per-tier and per-organization caps are a single
   replica's view, so a second replica would double them.
@@ -196,8 +196,8 @@ that is over rather than one in flight.
 
 ## Where to look
 
-- [InferenceApplication.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmonai/inference/InferenceApplication.java) — the two routes, in full.
-- [ChatRequest.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmonai/inference/ChatRequest.java) — the allowlist, the refusals and the flex lane.
-- [Caller.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmonai/inference/Caller.java) — the identity headers and the batch line.
-- [UsageEvent.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmonai/inference/UsageEvent.java) — what a finished request reports.
+- [InferenceApplication.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/InferenceApplication.java) — the two routes, in full.
+- [ChatRequest.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/ChatRequest.java) — the allowlist, the refusals and the flex lane.
+- [Caller.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Caller.java) — the identity headers and the batch line.
+- [UsageEvent.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/UsageEvent.java) — what a finished request reports.
 - [application.yaml](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/resources/application.yaml) — the tiers, the timeouts and the model list.

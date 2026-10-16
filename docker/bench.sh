@@ -16,9 +16,9 @@ cd "$(dirname "$0")"
 DC=(docker compose -f compose.yaml -f compose.gpu.yaml)
 G=http://localhost:8080
 J=(-H 'Content-Type: application/json')
-M=carmonai/qwen3-4b
+M=carmona/qwen3-4b
 DURATION=60
-RESULTS=${TMPDIR:-/tmp}/carmonai-bench.txt   # kept for a closer look; the next run overwrites it
+RESULTS=${TMPDIR:-/tmp}/carmona-bench.txt   # kept for a closer look; the next run overwrites it
 
 json() { sed -nE "s/.*\"$1\":\"([^\"]+)\".*/\1/p" <<<"$2"; }
 sql() { "${DC[@]}" exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tA -c "$1"' sh "$1" >/dev/null; }

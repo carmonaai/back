@@ -2,7 +2,7 @@
 
 ## What it is
 
-Carmonai is eight Spring Boot applications and five contract libraries, in thirteen Git repositories under
+Carmona is eight Spring Boot applications and five contract libraries, in thirteen Git repositories under
 `api/`. Each service owns one Postgres schema, exposes a small HTTP surface, and talks to the others over
 Feign or not at all. This page is the key to the other eight: what a service is here, what a library is, and
 which schema belongs to whom.
@@ -71,7 +71,7 @@ placeholder the stack resolves.</figcaption>
 3. The service owns exactly one Postgres schema, and it is the only writer of it. The arrow points down
    because the schema belongs to the service, not the other way round.
 4. In an integration test the same interface points at a stub, because `@FeignClient` takes
-   `url="${carmonai.<name>.url:http://<name>:8080}"` — the property the test sets, and the default the
+   `url="${carmona.<name>.url:http://<name>:8080}"` — the property the test sets, and the default the
    compose network resolves.
 
 ## The vocabulary this section uses

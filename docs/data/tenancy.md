@@ -1,6 +1,6 @@
 # Tenancy
 
-Carmonai's unit of tenancy is the **organization**, not the account. An organization owns the API keys, the
+Carmona's unit of tenancy is the **organization**, not the account. An organization owns the API keys, the
 tier, the credit and the usage; an account is a person who may be a member of several. This page is about what
 keeps one organization out of another's data — and where that separation stops.
 
@@ -245,11 +245,11 @@ per console request, and console requests do not touch the GPU.
 
 ## Where to look
 
-- [IdentityHeadersFilter.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmonai/gateway/IdentityHeadersFilter.java)
+- [IdentityHeadersFilter.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/IdentityHeadersFilter.java)
   — the exact strip list and what is set in its place.
-- [ChatRequest.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmonai/inference/ChatRequest.java)
+- [ChatRequest.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/ChatRequest.java)
   — the field allowlist, `cache_salt` and the tier priority.
-- [Admission.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmonai/inference/Admission.java)
+- [Admission.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Admission.java)
   — the per-organization bucket keys, the per-organization cap and the VTC ordering.
-- [BillingService.java](https://github.com/carmonai/back/blob/main/api/billing-service/src/main/java/ai/carmonai/billing/BillingService.java)
+- [BillingService.java](https://github.com/carmonai/back/blob/main/api/billing-service/src/main/java/ai/carmona/billing/BillingService.java)
   — the membership check and the 401/404 rule, in `balance()`.

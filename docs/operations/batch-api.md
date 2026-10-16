@@ -164,12 +164,12 @@ ORDER BY b.created_at, l.batch_id, l.line LIMIT 1 FOR UPDATE OF l SKIP LOCKED`, 
 stays open for the call. Ordering by the batch's creation time first runs batches roughly in the order they
 arrived, and `SKIP LOCKED` lets the second worker take the next line instead of blocking on the first.
 
-`carmonai.batch.workers: 2` and `poll-every: 500ms`: two lines in flight per instance, an idle worker looking
+`carmona.batch.workers: 2` and `poll-every: 500ms`: two lines in flight per instance, an idle worker looking
 twice a second. Because each worker holds a connection for the whole call, the pool is sized from that fact
 rather than from a throughput estimate — `maximum-pool-size: 10`, with the comment *"each worker holds one for
 its whole call: keep above workers + 4"*.
 
-The call goes to `carmonai.batch.inference-url` (`http://inference:8080`) with the batch's stored identity —
+The call goes to `carmona.batch.inference-url` (`http://inference:8080`) with the batch's stored identity —
 `id-organization`, `id-api-key`, `tier`, and `batch-line: {batchId} {line} {batchCreatedAt}` — and an
 11-minute client timeout, deliberately above inference-service's own 10-minute ceiling for a non-streamed
 answer. The `batch-line` marker is what makes the line run at vLLM priority 30 and at batch prices, and a
@@ -219,7 +219,7 @@ is that the count is greater than zero — a bench that never managed to interru
 
 ## The finisher
 
-`BatchFinisher.finish()` runs every `carmonai.batch.finish-every` (2 s). For each running batch it takes the
+`BatchFinisher.finish()` runs every `carmona.batch.finish-every` (2 s). For each running batch it takes the
 batch row with `FOR UPDATE SKIP LOCKED` — one finisher at a time — and asks what it needs: `cancelling`,
 `expired` (past `expires_at`), or `in_progress`. A `cancelling` batch has its pending lines **deleted**; an
 `expired` one has them **failed** with a `batch_expired` line in the error file; lines currently being run are
@@ -229,7 +229,7 @@ returns and tries again next tick. Otherwise it writes the output and error file
 JVM — stores the counts, sets the final status and `finished_at`, and deletes the lines, all in one transaction.
 
 Two more sweeps live in the same class. `expireFiles()` (cron `0 17 * * * *`) deletes files past their 30 days.
-`eraseClosed()` runs every `carmonai.batch.erase-every` (1 minute; 5 s in compose), asks organization-service's
+`eraseClosed()` runs every `carmona.batch.erase-every` (1 minute; 5 s in compose), asks organization-service's
 `tenant(id)` about every organization that still has batch data here, and erases the `closed` ones: their files
 go immediately and their running batches are marked `cancelling` with `erase = true`, so the finisher ends them
 **without** writing output or error files. Only an explicit `closed` erases anything — a 404 keeps the data,
@@ -250,7 +250,7 @@ rather than in object storage: the migration's own `ponytail:` comment names obj
 
 ## Differences from OpenAI's Batch API
 
-| | OpenAI | Carmonai |
+| | OpenAI | Carmona |
 |---|---|---|
 | Upload size | 200 MB | 4 MB (the gateway's `/v1` body cap) |
 | Validation | asynchronous: `validating` → `failed` | synchronous: a 400 naming the line |
@@ -291,13 +291,13 @@ ceiling because a timeout that fired first would abandon a call whose answer was
 
 ## Where to look
 
-- [BatchService.java](https://github.com/carmonai/back/blob/main/api/batch-service/src/main/java/ai/carmonai/batch/BatchService.java)
+- [BatchService.java](https://github.com/carmonai/back/blob/main/api/batch-service/src/main/java/ai/carmona/batch/BatchService.java)
   — upload, the line-by-line validation and the errors it produces.
-- [BatchWorker.java](https://github.com/carmonai/back/blob/main/api/batch-service/src/main/java/ai/carmonai/batch/BatchWorker.java)
+- [BatchWorker.java](https://github.com/carmonai/back/blob/main/api/batch-service/src/main/java/ai/carmona/batch/BatchWorker.java)
   — the claim, the held transaction, the per-status outcomes and the back-off clamp.
-- [BatchRepository.java](https://github.com/carmonai/back/blob/main/api/batch-service/src/main/java/ai/carmonai/batch/BatchRepository.java)
+- [BatchRepository.java](https://github.com/carmonai/back/blob/main/api/batch-service/src/main/java/ai/carmona/batch/BatchRepository.java)
   — `claim()`, `writeFile()` and the sweep queries, in SQL.
-- [BatchFinisher.java](https://github.com/carmonai/back/blob/main/api/batch-service/src/main/java/ai/carmonai/batch/BatchFinisher.java)
+- [BatchFinisher.java](https://github.com/carmonai/back/blob/main/api/batch-service/src/main/java/ai/carmona/batch/BatchFinisher.java)
   — completing, cancelling, expiring and erasing, plus the 30-day file sweep.
 - [batch-bench.sh](https://github.com/carmonai/back/blob/main/docker/batch-bench.sh) — the exit check,
   including the kill and the usage-event count.

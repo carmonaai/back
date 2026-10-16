@@ -2,7 +2,7 @@
 
 ## What it is
 
-Carmonai is one Git repository per module: thirteen Maven modules under `api/`, five of them **libraries**
+Carmona is one Git repository per module: thirteen Maven modules under `api/`, five of them **libraries**
 that hold a contract and no behaviour, and eight of them **services** that hold a Spring Boot application
 and one Postgres schema. A service may call another service's library and may never read another service's
 tables. Where two services genuinely need each other's data, they call each other — and the page below is
@@ -17,7 +17,7 @@ definition.
 ```java
 @FeignClient(
     name="organization",
-    url="${carmonai.organization.url:http://organization:8080}"
+    url="${carmona.organization.url:http://organization:8080}"
 )
 public interface OrganizationController {
 ```
@@ -178,11 +178,11 @@ than an event saga. [Known gaps](../reference/gaps.md) has the full list.
 
 ## Where to look
 
-- [OrganizationController.java](https://github.com/carmonai/back/blob/main/api/organization/src/main/java/ai/carmonai/organization/OrganizationController.java)
+- [OrganizationController.java](https://github.com/carmonai/back/blob/main/api/organization/src/main/java/ai/carmona/organization/OrganizationController.java)
   — the library contract, with a comment on every internal-only method.
-- [UsageService.java](https://github.com/carmonai/back/blob/main/api/usage-service/src/main/java/ai/carmonai/usage/UsageService.java)
+- [UsageService.java](https://github.com/carmonai/back/blob/main/api/usage-service/src/main/java/ai/carmona/usage/UsageService.java)
   — the membership check, the summary and the price read.
-- [BillingService.java](https://github.com/carmonai/back/blob/main/api/billing-service/src/main/java/ai/carmonai/billing/BillingService.java)
+- [BillingService.java](https://github.com/carmonai/back/blob/main/api/billing-service/src/main/java/ai/carmona/billing/BillingService.java)
   — the cursor pull, the one-transaction ledger write and the credit flag.
-- [BillingRepository.java](https://github.com/carmonai/back/blob/main/api/billing-service/src/main/java/ai/carmonai/billing/BillingRepository.java)
+- [BillingRepository.java](https://github.com/carmonai/back/blob/main/api/billing-service/src/main/java/ai/carmona/billing/BillingRepository.java)
   — plain JDBC against `currentSchema=billing`, including the reconciliation query.

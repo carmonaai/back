@@ -1,6 +1,6 @@
 # Data
 
-Carmonai keeps every durable fact in one PostgreSQL 17 database, split into six schemas — one per service
+Carmona keeps every durable fact in one PostgreSQL 17 database, split into six schemas — one per service
 that owns state — plus Valkey for what must be answered on the request path, plus whatever the model engine
 is holding in its own memory right now. This section is where that state lives, how the money in it is kept
 exact, and how one tenant is kept out of another's rows.
@@ -222,9 +222,9 @@ counters are a `HashMap` in one JVM for the same reason — nothing shared on th
 
 - [compose.yaml](https://github.com/carmonai/back/blob/main/docker/compose.yaml) — `db` and `valkey`, their
   volumes, and Valkey's append-only settings.
-- [ApiKeyAuthenticationManager.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmonai/gateway/ApiKeyAuthenticationManager.java)
+- [ApiKeyAuthenticationManager.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/ApiKeyAuthenticationManager.java)
   — the 60 s cache, the credit flag and the fail-closed 503.
-- [Admission.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmonai/inference/Admission.java)
+- [Admission.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Admission.java)
   — the per-organization buckets and the in-memory in-flight caps.
-- [UsageReporter.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmonai/inference/UsageReporter.java)
+- [UsageReporter.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/UsageReporter.java)
   — the `usage:events` stream and the relay that drains it.

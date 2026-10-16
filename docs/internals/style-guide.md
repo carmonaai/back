@@ -1,4 +1,4 @@
-# How to write a page for the Carmonai site
+# How to write a page for the Carmona site
 
 You are writing one section of a documentation site that explains a real production-shaped platform. Five
 writers work in parallel, so this file is the shared contract: follow it exactly and the pages will read as
@@ -12,7 +12,7 @@ the source file and read it — never invent a number, a class name, an endpoint
 ## The reader
 
 A competent engineer who has never seen this repository: a new colleague, a reviewer, a customer's architect.
-They know what HTTP, Postgres and a JWT are. They do not know Carmonai's decisions. Write for someone who will
+They know what HTTP, Postgres and a JWT are. They do not know Carmona's decisions. Write for someone who will
 ask "why is it like that?" after every sentence they read.
 
 ## Voice
@@ -36,7 +36,7 @@ ask "why is it like that?" after every sentence they read.
 3. **`## Why it is like this`** — the decisions and the rejected alternatives, with the alternative named.
 4. **`## What would change it`** — the ceiling and the upgrade path, from the fact sheet's shortcuts table.
 5. **`## Where to look`** — a short list of the two to five files that matter, as repo-relative paths, each
-   with a six-word reason. Link them: `[ChatHandler.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmonai/inference/ChatHandler.java)`.
+   with a six-word reason. Link them: `[ChatHandler.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/ChatHandler.java)`.
 
 Not every page needs all five headings verbatim, but the *information* must be there. A page of 120–220 lines
 of Markdown is the target: dense, not padded.

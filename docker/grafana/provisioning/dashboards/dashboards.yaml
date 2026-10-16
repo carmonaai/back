@@ -2,9 +2,9 @@
 # browser would not survive the next container restart, so it is not allowed to look like it did.
 apiVersion: 1
 providers:
-  - name: carmonai
+  - name: carmona
     orgId: 1
-    folder: Carmonai
+    folder: Carmona
     type: file
     disableDeletion: true
     allowUiUpdates: false

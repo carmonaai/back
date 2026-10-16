@@ -18,7 +18,7 @@ services:
     # stays at vLLM's default (off): prompts must never reach a log.
     command: ["cyankiwi/Qwen3-4B-Instruct-2507-AWQ-4bit",
               "--revision", "c46e2277ae3dee7d030f45c58987b291edc5c1d6",
-              "--served-model-name", "carmonai/qwen3-4b",
+              "--served-model-name", "carmona/qwen3-4b",
               "--host", "0.0.0.0", "--port", "8000",
               "--max-model-len", "4096", "--max-num-seqs", "4", "--max-num-queued-reqs", "8",
               "--kv-cache-dtype", "fp8",
@@ -50,8 +50,8 @@ services:
     environment:
       # The same model as the simulator's, at vLLM (the whole list is stated: see compose.yaml). 4 slots and 2 queued
       # are C and q from the phase-3 bench, the defaults of compose.yaml.
-      CARMONAI_INFERENCE_MODELS_0_URL: http://vllm:8000
-      CARMONAI_INFERENCE_MODELS_0_APIKEY: ${VLLM_API_KEY:?set in .env}
+      CARMONA_INFERENCE_MODELS_0_URL: http://vllm:8000
+      CARMONA_INFERENCE_MODELS_0_APIKEY: ${VLLM_API_KEY:?set in .env}
     depends_on: !override
       valkey: { condition: service_healthy }
       usage: { condition: service_healthy }

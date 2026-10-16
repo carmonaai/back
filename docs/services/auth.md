@@ -74,22 +74,22 @@ it.</figcaption>
 
 ## The access token
 
-`JwtService` signs with RS256 using a key built from `carmonai.jwt.private-key` (base64 PKCS#8 DER); the
+`JwtService` signs with RS256 using a key built from `carmona.jwt.private-key` (base64 PKCS#8 DER); the
 public half is derived from the private key and the key id is the JWK thumbprint. The claims are `iss`
-(`ai.carmonai`), `sub` (the account id), `iat` and `exp` — and nothing else. No name, no email, no roles: the
+(`ai.carmona`), `sub` (the account id), `iat` and `exp` — and nothing else. No name, no email, no roles: the
 token is a bearer credential that travels through a browser, so it carries identifiers only.
 
 The 15-minute lifetime is a constant in the class, not a configuration key, and it is what makes the rotation
 story work: the refresh cookie is the long-lived thing, and it is opaque, rotating and revocable.
 
 `GET /auth/jwks` publishes the public key. The gateway builds a `NimbusReactiveJwtDecoder` from
-`carmonai.jwt.jwks-uri` (default `http://auth:8080/auth/jwks`), pins the issuer to `ai.carmonai`, and caches
+`carmona.jwt.jwks-uri` (default `http://auth:8080/auth/jwks`), pins the issuer to `ai.carmona`, and caches
 the key set — so a token is verified locally and no request path calls auth-service. The property exists so an
 integration test can point the decoder at a stub.
 
 ## The refresh cookie
 
-The name is `__Host-carmonai-rt`, and the prefix is load-bearing: `__Host-` cookies are only accepted with
+The name is `__Host-carmona-rt`, and the prefix is load-bearing: `__Host-` cookies are only accepted with
 `Secure`, `Path=/` and no `Domain`, so no subdomain can set or overwrite it. The attributes are `HttpOnly`,
 `Secure`, `SameSite=Strict`, `Path=/`. `Max-Age` is 30 days at login, the remaining lifetime on each refresh,
 and zero on logout or a rejected refresh.
@@ -195,8 +195,8 @@ integration with them, and the 50-key cap is a property of the tenant.
 
 ## Where to look
 
-- [AuthController.java](https://github.com/carmonai/back/blob/main/api/auth/src/main/java/ai/carmonai/auth/AuthController.java) — the contract, including the two raw-cookie methods.
-- [JwtService.java](https://github.com/carmonai/back/blob/main/api/auth-service/src/main/java/ai/carmonai/auth/JwtService.java) — RS256, the 15-minute TTL and the JWKS.
-- [SessionService.java](https://github.com/carmonai/back/blob/main/api/auth-service/src/main/java/ai/carmonai/auth/SessionService.java) — the cookie, the rotation and the reuse check.
-- [ApiKeyService.java](https://github.com/carmonai/back/blob/main/api/auth-service/src/main/java/ai/carmonai/auth/ApiKeyService.java) — the cap, the expiry rule and the transactional rotate.
-- [ApiKeys.java](https://github.com/carmonai/back/blob/main/api/auth-service/src/main/java/ai/carmonai/auth/ApiKeys.java) — the key's shape, mirrored by the gateway.
+- [AuthController.java](https://github.com/carmonai/back/blob/main/api/auth/src/main/java/ai/carmona/auth/AuthController.java) — the contract, including the two raw-cookie methods.
+- [JwtService.java](https://github.com/carmonai/back/blob/main/api/auth-service/src/main/java/ai/carmona/auth/JwtService.java) — RS256, the 15-minute TTL and the JWKS.
+- [SessionService.java](https://github.com/carmonai/back/blob/main/api/auth-service/src/main/java/ai/carmona/auth/SessionService.java) — the cookie, the rotation and the reuse check.
+- [ApiKeyService.java](https://github.com/carmonai/back/blob/main/api/auth-service/src/main/java/ai/carmona/auth/ApiKeyService.java) — the cap, the expiry rule and the transactional rotate.
+- [ApiKeys.java](https://github.com/carmonai/back/blob/main/api/auth-service/src/main/java/ai/carmona/auth/ApiKeys.java) — the key's shape, mirrored by the gateway.

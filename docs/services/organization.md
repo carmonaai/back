@@ -143,7 +143,7 @@ Closing is owner-only: a non-owner gets 403 `only owners close an organization`.
 
 ## Why the batch sweep asks this service
 
-`BatchFinisher.eraseClosed` runs on `carmonai.batch.erase-every` (1 minute). It reads the organizations that
+`BatchFinisher.eraseClosed` runs on `carmona.batch.erase-every` (1 minute). It reads the organizations that
 have batch data, and for each one calls `tenant(id)`: an explicit `closed` erases that organization's files
 and stops its batches, while an **unknown** id or an **unreachable** organization-service never erases. A
 misrouted URL answering 404 must not wipe everyone's data.
@@ -186,8 +186,8 @@ left.
 
 ## Where to look
 
-- [OrganizationController.java](https://github.com/carmonai/back/blob/main/api/organization/src/main/java/ai/carmonai/organization/OrganizationController.java) — the contract, public and internal endpoints.
-- [OrganizationService.java](https://github.com/carmonai/back/blob/main/api/organization-service/src/main/java/ai/carmonai/organization/OrganizationService.java) — creation, closing and the lock-before-count erasure.
+- [OrganizationController.java](https://github.com/carmonai/back/blob/main/api/organization/src/main/java/ai/carmona/organization/OrganizationController.java) — the contract, public and internal endpoints.
+- [OrganizationService.java](https://github.com/carmonai/back/blob/main/api/organization-service/src/main/java/ai/carmona/organization/OrganizationService.java) — creation, closing and the lock-before-count erasure.
 - [create_tables.sql](https://github.com/carmonai/back/blob/main/api/organization-service/src/main/resources/db/migration/V2026.10.03.001__create_tables.sql) — the two tables and the LGPD comments on them.
-- [TenantOut.java](https://github.com/carmonai/back/blob/main/api/organization/src/main/java/ai/carmonai/organization/TenantOut.java) — the three fields that authenticate an API key.
-- [BatchFinisher.java](https://github.com/carmonai/back/blob/main/api/batch-service/src/main/java/ai/carmonai/batch/BatchFinisher.java) — the sweep that asks this service for status.
+- [TenantOut.java](https://github.com/carmonai/back/blob/main/api/organization/src/main/java/ai/carmona/organization/TenantOut.java) — the three fields that authenticate an API key.
+- [BatchFinisher.java](https://github.com/carmonai/back/blob/main/api/batch-service/src/main/java/ai/carmona/batch/BatchFinisher.java) — the sweep that asks this service for status.

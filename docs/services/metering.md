@@ -94,7 +94,7 @@ present, `durationMs` non-negative and `ttftMs` either absent or non-negative.
 | `eventId` | a UUID | name-based for a batch line, so a re-run is one event |
 | `requestId` | a UUID | the gateway's, the same one in the access log |
 | `organizationId`, `apiKeyId` | ids | who spent |
-| `model`, `mode`, `tier` | `carmonai/qwen3-4b`, `sync`, `standard` | `mode` is `sync` or `batch` |
+| `model`, `mode`, `tier` | `carmona/qwen3-4b`, `sync`, `standard` | `mode` is `sync` or `batch` |
 | `inputTokens` | 812 | includes the cached ones |
 | `cachedInputTokens` | 640 | priced separately |
 | `outputTokens` | 233 | what the customer read |
@@ -121,8 +121,8 @@ fails — which takes a badly wrong clock, and would need the rows moved by hand
 
 ## Sealing by arrival
 
-`SealJob` turns events into money. Its settings are `carmonai.usage.window` (5 minutes),
-`carmonai.usage.grace` (60 seconds) and `carmonai.usage.seal-every` (60 seconds); the compose stack uses 10
+`SealJob` turns events into money. Its settings are `carmona.usage.window` (5 minutes),
+`carmona.usage.grace` (60 seconds) and `carmona.usage.seal-every` (60 seconds); the compose stack uses 10
 second windows and a 2 second grace so billing shows up within seconds of a request.
 
 The rule is: **every whole window that ended at least `grace` ago is summed once.** In one transaction it locks
@@ -189,8 +189,8 @@ failure rate readable.
 
 ## Where to look
 
-- [UsageController.java](https://github.com/carmonai/back/blob/main/api/usage/src/main/java/ai/carmonai/usage/UsageController.java) — the four endpoints, internal and customer-facing.
-- [UsageService.java](https://github.com/carmonai/back/blob/main/api/usage-service/src/main/java/ai/carmonai/usage/UsageService.java) — validation, the summary and its pricing.
-- [SealJob.java](https://github.com/carmonai/back/blob/main/api/usage-service/src/main/java/ai/carmonai/usage/SealJob.java) — the window, the grace and the cursor lock.
-- [PartitionJob.java](https://github.com/carmonai/back/blob/main/api/usage-service/src/main/java/ai/carmonai/usage/PartitionJob.java) — partition creation, retention and the advisory lock.
+- [UsageController.java](https://github.com/carmonai/back/blob/main/api/usage/src/main/java/ai/carmona/usage/UsageController.java) — the four endpoints, internal and customer-facing.
+- [UsageService.java](https://github.com/carmonai/back/blob/main/api/usage-service/src/main/java/ai/carmona/usage/UsageService.java) — validation, the summary and its pricing.
+- [SealJob.java](https://github.com/carmonai/back/blob/main/api/usage-service/src/main/java/ai/carmona/usage/SealJob.java) — the window, the grace and the cursor lock.
+- [PartitionJob.java](https://github.com/carmonai/back/blob/main/api/usage-service/src/main/java/ai/carmona/usage/PartitionJob.java) — partition creation, retention and the advisory lock.
 - [create_tables.sql](https://github.com/carmonai/back/blob/main/api/usage-service/src/main/resources/db/migration/V2026.10.03.001__create_tables.sql) — the partitioned table and the seal cursor.

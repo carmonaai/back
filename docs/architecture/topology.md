@@ -204,7 +204,7 @@ from compose, and a summary taken while billing is down answers tokens with a `n
 ## What would change it
 
 Nginx in front of gateway replicas, and Kubernetes with a Deployment per service, are written down in
-`.claude/skills/carmonai-architecture/references/platform.md` and are not built. A second replica changes the
+`.claude/skills/carmona-architecture/references/platform.md` and are not built. A second replica changes the
 picture above in two specific places: the gateway's flood brake and inference-service's in-flight caps and
 virtual token counters are per-JVM memory, so both need shared counters first. A single engine endpoint per
 model is the third ceiling. [Known gaps](../reference/gaps.md) has them.
@@ -215,6 +215,6 @@ model is the third ceiling. [Known gaps](../reference/gaps.md) has them.
   healthchecks, volumes and every dependency edge (the GPU engine lives in `compose.gpu.yaml`).
 - [gateway application.yaml](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/resources/application.yaml)
   — the route table: id, uri, path, timeout, bulkhead and fallback code per route.
-- [UsageApplication.java](https://github.com/carmonai/back/blob/main/api/usage-service/src/main/java/ai/carmonai/usage/UsageApplication.java)
-  and [BillingApplication.java](https://github.com/carmonai/back/blob/main/api/billing-service/src/main/java/ai/carmonai/billing/BillingApplication.java)
+- [UsageApplication.java](https://github.com/carmonai/back/blob/main/api/usage-service/src/main/java/ai/carmona/usage/UsageApplication.java)
+  and [BillingApplication.java](https://github.com/carmonai/back/blob/main/api/billing-service/src/main/java/ai/carmona/billing/BillingApplication.java)
   — the two `@EnableFeignClients` lines that close the mutual dependency.

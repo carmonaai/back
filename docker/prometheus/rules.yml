@@ -1,7 +1,7 @@
 # Recording and alert rules. Prometheus evaluates them and Grafana lists them and their state (the
 # Prometheus datasource is provisioned with alert management on). There is deliberately no Alertmanager:
 # no destination has been chosen, so firing state is what an operator reads. What to do about each alert is
-# in .claude/skills/carmonai-architecture/references/observability.md.
+# in .claude/skills/carmona-architecture/references/observability.md.
 groups:
   # The SLOs, using the targets the code and the benches already hold (inference-plan.md §8; phase-3 and
   # phase-5 measurements): TTFT p95 below 2 s and inter-token p95 below 100 ms are the goodput definition,
@@ -9,20 +9,20 @@ groups:
   - name: inference-slo
     rules:
       - record: ttft:p95_5m
-        expr: histogram_quantile(0.95, sum by (le, model, tier) (rate(carmonai_inference_ttft_seconds_bucket[5m])))
+        expr: histogram_quantile(0.95, sum by (le, model, tier) (rate(carmona_inference_ttft_seconds_bucket[5m])))
 
       # Goodput: the share of requests whose first token arrived within 2 s (2 is a bucket boundary in the
       # metric contract, which is why it can be read straight off the histogram).
       - record: ttft:goodput_5m
         expr: |
-          sum by (model, tier) (rate(carmonai_inference_ttft_seconds_bucket{le="2"}[5m]))
-            / sum by (model, tier) (rate(carmonai_inference_ttft_seconds_count[5m]))
+          sum by (model, tier) (rate(carmona_inference_ttft_seconds_bucket{le="2"}[5m]))
+            / sum by (model, tier) (rate(carmona_inference_ttft_seconds_count[5m]))
 
       - record: itl:p95_5m
-        expr: histogram_quantile(0.95, sum by (le, model, tier) (rate(carmonai_inference_itl_seconds_bucket[5m])))
+        expr: histogram_quantile(0.95, sum by (le, model, tier) (rate(carmona_inference_itl_seconds_bucket[5m])))
 
   # The engine from its own /metrics, which is also what the queue-depth alert needs: inference-service's
-  # carmonai_engine_* gauges come from a reconcile that runs hourly, too coarse to alert on.
+  # carmona_engine_* gauges come from a reconcile that runs hourly, too coarse to alert on.
   - name: engine
     rules:
       - record: engine:requests_running
@@ -126,11 +126,11 @@ groups:
   # comparison is the only thing that sees it (plan §8).
   - name: revenue-integrity
     rules:
-      # carmonai_inference_reconcile_mismatch is 1 when the existing hourly reconcile finds the engine's
+      # carmona_inference_reconcile_mismatch is 1 when the existing hourly reconcile finds the engine's
       # token counters and usage-service's stored tokens outside its tolerance -- the WARN log today. Any
       # occurrence is worth an alert, so there is no for:.
       - alert: ReconciliationMismatch
-        expr: max by (model) (carmonai_inference_reconcile_mismatch) > 0
+        expr: max by (model) (carmona_inference_reconcile_mismatch) > 0
         labels: {severity: critical}
         annotations:
           summary: "engine counters and stored usage disagree for {{ $labels.model }}"
@@ -162,8 +162,8 @@ groups:
     rules:
       - alert: ErrorShareHigh
         expr: |
-          sum(rate(carmonai_inference_requests_total{outcome="error"}[5m]))
-            / sum(rate(carmonai_inference_requests_total[5m])) > 0.05
+          sum(rate(carmona_inference_requests_total{outcome="error"}[5m]))
+            / sum(rate(carmona_inference_requests_total[5m])) > 0.05
         for: 5m
         labels: {severity: warning}
         annotations:
@@ -175,8 +175,8 @@ groups:
 
       - alert: PayingTierRefusals
         expr: |
-          sum by (tier) (rate(carmonai_inference_requests_total{tier=~"standard|enterprise", code=~"model_busy|rate_limit_exceeded"}[5m]))
-            / sum by (tier) (rate(carmonai_inference_requests_total{tier=~"standard|enterprise"}[5m])) > 0.05
+          sum by (tier) (rate(carmona_inference_requests_total{tier=~"standard|enterprise", code=~"model_busy|rate_limit_exceeded"}[5m]))
+            / sum by (tier) (rate(carmona_inference_requests_total{tier=~"standard|enterprise"}[5m])) > 0.05
         for: 5m
         labels: {severity: warning}
         annotations:

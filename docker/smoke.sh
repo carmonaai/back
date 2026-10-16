@@ -27,8 +27,8 @@ note_fail() { NFAIL=$((NFAIL+1)); echo "  ^ FAIL #$NFAIL at smoke.sh line ${BASH
 skip_sim() { NSKIP=$((NSKIP+1)); echo "skip-sim  $1 (NOT RUN: $2)"; }
 G=${GATEWAY:-http://localhost:8080}
 # ENGINE picks the engine the inference checks run against: the simulator by default (CI, compose.yaml), or
-# ENGINE=vllm with the stack started from compose.yaml + compose.gpu.yaml. Both serve carmonai/qwen3-4b.
-M=${MODEL:-carmonai/qwen3-4b}
+# ENGINE=vllm with the stack started from compose.yaml + compose.gpu.yaml. Both serve carmona/qwen3-4b.
+M=${MODEL:-carmona/qwen3-4b}
 ENGINE=${ENGINE:-sim}
 # batch-service keeps its files in S3 (MinIO in compose): the batch section needs compose.minio.yaml, whose
 # MINIO_* and STORAGE_* variables must be in the environment or .env, as when the stack was started.
@@ -49,7 +49,7 @@ expect() {
   local want=$1; shift
   local got shown
   got=$(curl -s -o "$BODY" -w '%{http_code}' "$@")
-  shown=$(sed -E 's/Bearer [^ ]+/Bearer <redacted>/g; s/(carmonai-rt=)[^ ]+/\1<redacted>/g; s/("token":")[^"]+/\1<redacted>/g' <<<"$*")
+  shown=$(sed -E 's/Bearer [^ ]+/Bearer <redacted>/g; s/(carmona-rt=)[^ ]+/\1<redacted>/g; s/("token":")[^"]+/\1<redacted>/g' <<<"$*")
   if [[ $got != "$want" ]]; then echo "FAIL want $want got $got: $shown"; head -c 600 "$BODY"; echo; note_fail; return 0; fi
   echo "ok   $want  $shown"
 }
@@ -88,7 +88,7 @@ mail_token() {
   echo "$token"
 }
 # The refresh cookie the last response (-D "$HDRS") set.
-cookie() { sed -nE 's/^set-cookie: (__Host-carmonai-rt=[^;]+);.*/\1/ip' "$HDRS" | tr -d '\r' | tail -1; }
+cookie() { sed -nE 's/^set-cookie: (__Host-carmona-rt=[^;]+);.*/\1/ip' "$HDRS" | tr -d '\r' | tail -1; }
 
 # register, verify the email (Mailpit), login a fresh account; sets $email, $token and $rt (refresh cookie)
 account() {
@@ -105,8 +105,8 @@ account() {
 account
 # A known email answers like a new one (no account enumeration); its owner gets an email instead.
 expect 202 "${J[@]}" -X POST "$G/auth/register" -d "{\"name\":\"Smoke\",\"email\":\"${email^^}\",\"password\":\"$pass\"}"
-for _ in $(seq 20); do all=$(mails "$email"); grep -q 'Você já tem uma conta na Carmonai' <<<"$all" && break; sleep 0.5; done
-grep -q 'Você já tem uma conta na Carmonai' <<<"$all" && echo "ok   the owner of the known email was told by email" \
+for _ in $(seq 20); do all=$(mails "$email"); grep -q 'Você já tem uma conta na Carmona' <<<"$all" && break; sleep 0.5; done
+grep -q 'Você já tem uma conta na Carmona' <<<"$all" && echo "ok   the owner of the known email was told by email" \
   || { echo "FAIL no 'already registered' email"; note_fail; }
 expect 400 "${J[@]}" -X POST "$G/auth/register" -d '{"name":"Smoke","email":"not-an-email","password":"correct-horse"}'
 expect 401 "${J[@]}" -X POST "$G/auth/login" -d "{\"email\":\"$email\",\"password\":\"wrong-password\"}"
@@ -378,7 +378,7 @@ rm -f "$big"
 curl -sN --max-time 1 "${K2[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" -d "$(chat "$canary Write a long story." 500 ',"stream":true')" >/dev/null || true
 expect 400 "${K2[@]}" "$G/v1/models?api_key=cmn_test_$canary"
 sleep 2   # let batches and logs flush
-access_log() { MSYS_NO_PATHCONV=1 "${DC[@]}" exec -T gateway sh -c 'cat /var/log/carmonai/access.log'; }
+access_log() { MSYS_NO_PATHCONV=1 "${DC[@]}" exec -T gateway sh -c 'cat /var/log/carmona/access.log'; }
 valkey_file() { MSYS_NO_PATHCONV=1 "${DC[@]}" exec -T valkey sh -c 'cat /data/appendonlydir/*'; }
 leaks=$( { "${DC[@]}" logs --no-color 2>&1; "${DC[@]}" exec -T db sh -c 'pg_dumpall -U "$POSTGRES_USER"'; access_log; valkey_file; } \
   | grep -acF -e "$canary" -e "Bearer " -e "$key2" -e "api_key=" -e "${keep#*=}" || true)

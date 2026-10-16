@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds the simulated engine with the disconnect patch into a local image (never :latest):
-#   bash docker/sim/build.sh                       -> carmonai/llm-d-inference-sim:v0.11.4-disconnect.1
+#   bash docker/sim/build.sh                       -> carmona/llm-d-inference-sim:v0.11.4-disconnect.1
 #   SIM_TEST=1 bash docker/sim/build.sh            -> also runs the simulator's Go tests (the patch's included) in the build
 #   SIM_SRC=<dir> SIM_IMAGE=<tag> bash docker/sim/build.sh
 #
@@ -20,7 +20,7 @@
 # It needs Docker (slots: this is a build, take one with work/docker-slots.sh) and network (Go modules, base images).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-TAG=${SIM_IMAGE:-carmonai/llm-d-inference-sim:v0.11.4-disconnect.1}
+TAG=${SIM_IMAGE:-carmona/llm-d-inference-sim:v0.11.4-disconnect.1}
 SRC=${SIM_SRC:-$here/../../../prototype-sim/_sim-src-v0.11.4}
 SRC_PIN=c014e9cf50b2690601b7467efb964fd22ee6d3343a839e3ebda14039406c7f0b
 [[ $TAG == *:* && $TAG != *:latest ]] || { echo "SIM_IMAGE must carry an explicit tag that is not latest: $TAG" >&2; exit 1; }

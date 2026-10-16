@@ -81,7 +81,7 @@ CREATE TABLE price (
 ```
 
 Amounts are micro-BRL per million tokens (`1 BRL = 1,000,000`), and the seeded values are prototype
-placeholders, not commercial ones: `carmonai/qwen3-0.6b` at 0.10 / 0.05 / 0.40 and `carmonai/qwen3-4b` at
+placeholders, not commercial ones: `carmona/qwen3-0.6b` at 0.10 / 0.05 / 0.40 and `carmona/qwen3-4b` at
 0.50 / 0.25 / 2.00 (input / cached input / output), batch at half the sync price, from a second migration.
 
 The arithmetic lives in the **library**, as `Price`, because both sides of the money need it: billing-service
@@ -125,7 +125,7 @@ before it gets that far.
 
 ## Billing one window
 
-`BillingJobs.debit` runs every `carmonai.billing.debit-every` (60 s) and calls `BillingService.debit()`, which
+`BillingJobs.debit` runs every `carmona.billing.debit-every` (60 s) and calls `BillingService.debit()`, which
 bills at most `MAX_WINDOWS_PER_RUN = 100` windows per run. For each window, `debitNextWindow()`:
 
 1. reads the cursor — the last billed `window_start` — and asks usage-service for the rows of the first sealed
@@ -183,7 +183,7 @@ spending for it instead of quietly allowing it.
 
 `reconcile()` reads every row of that join, re-syncs every flag, and logs an ERROR naming each organization
 whose balance differs from its ledger. It **never repairs a balance** — an automatic correction would hide the
-bug that caused the drift. It runs every `carmonai.billing.reconcile-every` (10 minutes) and on demand at
+bug that caused the drift. It runs every `carmona.billing.reconcile-every` (10 minutes) and on demand at
 `GET /actuator/reconcile`, on the management port (8081) only and never routed: it returns the counts plus up
 to `MAX_CHECKS = 100` rows, drifted first. `docker/revenue-check.sh` runs the same comparison and exits
 non-zero when the books disagree, which is what makes this a check rather than a dashboard.
@@ -214,7 +214,7 @@ token generated.
 ## Where to look
 
 - [create_tables.sql](https://github.com/carmonai/back/blob/main/api/billing-service/src/main/resources/db/migration/V2026.10.03.001__create_tables.sql) — prices, the ledger, the balance and the triggers.
-- [BillingService.java](https://github.com/carmonai/back/blob/main/api/billing-service/src/main/java/ai/carmonai/billing/BillingService.java) — one window, one transaction, and the missing-price stop.
-- [BillingRepository.java](https://github.com/carmonai/back/blob/main/api/billing-service/src/main/java/ai/carmonai/billing/BillingRepository.java) — the idempotent insert, the balance upsert and the outer join.
-- [CreditFlags.java](https://github.com/carmonai/back/blob/main/api/billing-service/src/main/java/ai/carmonai/billing/CreditFlags.java) — the flag the gateway reads.
-- [Price.java](https://github.com/carmonai/back/blob/main/api/billing/src/main/java/ai/carmonai/billing/Price.java) — the one arithmetic both sides of the money use.
+- [BillingService.java](https://github.com/carmonai/back/blob/main/api/billing-service/src/main/java/ai/carmona/billing/BillingService.java) — one window, one transaction, and the missing-price stop.
+- [BillingRepository.java](https://github.com/carmonai/back/blob/main/api/billing-service/src/main/java/ai/carmona/billing/BillingRepository.java) — the idempotent insert, the balance upsert and the outer join.
+- [CreditFlags.java](https://github.com/carmonai/back/blob/main/api/billing-service/src/main/java/ai/carmona/billing/CreditFlags.java) — the flag the gateway reads.
+- [Price.java](https://github.com/carmonai/back/blob/main/api/billing/src/main/java/ai/carmona/billing/Price.java) — the one arithmetic both sides of the money use.

@@ -1,4 +1,4 @@
-# Carmonai
+# Carmona
 
 **An OpenAI-compatible inference platform for Brazil: prepaid credit in BRL, LGPD by design, sold in tiers.**
 

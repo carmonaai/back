@@ -6,7 +6,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 export MSYS_NO_PATHCONV=1
-P=carmonai-p2-har-vk
+P=carmona-p2-har-vk
 V=${P}_valkey-data
 IMG=$(sed -nE 's#^[[:space:]]*image: (valkey/valkey:[^[:space:]]+).*#\1#p' compose.yaml | head -1)
 DC=(docker compose -p "$P" -f compose.yaml)

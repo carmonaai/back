@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Carmonai workflow</title>
+<title>Carmona workflow</title>
 <style>
   body { font: 15px/1.45 system-ui, sans-serif; margin: 0; background: #f6f7f9; color: #07182e; }
   #say { position: sticky; top: 0; z-index: 1; background: #07182e; color: #fff; padding: 12px 20px; font-size: 19px; min-height: 52px; }
@@ -28,7 +28,7 @@
 <body>
 <div id="say">Press <b>Run everything</b>, or run the steps one by one.</div>
 <main>
-  <h1>Carmonai: the whole workflow</h1>
+  <h1>Carmona: the whole workflow</h1>
   <p>This page plays the console, on <code>localhost:3000</code> (the origin the stack trusts). It talks only to the gateway, the way a customer would. Three <code>/dev</code> helpers stand in for things a customer can't do: read the email Mailpit caught, add prepaid credit, and show a balance.</p>
 
   <h2>How it's built</h2>
@@ -118,7 +118,7 @@ const steps = [
       s.token = r.data.token;
       const me = await call("GET", "/auth/whoami", { bearer: s.token });
       s.id = me.data.id;
-      out(`POST /auth/login → ${r.status}\naccess token: ${mask(s.token)}\nrefresh cookie visible to JavaScript? ${document.cookie.includes("carmonai-rt") ? "yes" : "no (HttpOnly)"}\nGET /auth/whoami → ${pretty(me.data)}`);
+      out(`POST /auth/login → ${r.status}\naccess token: ${mask(s.token)}\nrefresh cookie visible to JavaScript? ${document.cookie.includes("carmona-rt") ? "yes" : "no (HttpOnly)"}\nGET /auth/whoami → ${pretty(me.data)}`);
       return r.status === 200 && me.status === 200;
     } },
   { title: "5. Refresh the session", say: "Refresh trades the cookie for a new token <b>and a new cookie</b>. An old cookie used again means it was copied: the session ends.",
@@ -144,7 +144,7 @@ const steps = [
     run: async out => {
       const res = await fetch("/api/v1/chat/completions", { method: "POST",
         headers: { "Content-Type": "application/json", Authorization: "Bearer " + s.key },
-        body: JSON.stringify({ model: "carmonai/qwen3-0.6b", stream: true, max_tokens: 60,
+        body: JSON.stringify({ model: "carmona/qwen3-0.6b", stream: true, max_tokens: 60,
           messages: [{ role: "user", content: "In one sentence, what does an API gateway do?" }] }) });
       const head = `→ ${res.status}  X-Request-Id ${res.headers.get("X-Request-Id")}  requests left this minute: ${res.headers.get("x-ratelimit-remaining-requests")}\n\n`;
       let text = "", buffer = "";
@@ -165,7 +165,7 @@ const steps = [
     run: async out => {
       const questions = ["What is 2 + 2?", "Name a color of the sky.", "Say hello in Portuguese."];
       const jsonl = questions.map((q, i) => JSON.stringify({ custom_id: "q" + (i + 1), method: "POST", url: "/v1/chat/completions",
-        body: { model: "carmonai/qwen3-0.6b", max_tokens: 20, messages: [{ role: "user", content: q }] } })).join("\n");
+        body: { model: "carmona/qwen3-0.6b", max_tokens: 20, messages: [{ role: "user", content: q }] } })).join("\n");
       const form = new FormData(); form.append("purpose", "batch"); form.append("file", new Blob([jsonl]), "demo.jsonl");
       const up = await fetch("/api/v1/files", { method: "POST", headers: { Authorization: "Bearer " + s.key }, body: form });
       const file = await up.json();

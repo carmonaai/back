@@ -10,8 +10,8 @@ for trusting them.
 <svg viewBox="0 0 760 280" role="img" aria-labelledby="dkb-title" aria-describedby="dkb-desc"
      xmlns="http://www.w3.org/2000/svg">
   <title id="dkb-title">The knowledge base, and what defers to what</title>
-  <desc id="dkb-desc">Four skills across the top: carmonai holds the status and the pending decisions,
-  carmonai-architecture holds the rules and the inference plan, carmonai-new-service holds the templates and
+  <desc id="dkb-desc">Four skills across the top: carmona holds the status and the pending decisions,
+  carmona-architecture holds the rules and the inference plan, carmona-new-service holds the templates and
   the pitfalls, and batch-inference-design holds the video notes the plan came from. Below them sit the files
   they point at: templates, the phase logs, the inference plan and the plan review. The handoff document
   summarizes everything, and a dotted line runs from it to the repository, which wins whenever the notes and
@@ -45,21 +45,21 @@ for trusting them.
           d="M176 248 H596" marker-end="url(#dkb-arrow-flow)"/>
   </g>
 
-  <g class="cmn-node cmn-node--entry cmn-node--flow" id="dkb-carmonai" aria-labelledby="dkb-carmonai-label">
+  <g class="cmn-node cmn-node--entry cmn-node--flow" id="dkb-carmona" aria-labelledby="dkb-carmona-label">
     <rect x="16" y="34" width="130" height="56" rx="10"/>
-    <text id="dkb-carmonai-label" x="81" y="54">carmonai</text>
+    <text id="dkb-carmona-label" x="81" y="54">carmona</text>
     <text class="cmn-sub" x="81" y="72">status, decisions</text>
   </g>
 
   <g class="cmn-node cmn-node--flow" id="dkb-architecture" aria-labelledby="dkb-architecture-label">
     <rect x="166" y="34" width="180" height="56" rx="10"/>
-    <text id="dkb-architecture-label" x="256" y="54">carmonai-architecture</text>
+    <text id="dkb-architecture-label" x="256" y="54">carmona-architecture</text>
     <text class="cmn-sub" x="256" y="72">rules and the plan</text>
   </g>
 
   <g class="cmn-node cmn-node--flow" id="dkb-newservice" aria-labelledby="dkb-newservice-label">
     <rect x="366" y="34" width="180" height="56" rx="10"/>
-    <text id="dkb-newservice-label" x="456" y="54">carmonai-new-service</text>
+    <text id="dkb-newservice-label" x="456" y="54">carmona-new-service</text>
     <text class="cmn-sub" x="456" y="72">scaffold and pitfalls</text>
   </g>
 
@@ -132,8 +132,8 @@ for trusting them.
   <text class="cmn-label" x="385" y="252">the repo wins</text>
 </svg>
 </div>
-<figcaption>The four skills are the entry points, loaded by name: `carmonai` first for context,
-`carmonai-architecture` before changing any service, `carmonai-new-service` when creating one, and
+<figcaption>The four skills are the entry points, loaded by name: `carmona` first for context,
+`carmona-architecture` before changing any service, `carmona-new-service` when creating one, and
 `batch-inference-design` when working on the inference path. Under them are the files they point at. The
 inference plan is the one document the whole inference build came from, and it came from the video notes;
 `plan-review` ranked the gaps the plan then closed. The handoff summarizes all of it — and the dotted line to
@@ -146,11 +146,11 @@ the repository is the rule that overrides everything above it.</figcaption>
   <span><i class="is-accent"></i> the documents that bind the others (teal outline)</span>
 </div>
 
-1. **`carmonai` is the first skill to load.** Product, repository map, what exists versus what is planned, and
+1. **`carmona` is the first skill to load.** Product, repository map, what exists versus what is planned, and
    the decisions still open. It is the one that tells you the rest exist.
-2. **`carmonai-architecture` holds the rules** — module split, layering, the hardening overrides, LGPD
+2. **`carmona-architecture` holds the rules** — module split, layering, the hardening overrides, LGPD
    working rules and the stack — and the inference plan with its references.
-3. **`carmonai-new-service` holds the scaffolding** and `references/templates.md`, including the pitfalls
+3. **`carmona-new-service` holds the scaffolding** and `references/templates.md`, including the pitfalls
    list, which is the most valuable file in the repository for anyone building a service here.
 4. **`batch-inference-design` is the distilled source material** the inference plan was derived from, with its
    own caveat about what carries over from interview constraints and what does not.
@@ -161,20 +161,20 @@ the repository is the rule that overrides everything above it.</figcaption>
    the deviations are read before the original intent.
 7. **The review ranked the gaps**, and the plan and the progress logs record which of them were closed.
 8. **And when any of it disagrees with the repository, the repository wins.** The handoff says it, the
-   `carmonai` skill says it, and the sections below show it happening.
+   `carmona` skill says it, and the sections below show it happening.
 
 ## What it is
 
-`.claude/skills/` holds five skills. Four are the project's own model of itself; the fifth, `carmonai-handson`,
+`.claude/skills/` holds five skills. Four are the project's own model of itself; the fifth, `carmona-handson`,
 is a thin index over the Insper course pages this architecture follows and is only fetched on demand.
 
 | Skill | Holds | Load it when |
 |---|---|---|
-| `carmonai` | product, repository map, built-versus-planned, pending decisions | starting anything in this workspace |
-| `carmonai-architecture` | architecture rules, hardening overrides, LGPD rules, the inference plan | designing, reviewing or changing a service |
-| `carmonai-new-service` | how to scaffold a `<name>` + `<name>-service` pair, plus templates and pitfalls | creating or restructuring a service |
+| `carmona` | product, repository map, built-versus-planned, pending decisions | starting anything in this workspace |
+| `carmona-architecture` | architecture rules, hardening overrides, LGPD rules, the inference plan | designing, reviewing or changing a service |
+| `carmona-new-service` | how to scaffold a `<name>` + `<name>-service` pair, plus templates and pitfalls | creating or restructuring a service |
 | `batch-inference-design` | the distilled system design the inference plan came from | designing or reviewing the inference path |
-| `carmonai-handson` | an index of the reference course's hands-on pages | you want the course material behind a pattern |
+| `carmona-handson` | an index of the reference course's hands-on pages | you want the course material behind a pattern |
 
 Each is a `SKILL.md` with YAML front matter (`name`, `description`) and a `references/` directory of longer
 files. The front matter matters: the description is what decides whether an agent loads the skill at all,
@@ -182,18 +182,18 @@ which is why every one of them says when to use it rather than what it contains.
 
 ## What each one holds
 
-**`carmonai` — status and decisions.** A repository map naming every module and what it owns; a status table
+**`carmona` — status and decisions.** A repository map naming every module and what it owns; a status table
 with a date against each phase; a pending-decisions section; and a pointer to the handoff. It is the only place
 that lists the decisions the user has to make — hosting, PSP, retention, legal entity, where libraries are
 published — as opposed to the ones the project already made.
 
-**`carmonai-architecture` — the rules, and the plan.** The rules half is short and binding: one schema per
+**`carmona-architecture` — the rules, and the plan.** The rules half is short and binding: one schema per
 service, a `XController` Feign interface per library, `XResource → XService → XRepository`, ids as UUID
-strings, Flyway date-versioned migrations, `ai.carmonai` everywhere, then six hardening overrides that win
+strings, Flyway date-versioned migrations, `ai.carmona` everywhere, then six hardening overrides that win
 where the reference course's patterns conflict with them. The references half is the inference plan (286 lines:
 phases 0–7, decisions, backlog), the plan review, a progress log per phase, and `observability.md`.
 
-**`carmonai-new-service` — the scaffold.** Three numbered steps with a *done when* line each, and
+**`carmona-new-service` — the scaffold.** Three numbered steps with a *done when* line each, and
 `references/templates.md`: a service pom, tests, `application.yaml`, a Dockerfile, the compose block, and a
 **pitfalls list** of thirty-seven things that already went wrong here — Boot 4 renaming starters, Jackson 3's
 `asString()`, `retryWhen` wrapping the real error, `MockServerHttpRequest` not parsing cookies, Git Bash
@@ -204,7 +204,7 @@ caveat at the top that the video's constraints are interview constraints. It car
 ideas survive contact with a real engine and which do not, and the plan's §1 is that table applied.
 
 **The handoff document.** An artifact, not a file in the repository, written 2026-10-04 at the end of phase 7a.
-It summarises the status, the built-versus-planned picture and the known gaps, and both the `carmonai` skill
+It summarises the status, the built-versus-planned picture and the known gaps, and both the `carmona` skill
 and `revenue-leaks-progress.md` refer to it by URL. Treat it as a snapshot with a date on it: everything after
 2026-10-04 — flex processing, the bounded admission wait, the capacity metrics, API key expiry and rotation,
 the money endpoints, the observability stack — postdates it.
@@ -235,13 +235,13 @@ list are the authoritative version of that paragraph.
 - where the libraries are published so services can depend on them (today they resolve from the reactor);
 - the hosting and CI target.
 
-Two entries in `carmonai`'s pending list are already answered by the code and should be read as closed: token
+Two entries in `carmona`'s pending list are already answered by the code and should be read as closed: token
 transport (a Bearer access token **and** an HttpOnly refresh cookie both exist, and `POST /auth/logout` is
 built), and refresh tokens (access tokens are 15 minutes and `POST /auth/refresh` rotates the cookie).
 
 ## Where the source of truth lives
 
-The rule is one sentence, and it appears in the `carmonai` skill and in the progress logs: **when the notes
+The rule is one sentence, and it appears in the `carmona` skill and in the progress logs: **when the notes
 and the repository disagree, the repository wins.**
 
 That is not a formality. The notes are written at the end of a phase and are not edited when a later phase
@@ -249,13 +249,13 @@ changes the thing they describe. Four live examples, all verifiable by opening t
 
 | The note says | The repository says |
 |---|---|
-| `carmonai` calls them "Java 27 microservices" | every `pom.xml` targets Java 25 (`<java.version>25</java.version>`) |
-| `carmonai`'s repository map: "`docker/` — compose files (empty today)" | fourteen services in `docker/compose.yaml` |
-| `carmonai`'s status table: "observability, K8s, CI — later" | `ci.yaml` runs; `docker/prometheus` and `docker/grafana` exist |
+| `carmona` calls them "Java 27 microservices" | every `pom.xml` targets Java 25 (`<java.version>25</java.version>`) |
+| `carmona`'s repository map: "`docker/` — compose files (empty today)" | fourteen services in `docker/compose.yaml` |
+| `carmona`'s status table: "observability, K8s, CI — later" | `ci.yaml` runs; `docker/prometheus` and `docker/grafana` exist |
 | plan §12: the `/rotate` gateway route and the cached-key expiry check are "pending (task C)" | both are in `gateway-service`'s `application.yaml` and `ApiKeyAuthenticationManager` |
-| `observability.md` §Gaps 1–2: the `carmonai_inference_*` metrics "do not exist yet" | `Metrics.java` publishes them all, `reconcile_mismatch` included |
+| `observability.md` §Gaps 1–2: the `carmona_inference_*` metrics "do not exist yet" | `Metrics.java` publishes them all, `reconcile_mismatch` included |
 
-The same table applies to `carmonai-architecture`'s "Scope today: account, auth, organization, gateway", which
+The same table applies to `carmona-architecture`'s "Scope today: account, auth, organization, gateway", which
 predates the inference, usage, billing and batch work.
 
 The practical rule: use the notes to find the *why* and the *history* — a decision, a rejected alternative, a
@@ -290,13 +290,13 @@ permanent features with a recorded reason.
 
 ## Where to look
 
-- [carmonai/SKILL.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmonai/SKILL.md) — status,
+- [carmona/SKILL.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmona/SKILL.md) — status,
   repository map and pending decisions; load it first.
-- [carmonai-architecture/SKILL.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmonai-architecture/SKILL.md)
+- [carmona-architecture/SKILL.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmona-architecture/SKILL.md)
   — the architecture rules and the six hardening overrides that win over the reference.
-- [inference-plan.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmonai-architecture/references/inference-plan.md)
+- [inference-plan.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmona-architecture/references/inference-plan.md)
   — the plan every inference page on this site is derived from, with its progress notes at the top.
-- [plan-review-2026-10-02.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmonai-architecture/references/plan-review-2026-10-02.md)
+- [plan-review-2026-10-02.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmona-architecture/references/plan-review-2026-10-02.md)
   — the ranked findings, including the three billing bugs found before any of it was built.
-- [templates.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmonai-new-service/references/templates.md)
+- [templates.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmona-new-service/references/templates.md)
   — the templates, and the thirty-seven-entry pitfalls list.

@@ -96,7 +96,7 @@ where it is written.
 Two details make the login path uninformative in the other direction too:
 
 - **An unknown email costs the same as a known one.** The service hashes against a `DUMMY_HASH` of
-  `"carmonai-timing-dummy"` when the lookup misses, so the response time does not reveal whether the address
+  `"carmona-timing-dummy"` when the lookup misses, so the response time does not reveal whether the address
   exists.
 - **Only a correct password learns that the email is unverified.** `POST /accounts/login` answers 401 for a
   wrong password, and 403 with "verify your email first: follow the link we sent" for a right password on an
@@ -140,8 +140,8 @@ receiving the link proves the mailbox, and it calls `closeSessions` on auth-serv
 ends. If that call fails, the transaction rolls back and the link still works.
 
 Mail goes out over SMTP: `MAIL_HOST`, `MAIL_PORT` defaulting to 1025 (Mailpit in compose), a 2 s connect and
-3 s read/write timeout, from `carmonai.mail.from`. The bodies are plain text and the links point at
-`carmonai.console.url` (default `http://localhost:3000`), because the console is what posts the token back to
+3 s read/write timeout, from `carmona.mail.from`. The bodies are plain text and the links point at
+`carmona.console.url` (default `http://localhost:3000`), because the console is what posts the token back to
 the service. Addresses and tokens are never logged.
 
 ## Export
@@ -184,8 +184,8 @@ is an account nobody can log into; leaving it behind would also occupy the addre
 
 ## Where to look
 
-- [AccountController.java](https://github.com/carmonai/back/blob/main/api/account/src/main/java/ai/carmonai/account/AccountController.java) — the contract, including the public and internal endpoints.
-- [AccountService.java](https://github.com/carmonai/back/blob/main/api/account-service/src/main/java/ai/carmonai/account/AccountService.java) — Argon2id, the dummy hash and the erasure order.
-- [AccountTokens.java](https://github.com/carmonai/back/blob/main/api/account-service/src/main/java/ai/carmonai/account/AccountTokens.java) — issue and spend, in one statement.
-- [Mailer.java](https://github.com/carmonai/back/blob/main/api/account-service/src/main/java/ai/carmonai/account/Mailer.java) — the three emails and the console links.
+- [AccountController.java](https://github.com/carmonai/back/blob/main/api/account/src/main/java/ai/carmona/account/AccountController.java) — the contract, including the public and internal endpoints.
+- [AccountService.java](https://github.com/carmonai/back/blob/main/api/account-service/src/main/java/ai/carmona/account/AccountService.java) — Argon2id, the dummy hash and the erasure order.
+- [AccountTokens.java](https://github.com/carmonai/back/blob/main/api/account-service/src/main/java/ai/carmona/account/AccountTokens.java) — issue and spend, in one statement.
+- [Mailer.java](https://github.com/carmonai/back/blob/main/api/account-service/src/main/java/ai/carmona/account/Mailer.java) — the three emails and the console links.
 - [email_flows.sql](https://github.com/carmonai/back/blob/main/api/account-service/src/main/resources/db/migration/V2026.10.03.001__email_flows.sql) — the token table and the verified column.

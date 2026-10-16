@@ -146,8 +146,8 @@ limit. OpenAI allows 200 MB. Object storage is the fix and it waits on the hosti
 
 ## Where to look
 
-- [`BatchWorker.java`](https://github.com/carmonai/back/blob/main/api/batch-service/src/main/java/ai/carmonai/batch/BatchWorker.java) — the claim, the call, the outcome per status.
-- [`BatchService.java`](https://github.com/carmonai/back/blob/main/api/batch-service/src/main/java/ai/carmonai/batch/BatchService.java) — the up-front validation and the batch lifecycle.
-- [`BatchFinisher.java`](https://github.com/carmonai/back/blob/main/api/batch-service/src/main/java/ai/carmonai/batch/BatchFinisher.java) — completing, cancelling, expiring, and writing the output files.
-- [`BatchRepository.java`](https://github.com/carmonai/back/blob/main/api/batch-service/src/main/java/ai/carmonai/batch/BatchRepository.java) — `FOR UPDATE SKIP LOCKED`, which is the whole lease mechanism.
+- [`BatchWorker.java`](https://github.com/carmonai/back/blob/main/api/batch-service/src/main/java/ai/carmona/batch/BatchWorker.java) — the claim, the call, the outcome per status.
+- [`BatchService.java`](https://github.com/carmonai/back/blob/main/api/batch-service/src/main/java/ai/carmona/batch/BatchService.java) — the up-front validation and the batch lifecycle.
+- [`BatchFinisher.java`](https://github.com/carmonai/back/blob/main/api/batch-service/src/main/java/ai/carmona/batch/BatchFinisher.java) — completing, cancelling, expiring, and writing the output files.
+- [`BatchRepository.java`](https://github.com/carmonai/back/blob/main/api/batch-service/src/main/java/ai/carmona/batch/BatchRepository.java) — `FOR UPDATE SKIP LOCKED`, which is the whole lease mechanism.
 - [Batch API design](../operations/batch-api.md) — the same design argued against OpenAI's, with the exit-check numbers.

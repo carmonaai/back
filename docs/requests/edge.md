@@ -196,13 +196,13 @@ never a header, a body or a query string.
 
 ## Where to look
 
-- [`V1RequestFilter.java`](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmonai/gateway/V1RequestFilter.java)
+- [`V1RequestFilter.java`](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/V1RequestFilter.java)
   — the four checks and their exact refusal strings.
-- [`AccessLogFilter.java`](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmonai/gateway/AccessLogFilter.java)
+- [`AccessLogFilter.java`](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/AccessLogFilter.java)
   — the request id and the one line written at the end.
 - [`logback-spring.xml`](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/resources/logback-spring.xml)
   — the access log's own file and its 184-day retention.
-- [`OpenAiErrors.java`](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmonai/gateway/OpenAiErrors.java)
+- [`OpenAiErrors.java`](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/OpenAiErrors.java)
   — the single error writer, in OpenAI's shape, with fixed messages.
 - [`application.yaml`](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/resources/application.yaml)
   — the `inference` route: its predicates, `response-timeout` and `max-concurrent`.

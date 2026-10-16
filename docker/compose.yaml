@@ -4,7 +4,7 @@
 # run a simulated one). compose.gpu.yaml swaps in the real vLLM on the laptop GPU. The `fleet` profile adds a fleet
 # (many simulators behind a stand-in, several gateway and inference replicas):
 #   docker compose --env-file .env --env-file fleet.env --profile fleet up -d --build --wait
-name: carmonai
+name: carmona
 
 x-readiness: &readiness
   # No curl in the JRE image: bash's /dev/tcp asks the actuator on the management port.
@@ -31,7 +31,7 @@ x-valkey: &valkey
 # pulls it. ENGINE_IMAGE swaps in another, for example upstream's own, pinned by digest (the tag alone is not a pin, G11 of
 # work/prototype-sim/FINDINGS-contract.md): ghcr.io/llm-d/llm-d-inference-sim:v0.11.4@sha256:d60f0fb00ac62d0eb7c100e7a6816b8acec487aa06f0f38dba72b0ab1754e8f6
 # (then run smoke.sh with SIM_STOCK=1: that engine cannot pass the two assertions below).
-x-engine-image: &engine-image ${ENGINE_IMAGE:-carmonai/llm-d-inference-sim:v0.11.4-disconnect.1}
+x-engine-image: &engine-image ${ENGINE_IMAGE:-carmona/llm-d-inference-sim:v0.11.4-disconnect.1}
 
 services:
   db:
@@ -135,7 +135,7 @@ services:
     networks: [internal]
 
   # The default engine: llm-d-inference-sim, shaped like the measured vLLM GPU profile (compose.gpu.yaml): model
-  # carmonai/qwen3-4b, 4 running + 8 waiting, a 4096 window, latency calibrated to the laptop measurements (TTFT p95
+  # carmona/qwen3-4b, 4 running + 8 waiting, a 4096 window, latency calibrated to the laptop measurements (TTFT p95
   # 0.8 s, 24 ms per token). The defaults of the simulator (5 slots, 1024 window, queue 1000) are traps: every flag is set.
   # Echo mode makes the output as long as the prompt, so long streams (smoke's hang-up and tier-share steps, the
   # fairness drill) do not depend on a random output length; the usage the engine counts is still its own.
@@ -147,7 +147,7 @@ services:
     image: *engine-image
     pull_policy: never                  # a local build (docker/sim/build.sh): a missing image is an error, not a pull from a registry
     command:
-      - --model=carmonai/qwen3-4b
+      - --model=carmona/qwen3-4b
       - --port=8000
       - --mode=echo
       - --max-num-seqs=4
@@ -214,9 +214,9 @@ services:
     build: ../api/usage-service
     environment:
       <<: *database
-      CARMONAI_USAGE_WINDOW: 10s
-      CARMONAI_USAGE_GRACE: 2s
-      CARMONAI_USAGE_SEAL_EVERY: 2s
+      CARMONA_USAGE_WINDOW: 10s
+      CARMONA_USAGE_GRACE: 2s
+      CARMONA_USAGE_SEAL_EVERY: 2s
     depends_on:
       db: { condition: service_healthy }
     healthcheck: *readiness
@@ -227,7 +227,7 @@ services:
     build: ../api/billing-service
     environment:
       <<: [*database, *valkey]
-      CARMONAI_BILLING_DEBIT_EVERY: 2s
+      CARMONA_BILLING_DEBIT_EVERY: 2s
     depends_on:
       db: { condition: service_healthy }
       valkey: { condition: service_healthy }
@@ -244,17 +244,17 @@ services:
       <<: *valkey
       # Spring replaces a whole list from the first source that defines any element of it, so the environment states
       # every field of the model (application.yaml's list is not merged with it).
-      CARMONAI_INFERENCE_MODELS_0_ID: carmonai/qwen3-4b
-      CARMONAI_INFERENCE_MODELS_0_CREATED: "2026-10-01T00:00:00Z"   # BE-12: required, shown as Unix seconds by GET /v1/models/{id}
-      CARMONAI_INFERENCE_MODELS_0_URL: ${ENGINE_URL:-http://engine:8000}
-      CARMONAI_INFERENCE_MODELS_0_APIKEY: ${ENGINE_API_KEY:?set in .env}
-      CARMONAI_INFERENCE_MODELS_0_CONTEXTWINDOW: 4096
-      CARMONAI_INFERENCE_MODELS_0_MAXOUTPUT: 1024
-      CARMONAI_INFERENCE_MODELS_0_SLOTS: ${ENGINE_SLOTS:-4}
-      CARMONAI_INFERENCE_MODELS_0_QUEUE: ${ENGINE_QUEUE:-2}
-      CARMONAI_INFERENCE_EXPECTEDREPLICAS: ${INFERENCE_REPLICAS:-1}
-      CARMONAI_INFERENCE_RECONCILEEVERY: ${RECONCILE_EVERY:-1h}
-      CARMONAI_INFERENCE_USAGECLAIMAFTER: 10s   # a killed instance's unconfirmed usage events go out within seconds (default 60 s)
+      CARMONA_INFERENCE_MODELS_0_ID: carmona/qwen3-4b
+      CARMONA_INFERENCE_MODELS_0_CREATED: "2026-10-01T00:00:00Z"   # BE-12: required, shown as Unix seconds by GET /v1/models/{id}
+      CARMONA_INFERENCE_MODELS_0_URL: ${ENGINE_URL:-http://engine:8000}
+      CARMONA_INFERENCE_MODELS_0_APIKEY: ${ENGINE_API_KEY:?set in .env}
+      CARMONA_INFERENCE_MODELS_0_CONTEXTWINDOW: 4096
+      CARMONA_INFERENCE_MODELS_0_MAXOUTPUT: 1024
+      CARMONA_INFERENCE_MODELS_0_SLOTS: ${ENGINE_SLOTS:-4}
+      CARMONA_INFERENCE_MODELS_0_QUEUE: ${ENGINE_QUEUE:-2}
+      CARMONA_INFERENCE_EXPECTEDREPLICAS: ${INFERENCE_REPLICAS:-1}
+      CARMONA_INFERENCE_RECONCILEEVERY: ${RECONCILE_EVERY:-1h}
+      CARMONA_INFERENCE_USAGECLAIMAFTER: 10s   # a killed instance's unconfirmed usage events go out within seconds (default 60 s)
     deploy:
       replicas: ${INFERENCE_REPLICAS:-1}
     depends_on:
@@ -272,7 +272,7 @@ services:
     build: ../api/batch-service
     environment:
       <<: *database
-      CARMONAI_BATCH_ERASE_EVERY: 5s   # prototype: a closed organization's batch data goes within seconds
+      CARMONA_BATCH_ERASE_EVERY: 5s   # prototype: a closed organization's batch data goes within seconds
     depends_on:
       db: { condition: service_healthy }
       organization: { condition: service_healthy }
@@ -288,11 +288,11 @@ services:
     ports: ["${GATEWAY_PORTS:-127.0.0.1:8080:8080}"]
     deploy:
       replicas: ${GATEWAY_REPLICAS:-1}
-    volumes: ["access-logs:/var/log/carmonai"]   # Marco Civil access log, 6 months (logback-spring.xml)
+    volumes: ["access-logs:/var/log/carmona"]   # Marco Civil access log, 6 months (logback-spring.xml)
     environment:
       <<: *valkey
       CONSOLE_ORIGINS: http://localhost:3000     # the only Origin allowed on login/register/refresh/logout
-      CARMONAI_GATEWAY_REGISTRATIONOPEN: "true"  # the harness registers through the gateway; production must not set this
+      CARMONA_GATEWAY_REGISTRATIONOPEN: "true"  # the harness registers through the gateway; production must not set this
     depends_on:
       valkey: { condition: service_healthy }
       auth: { condition: service_healthy }

@@ -213,8 +213,8 @@ A rejection is revisited when its trigger fires, not when somebody finds the not
 
 ## Where to look
 
-- [inference-plan.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmonai-architecture/references/inference-plan.md) — the "Phase N built" blocks at the top of the file are the deviation log this page is built from.
-- [plan-review-2026-10-02.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmonai-architecture/references/plan-review-2026-10-02.md) — the free-GPU ranking and the transport decision, with the sources they were read from.
-- [templates.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmonai-new-service/references/templates.md) — "Pitfalls already hit": the failures that decided several entries above.
-- [V1RequestFilter.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmonai/gateway/V1RequestFilter.java) — the 4 MB body cap that makes object storage a future need rather than a preference.
+- [inference-plan.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmona-architecture/references/inference-plan.md) — the "Phase N built" blocks at the top of the file are the deviation log this page is built from.
+- [plan-review-2026-10-02.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmona-architecture/references/plan-review-2026-10-02.md) — the free-GPU ranking and the transport decision, with the sources they were read from.
+- [templates.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmona-new-service/references/templates.md) — "Pitfalls already hit": the failures that decided several entries above.
+- [V1RequestFilter.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/V1RequestFilter.java) — the 4 MB body cap that makes object storage a future need rather than a preference.
 - [docker/bench.sh](https://github.com/carmonai/back/blob/main/docker/bench.sh) — the check that replaced the load tools that could not see TTFT.

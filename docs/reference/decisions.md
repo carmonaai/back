@@ -141,7 +141,7 @@ no packet travels their dotted lines — the page marks them as undecided instea
 
 | Decision | Why | Rejected alternative |
 |---|---|---|
-| The refresh token lives in an HttpOnly `__Host-carmonai-rt` cookie, not a response body | An XSS can read `localStorage`; it cannot read an HttpOnly cookie. `SameSite=Strict` plus an `Origin` check on the cookie endpoints is the CSRF defence — walked through on [Who is calling](../requests/identity.md) | A refresh token in the JSON body, stored by the console SPA; a cookie without the `__Host-` prefix |
+| The refresh token lives in an HttpOnly `__Host-carmona-rt` cookie, not a response body | An XSS can read `localStorage`; it cannot read an HttpOnly cookie. `SameSite=Strict` plus an `Origin` check on the cookie endpoints is the CSRF defence — walked through on [Who is calling](../requests/identity.md) | A refresh token in the JSON body, stored by the console SPA; a cookie without the `__Host-` prefix |
 | Sessions end after 7 days idle or 30 days absolute, every refresh rotates the secret, and a reused cookie ends every copy | A stolen cookie is caught by its second use — the one signal a stateless JWT cannot give | Long-lived refresh tokens; a token-family table, when one row per login already answers the question |
 | Organizations are created explicitly; a person is not implicitly an organization | The organization is the billing unit, the rate-limit unit and the tenant, and membership has to be an explicit grant with a role | An implicit personal organization created at registration |
 | Membership is checked through organization-service on every console request, with no cache | A cached membership is a revoked membership that still works; `/v1` never checks membership at all, because the API key's organization is the identity there | Caching memberships in the gateway; re-checking membership on the inference path |
@@ -183,7 +183,7 @@ Nothing below has been chosen, and each blocks a named thing. Two further decisi
 |---|---|---|
 | Payment provider, and an NFS-e invoicing provider | Taking money from anyone: credit today comes from a staff grant | Efí (Pix-native, webhooks over mTLS), Mercado Pago (HMAC-signed webhooks) and Stripe (Pix, invite-only) all sign their webhooks; Asaas sends only a token. Whichever is chosen, the webhook is a hint and the charge is re-fetched before credit is given |
 | Retention periods for accounts, usage, batches and the access log | Any promise made in a customer contract | To confirm with counsel. The access log is already kept 184 days for Marco Civil art. 15, usage partitions 90 days, batch files 30 days |
-| Legal entity, and the LGPD questions around it | Any outside user at all | Whether Carmonai counts as a small agent (which doubles an incident deadline unless the processing is high-risk), whether inference is high-risk processing, and the Marco Civil access-log duty: all three are counsel questions, not engineering ones |
+| Legal entity, and the LGPD questions around it | Any outside user at all | Whether Carmona counts as a small agent (which doubles an incident deadline unless the processing is high-risk), whether inference is high-risk processing, and the Marco Civil access-log duty: all three are counsel questions, not engineering ones |
 
 ## Why it is like this
 
@@ -209,7 +209,7 @@ report, and a maximum API key lifetime if a customer asks for a policy.
 
 ## Where to look
 
-- [inference-plan.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmonai-architecture/references/inference-plan.md) — §12 is this page's spine, and the blocks at the top list every deviation, phase by phase.
-- [plan-review-2026-10-02.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmonai-architecture/references/plan-review-2026-10-02.md) — the review that changed several of these decisions, with its sources.
-- [Price.java](https://github.com/carmonai/back/blob/main/api/billing/src/main/java/ai/carmonai/billing/Price.java) — the one implementation of the money arithmetic, shared by the debit job and the customer summary.
-- [Admission.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmonai/inference/Admission.java) — where the tier share, the organization cap and the virtual token counter actually meet.
+- [inference-plan.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmona-architecture/references/inference-plan.md) — §12 is this page's spine, and the blocks at the top list every deviation, phase by phase.
+- [plan-review-2026-10-02.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmona-architecture/references/plan-review-2026-10-02.md) — the review that changed several of these decisions, with its sources.
+- [Price.java](https://github.com/carmonai/back/blob/main/api/billing/src/main/java/ai/carmona/billing/Price.java) — the one implementation of the money arithmetic, shared by the debit job and the customer summary.
+- [Admission.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Admission.java) — where the tier share, the organization cap and the virtual token counter actually meet.

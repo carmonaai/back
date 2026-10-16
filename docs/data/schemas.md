@@ -1,6 +1,6 @@
 # Schemas
 
-Carmonai keeps one PostgreSQL 17 database and gives each service that owns state its own schema inside it. A
+Carmona keeps one PostgreSQL 17 database and gives each service that owns state its own schema inside it. A
 service reaches its schema and no other, and the migrations that create the tables travel with the service
 that owns them. This page is the map of those schemas, the migration convention, and the two tables whose
 shape carries a decision rather than a column list.
@@ -216,7 +216,7 @@ in tension: the seal job reads by `received_at` and needs the separate `usage_ev
   — the partitioned table, the default partition and the seal cursor's first value.
 - [batch-service V2026.10.03.001](https://github.com/carmonai/back/blob/main/api/batch-service/src/main/resources/db/migration/V2026.10.03.001__create_tables.sql)
   — `batch_line`, its partial index, and the `ponytail:` comment on storing content in Postgres.
-- [BatchRepository.java](https://github.com/carmonai/back/blob/main/api/batch-service/src/main/java/ai/carmonai/batch/BatchRepository.java)
+- [BatchRepository.java](https://github.com/carmonai/back/blob/main/api/batch-service/src/main/java/ai/carmona/batch/BatchRepository.java)
   — the claim query, and the `FOR UPDATE SKIP LOCKED` used to delete and expire pending lines safely.
-- [PartitionJob.java](https://github.com/carmonai/back/blob/main/api/usage-service/src/main/java/ai/carmonai/usage/PartitionJob.java)
+- [PartitionJob.java](https://github.com/carmonai/back/blob/main/api/usage-service/src/main/java/ai/carmona/usage/PartitionJob.java)
   — the 7-days-ahead window, the advisory lock and the 90-day drop.

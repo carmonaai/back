@@ -140,7 +140,7 @@ immediate (trial, flex, batch) or arrives after the 1.5-second wait (standard, e
 4. **A bucket below 1 refuses the request at once** with 429 `rate_limit_exceeded` and the exact wait for the
    bucket that ran dry, in `retry-after-ms`.
 5. **The model's share for this tier is checked next**, in memory, not in Valkey: trial and the batch lines
-   get `C/2`, standard `0.85·C`, enterprise `C+q`. On `carmonai/qwen3-4b` (C = 4, q = 2) that is 2, 3 and 6 —
+   get `C/2`, standard `0.85·C`, enterprise `C+q`. On `carmona/qwen3-4b` (C = 4, q = 2) that is 2, 3 and 6 —
    and then the organization's own `max-in-flight` (2, 4 and 16) caps what one customer can take of it.
 6. **A paying tier that meets a cap waits**, polling every 100 ms for up to `admission-wait`, 1500 ms by
    default. Trial, flex and batch lines are refused at once: they are the traffic meant to be shed first.
@@ -206,15 +206,15 @@ priority 30, behind every interactive tier, and both are priced at half the sync
 
 ## Where to look
 
-- [`Admission.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmonai/inference/Admission.java)
+- [`Admission.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Admission.java)
   — both gates, the wait, the counter and the settlement.
 - [`buckets.lua`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/resources/buckets.lua)
   — the three buckets, their linear refill and the exact wait they return.
-- [`ChatRequest.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmonai/inference/ChatRequest.java)
+- [`ChatRequest.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/ChatRequest.java)
   — the input estimate, `max_tokens` and the `flex` flag.
 - [`application.yaml`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/resources/application.yaml)
   — `admission-wait`, `max-connections`, the three tiers and each model's `slots` and `queue`.
-- [`Metrics.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmonai/inference/Metrics.java)
+- [`Metrics.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Metrics.java)
   — the queue-wait timer and the in-flight and capacity gauges.
 
 **Next:** [4 · The relay](relay.md) — the permit is held, the slot is taken, and the request goes to the

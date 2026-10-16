@@ -1,6 +1,6 @@
 # Metering what runs
 
-Carmonai runs Prometheus and Grafana inside the compose network, provisioned entirely from files in `docker/`,
+Carmona runs Prometheus and Grafana inside the compose network, provisioned entirely from files in `docker/`,
 and inference-service publishes its own service-level indicators on the management port. This page is what is
 measured, what the numbers mean, and — with the same weight — what is not measured yet.
 
@@ -129,16 +129,16 @@ nothing: the engine's own counters are real series today.
 
 | Metric | Type | Tags | Buckets (seconds) |
 |---|---|---|---|
-| `carmonai_inference_ttft_seconds` | timer | `model`, `tier` | 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 30 |
-| `carmonai_inference_itl_seconds` | timer | `model`, `tier` | 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 5 |
-| `carmonai_inference_queue_wait_seconds` | timer | `model`, `tier` | 0.005, 0.01, 0.02, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10 |
-| `carmonai_inference_request_seconds` | timer | `model`, `tier` | 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600 |
-| `carmonai_inference_requests_total` | counter | `model`, `tier`, `outcome`, `code` | — |
-| `carmonai_inference_tokens_total` | counter | `model`, `mode`, `kind` | — |
-| `carmonai_inference_inflight` | gauge | `model` | — |
-| `carmonai_inference_capacity` | gauge | `model`, `tier` | — |
-| `carmonai_engine_requests_running`, `…_waiting`, `…_cache_usage` | gauge | `model` | — |
-| `carmonai_inference_reconcile_mismatch` | gauge | `model` | — |
+| `carmona_inference_ttft_seconds` | timer | `model`, `tier` | 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 30 |
+| `carmona_inference_itl_seconds` | timer | `model`, `tier` | 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 5 |
+| `carmona_inference_queue_wait_seconds` | timer | `model`, `tier` | 0.005, 0.01, 0.02, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10 |
+| `carmona_inference_request_seconds` | timer | `model`, `tier` | 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600 |
+| `carmona_inference_requests_total` | counter | `model`, `tier`, `outcome`, `code` | — |
+| `carmona_inference_tokens_total` | counter | `model`, `mode`, `kind` | — |
+| `carmona_inference_inflight` | gauge | `model` | — |
+| `carmona_inference_capacity` | gauge | `model`, `tier` | — |
+| `carmona_engine_requests_running`, `…_waiting`, `…_cache_usage` | gauge | `model` | — |
+| `carmona_inference_reconcile_mismatch` | gauge | `model` | — |
 
 The buckets are not Micrometer's defaults: a default timer stops at 30 seconds, and a TTFT past the last bucket
 is a p99 that reads as the bucket edge — the one number an operator most needs during an incident. `2` is
@@ -161,7 +161,7 @@ usage data, where they already exist, are already scoped by a membership check, 
 Two reasons. Cardinality: an organization id on a latency timer multiplies every series by the customer count,
 which is how a 512 MB Prometheus falls over. And privacy: a metric label is the hardest thing in a system to
 delete, and a per-organization time series is a record of when a customer was busy. The gateway follows the
-same rule — `carmonai.gateway.rate_limit.refused{route}` — and the verification pass behind this stack checked
+same rule — `carmona.gateway.rate_limit.refused{route}` — and the verification pass behind this stack checked
 it directly: `uri` labels are mapped patterns (`/v1/models`, `/usage/events`,
 `/organizations/{id}/tenant`) or `UNKNOWN` on the gateway, and the only `id` label in the whole exposition is
 the JVM's own memory pools.
@@ -169,7 +169,7 @@ the JVM's own memory pools.
 ## The reconciliation against the engines' own counters
 
 `Reconciler` is the only thing that can notice usage going missing, and it is why the revenue-integrity
-dashboard exists. Every `carmonai.inference.reconcile-every` — 1 hour, and the file says why it is not a
+dashboard exists. Every `carmona.inference.reconcile-every` — 1 hour, and the file says why it is not a
 second — it reads each engine's token counters and compares their increase with the tokens usage-service
 stored in the same interval. Two tolerances, and both are needed:
 
@@ -184,7 +184,7 @@ reads. The engines' counters are not the same counter on both engines: vLLM's `v
 includes cache hits and adds a prompt once; llama.cpp counts prompt tokens it computed separately from those it
 reused, so its input is `llamacpp:prompt_tokens_total` plus `llamacpp:prompt_tokens_cached_total`.
 
-The verdict is published as a gauge, not only logged: `carmonai_inference_reconcile_mismatch{model}` is `1`
+The verdict is published as a gauge, not only logged: `carmona_inference_reconcile_mismatch{model}` is `1`
 when the two disagree and `0` when they agree — and it is **absent** until a model has two readings to compare,
 because a false `0` would claim a check that never ran had passed. `GET /actuator/reconcile` runs the same
 check on demand.
@@ -196,11 +196,11 @@ Both are in `docker/compose.yaml`, pinned by digest, on the internal network, wi
 local TSDB, capped at 512m/0.5 cpu. `grafana` (`grafana/grafana:13.2.3`) provisions its datasource, three
 dashboards and the Prometheus alert list from files, capped at 384m/0.5 cpu.
 
-**Carmonai — SLO & golden signals** has availability, request rate and error share; TTFT p50/p95/p99 against
+**Carmona — SLO & golden signals** has availability, request rate and error share; TTFT p50/p95/p99 against
 the 2 s line and TTFT goodput; ITL p95 against 100 ms; queue wait; whole-request p95/p99; in-flight against
-capacity; engine running/waiting and KV cache; and tokens per second by mode and kind. **Carmonai — service
+capacity; engine running/waiting and KV cache; and tokens per second by mode and kind. **Carmona — service
 RED** has one repeated row per service — rate by route, error share against the 5 % line, duration max and
-mean — plus a gateway row by `routeId`. **Carmonai — revenue integrity** has 402s served, usage events received
+mean — plus a gateway row by `routeId`. **Carmona — revenue integrity** has 402s served, usage events received
 against `/v1` requests served, events rejected in the last hour, and a collapsed row for the four signals no
 service publishes yet.
 
@@ -243,8 +243,8 @@ a lie.
 - **The gateway's `uri` tag is `UNKNOWN` for every public request**, because Spring Cloud Gateway sets no path
   pattern on the exchange. Route-level RED uses its own
   `spring_cloud_gateway_requests_seconds_count{routeId, routeUri, status, outcome}` instead, which exists.
-- **Three revenue panels have no source.** `carmonai_usage_seal_lag_seconds`,
-  `carmonai_billing_debit_lag_seconds` and `carmonai_billing_no_credit_organizations` are in no service's
+- **Three revenue panels have no source.** `carmona_usage_seal_lag_seconds`,
+  `carmona_billing_debit_lag_seconds` and `carmona_billing_no_credit_organizations` are in no service's
   metric contract. The panels exist, are empty, and say why.
 - **llama.cpp exposes no KV-cache usage ratio** on the CPU stack, so `engine:cache_usage` produces no samples
   there and fills from vLLM on the GPU stack. A gauge the engine does not expose stays absent, never `0`.
@@ -278,13 +278,13 @@ which is the goodput definition the benches already use.
 
 ## Where to look
 
-- [Metrics.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmonai/inference/Metrics.java)
+- [Metrics.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Metrics.java)
   — every metric name, tag and bucket boundary, in one file, with the tag rule in its comment.
-- [Reconciler.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmonai/inference/Reconciler.java)
+- [Reconciler.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Reconciler.java)
   — the tolerance, the engine counter mappings and the mismatch gauge.
 - [rules.yml](https://github.com/carmonai/back/blob/main/docker/prometheus/rules.yml) — the recording rules and
   all seven alerts, each with what an operator should do about it.
 - [prometheus.yml](https://github.com/carmonai/back/blob/main/docker/prometheus/prometheus.yml) — the scrape
   jobs, the 15 s interval and the engine's token file.
-- [observability.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmonai-architecture/references/observability.md)
+- [observability.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmona-architecture/references/observability.md)
   — the SLI/SLO table this page summarises, the verification pass, and the gaps list.

@@ -182,7 +182,7 @@ stack, ten calls to a stopped container produced ten Spring error pages and a st
 ## The access log
 
 `AccessLogFilter` writes one JSON line per request — refusals included, because it wraps the security chain —
-to its own file and nothing to stdout: logger `access`, `/var/log/carmonai/access.log`, daily, gzipped,
+to its own file and nothing to stdout: logger `access`, `/var/log/carmona/access.log`, daily, gzipped,
 `maxHistory` 184 days. Marco Civil da Internet art. 15 requires six months, and 184 days satisfies it. The
 line carries `request_id`, `method`, `path` (no query string), `status`, `duration_ms`, `client_ip`,
 `client_closed` when the caller hung up, and whichever ids the request had; `/actuator/**` is skipped.
@@ -197,7 +197,7 @@ resolved from a 60 s Valkey cache.
 `batch-line`, `cookie`, every `x-forwarded-*`, `forwarded`, `traceparent`, `tracestate` and `baggage` from the
 inbound request before adding its own. Services trust these headers and nothing else, so an inbound copy
 would be a complete authentication bypass. `Cookie` is removed too, except on the two paths that need
-`__Host-carmonai-rt`, `/auth/refresh` and `/auth/logout`.
+`__Host-carmona-rt`, `/auth/refresh` and `/auth/logout`.
 
 ## What would change it
 
@@ -214,7 +214,7 @@ would be a complete authentication bypass. `Cookie` is removed too, except on th
 ## Where to look
 
 - [application.yaml](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/resources/application.yaml) — the route table and every timeout.
-- [GatewayApplication.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmonai/gateway/GatewayApplication.java) — the two security chains and the JWKS decoder.
-- [ApiKeyAuthenticationManager.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmonai/gateway/ApiKeyAuthenticationManager.java) — the key cache, the TTL and the credit gate.
-- [IdentityHeadersFilter.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmonai/gateway/IdentityHeadersFilter.java) — the strip list and the headers it sets.
-- [OpenAiErrors.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmonai/gateway/OpenAiErrors.java) — every error body the gateway can write.
+- [GatewayApplication.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/GatewayApplication.java) — the two security chains and the JWKS decoder.
+- [ApiKeyAuthenticationManager.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/ApiKeyAuthenticationManager.java) — the key cache, the TTL and the credit gate.
+- [IdentityHeadersFilter.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/IdentityHeadersFilter.java) — the strip list and the headers it sets.
+- [OpenAiErrors.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/OpenAiErrors.java) — every error body the gateway can write.

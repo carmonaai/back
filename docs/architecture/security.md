@@ -111,7 +111,7 @@ organization whose prepaid balance is spent. What reaches inference (step 4) car
 
 ## Sessions, cookies and CSRF
 
-The console session is a rotating refresh cookie: `__Host-carmonai-rt`, `HttpOnly`, `Secure`,
+The console session is a rotating refresh cookie: `__Host-carmona-rt`, `HttpOnly`, `Secure`,
 `SameSite=Strict`, `Path=/`, holding `{id}.{secret}` where only the secret's SHA-256 is stored. Every
 refresh rotates it, and a cookie presented twice ends **every** copy of that session — that is the reuse
 detection, and the reason a stolen cookie has a short life. Idle limit 7 days, absolute 30 days, and logout
@@ -119,7 +119,7 @@ expires the cookie.
 
 Because the cookie exists, the four POST endpoints that touch it are guarded twice: `SameSite=Strict` keeps
 it off cross-site requests, and `OriginFilter` refuses a POST to `/auth/login`, `/auth/register`,
-`/auth/refresh` or `/auth/logout` whose `Origin` is not in `carmonai.console.origins`
+`/auth/refresh` or `/auth/logout` whose `Origin` is not in `carmona.console.origins`
 (`CONSOLE_ORIGINS`, `http://localhost:3000` in compose). No `Origin` at all means not a browser — which is
 why curl and SDKs still work. There is no CSRF token because there is no form; the two locks above are the
 whole defence, and `/v1` has no CORS configuration at all.
@@ -158,7 +158,7 @@ access log did **not** reach stdout.
 ## The access log, and erasure
 
 Brazil's Marco Civil da Internet (art. 15) requires connection records to be kept for six months, so the
-gateway keeps them for 184 days: logback rolls `access.log` daily into `/var/log/carmonai`, gzipped, on its
+gateway keeps them for 184 days: logback rolls `access.log` daily into `/var/log/carmona`, gzipped, on its
 own appender that never writes to stdout. `AccessLogFilter` wraps the security chain, so refused requests
 are recorded too — that is the point of a connection log. `client_ip` is the TCP peer today; behind nginx it
 becomes the `X-Forwarded-For` value nginx sets.
@@ -192,17 +192,17 @@ a distributed attacker can still spam one mailbox. There is no DPA gate, no CSAM
 second factor. TLS in transit is a deployment concern that is not configured anywhere in this repository —
 nginx terminates it, and nginx is not built. Every one of those is listed in
 [known gaps](../reference/gaps.md); the LGPD working rules themselves are in
-`.claude/skills/carmonai-architecture/SKILL.md` and are marked "confirm with legal/DPO".
+`.claude/skills/carmona-architecture/SKILL.md` and are marked "confirm with legal/DPO".
 
 ## Where to look
 
-- [IdentityHeadersFilter.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmonai/gateway/IdentityHeadersFilter.java)
+- [IdentityHeadersFilter.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/IdentityHeadersFilter.java)
   — the strip list, the identity headers and the two endpoints that keep the cookie.
-- [ApiKeyAuthenticationManager.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmonai/gateway/ApiKeyAuthenticationManager.java)
+- [ApiKeyAuthenticationManager.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/ApiKeyAuthenticationManager.java)
   — the format check, the hash, the 60 s cache and the 402.
-- [V1RequestFilter.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmonai/gateway/V1RequestFilter.java)
+- [V1RequestFilter.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/V1RequestFilter.java)
   — the four refusals that run before authentication.
-- [AccessLogFilter.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmonai/gateway/AccessLogFilter.java)
+- [AccessLogFilter.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/AccessLogFilter.java)
   and [logback-spring.xml](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/resources/logback-spring.xml)
   — the fields, the file and the 184-day retention.
 - [docker/smoke.sh](https://github.com/carmonai/back/blob/main/docker/smoke.sh) — the canary check and the

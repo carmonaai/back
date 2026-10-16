@@ -1,8 +1,8 @@
 {
-  "uid": "carmonai-revenue",
-  "title": "Carmonai — revenue integrity",
-  "description": "What is served, what is metered and what is refused for money reasons. The panels that read carmonai_usage_* / carmonai_billing_* are in the collapsed row at the bottom: those metrics are NOT PUBLISHED YET (see references/observability.md §gaps) and the panels are empty on purpose — a substitute metric would hide the gap instead of showing it.",
-  "tags": ["carmonai", "revenue"],
+  "uid": "carmona-revenue",
+  "title": "Carmona — revenue integrity",
+  "description": "What is served, what is metered and what is refused for money reasons. The panels that read carmona_usage_* / carmona_billing_* are in the collapsed row at the bottom: those metrics are NOT PUBLISHED YET (see references/observability.md §gaps) and the panels are empty on purpose — a substitute metric would hide the gap instead of showing it.",
+  "tags": ["carmona", "revenue"],
   "timezone": "browser",
   "editable": false,
   "schemaVersion": 39,
@@ -94,7 +94,7 @@
           "id": 6,
           "type": "stat",
           "title": "Reconciliation mismatches (models)",
-          "description": "Waits for carmonai_inference_reconcile_mismatch{model} (1 = the existing hourly engine-vs-usage reconcile disagreed). Not in any task's metric contract yet: this panel and the ReconciliationMismatch alert are the requirement. Until then, the WARN log line is the only signal.",
+          "description": "Waits for carmona_inference_reconcile_mismatch{model} (1 = the existing hourly engine-vs-usage reconcile disagreed). Not in any task's metric contract yet: this panel and the ReconciliationMismatch alert are the requirement. Until then, the WARN log line is the only signal.",
           "datasource": {"type": "prometheus", "uid": "prometheus"},
           "gridPos": {"h": 7, "w": 8, "x": 0, "y": 9},
           "fieldConfig": {
@@ -108,14 +108,14 @@
           },
           "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "colorMode": "background", "graphMode": "none", "textMode": "value"},
           "targets": [
-            {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(carmonai_inference_reconcile_mismatch)", "legendFormat": "models disagreeing", "editorMode": "code", "range": true}
+            {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(carmona_inference_reconcile_mismatch)", "legendFormat": "models disagreeing", "editorMode": "code", "range": true}
           ]
         },
         {
           "id": 7,
           "type": "timeseries",
           "title": "Window seal lag / debit lag",
-          "description": "Waits for carmonai_usage_seal_lag_seconds (age of the oldest unsealed window) and carmonai_billing_debit_lag_seconds (sealed windows not yet debited). The prototype runs 10 s windows, a 2 s grace, sealing every 2 s and a debit every 2 s: a healthy lag is seconds, so a line measured in minutes is the leak signature.",
+          "description": "Waits for carmona_usage_seal_lag_seconds (age of the oldest unsealed window) and carmona_billing_debit_lag_seconds (sealed windows not yet debited). The prototype runs 10 s windows, a 2 s grace, sealing every 2 s and a debit every 2 s: a healthy lag is seconds, so a line measured in minutes is the leak signature.",
           "datasource": {"type": "prometheus", "uid": "prometheus"},
           "gridPos": {"h": 7, "w": 10, "x": 8, "y": 9},
           "fieldConfig": {
@@ -130,15 +130,15 @@
           },
           "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
           "targets": [
-            {"refId": "seal", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "carmonai_usage_seal_lag_seconds", "legendFormat": "seal lag", "editorMode": "code", "range": true},
-            {"refId": "debit", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "carmonai_billing_debit_lag_seconds", "legendFormat": "debit lag", "editorMode": "code", "range": true}
+            {"refId": "seal", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "carmona_usage_seal_lag_seconds", "legendFormat": "seal lag", "editorMode": "code", "range": true},
+            {"refId": "debit", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "carmona_billing_debit_lag_seconds", "legendFormat": "debit lag", "editorMode": "code", "range": true}
           ]
         },
         {
           "id": 8,
           "type": "stat",
           "title": "Organizations with no_credit set",
-          "description": "Waits for carmonai_billing_no_credit_organizations (billing-service syncs the flag into Valkey; the gateway and inference-service read it). A count of organizations, never their ids. Not an error: it is how many customers are out of prepaid credit right now.",
+          "description": "Waits for carmona_billing_no_credit_organizations (billing-service syncs the flag into Valkey; the gateway and inference-service read it). A count of organizations, never their ids. Not an error: it is how many customers are out of prepaid credit right now.",
           "datasource": {"type": "prometheus", "uid": "prometheus"},
           "gridPos": {"h": 7, "w": 6, "x": 18, "y": 9},
           "fieldConfig": {
@@ -152,7 +152,7 @@
           },
           "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "colorMode": "value", "graphMode": "none", "textMode": "value"},
           "targets": [
-            {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "carmonai_billing_no_credit_organizations", "legendFormat": "organizations", "editorMode": "code", "range": true}
+            {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "carmona_billing_no_credit_organizations", "legendFormat": "organizations", "editorMode": "code", "range": true}
           ]
         }
       ]

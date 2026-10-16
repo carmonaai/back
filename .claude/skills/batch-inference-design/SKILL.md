@@ -1,13 +1,13 @@
 ---
 name: batch-inference-design
-description: Distilled system design from the ShowOffer video "Design Batch Inference System" (Anthropic/OpenAI interview question) — requirements, entities, GPU batching math, request flow, batcher scaling, autoscaling, queue-depth load shedding, GPU failure retries. Load when designing or reviewing Carmonai's inference path, together with carmonai-architecture/references/inference-plan.md, which says what changes for real LLM serving.
+description: Distilled system design from the ShowOffer video "Design Batch Inference System" (Anthropic/OpenAI interview question) — requirements, entities, GPU batching math, request flow, batcher scaling, autoscaling, queue-depth load shedding, GPU failure retries. Load when designing or reviewing Carmona's inference path, together with carmona-architecture/references/inference-plan.md, which says what changes for real LLM serving.
 ---
 
 # Batch inference system design (video distillation)
 
 Source: ShowOffer, *Design Batch Inference System – Anthropic & OpenAI System Design Question*, 2026-03-22, 52 min — https://www.youtube.com/watch?v=CYFs6mR--KE. Extracted with the `youtube` skill; the whiteboard frames were checked against the transcript. Summarized in our own words; numbers are the speaker's.
 
-**Caveat before using any of it:** the video works under interview constraints — a GPU runs one batch at a time, a batch takes a fixed ~100 ms whatever its size (1–100), and each request gets one complete answer. Real LLM serving is different: the engine (vLLM, SGLang, TensorRT-LLM) batches continuously at every generated token, answers stream, and GPU memory for the KV cache, not batch size, is the limit. The ideas that carry over (edge backpressure, tier queues, priority shedding, asymmetric autoscaling, retry discipline, no DB on the hot path) and the ones that don't (a hand-written batcher, index demux, fixed latency math) are sorted in [../carmonai-architecture/references/inference-plan.md](../carmonai-architecture/references/inference-plan.md).
+**Caveat before using any of it:** the video works under interview constraints — a GPU runs one batch at a time, a batch takes a fixed ~100 ms whatever its size (1–100), and each request gets one complete answer. Real LLM serving is different: the engine (vLLM, SGLang, TensorRT-LLM) batches continuously at every generated token, answers stream, and GPU memory for the KV cache, not batch size, is the limit. The ideas that carry over (edge backpressure, tier queues, priority shedding, asymmetric autoscaling, retry discipline, no DB on the hot path) and the ones that don't (a hand-written batcher, index demux, fixed latency math) are sorted in [../carmona-architecture/references/inference-plan.md](../carmona-architecture/references/inference-plan.md).
 
 ## Why batching
 

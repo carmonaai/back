@@ -210,11 +210,11 @@ in [known gaps](../reference/gaps.md).
 
 ## Where to look
 
-- [Engine.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmonai/inference/Engine.java)
+- [Engine.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Engine.java)
   — the pool, the timeouts and the one retry, in 84 lines.
-- [ApiError.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmonai/inference/ApiError.java)
+- [ApiError.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/ApiError.java)
   — every failure mapped to a status and an OpenAI-shaped code.
-- [RateLimitFilter.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmonai/gateway/RateLimitFilter.java)
+- [RateLimitFilter.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/RateLimitFilter.java)
   — the Lua token bucket, and the comment that explains failing open.
-- [ResilienceConfiguration.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmonai/gateway/ResilienceConfiguration.java)
+- [ResilienceConfiguration.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/ResilienceConfiguration.java)
   — the breaker numbers and why they are constants.

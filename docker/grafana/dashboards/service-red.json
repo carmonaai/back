@@ -1,8 +1,8 @@
 {
-  "uid": "carmonai-red",
-  "title": "Carmonai — service RED (per service)",
+  "uid": "carmona-red",
+  "title": "Carmona — service RED (per service)",
   "description": "Rate, errors and duration for each of the eight services, from its own HTTP server metrics on the management port. One row of three panels repeats per service; pick services in the selector at the top.",
-  "tags": ["carmonai", "red"],
+  "tags": ["carmona", "red"],
   "timezone": "browser",
   "editable": false,
   "schemaVersion": 39,

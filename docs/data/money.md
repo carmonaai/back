@@ -1,6 +1,6 @@
 # Money
 
-Carmonai sells prepaid credit, so the money model has one job: the number a customer sees must be the sum of
+Carmona sells prepaid credit, so the money model has one job: the number a customer sees must be the sum of
 the events that produced it, exactly, forever. Everything here follows from that — the unit, the price table's
 shape, where rounding is allowed to happen, and why the ledger refuses to be edited.
 
@@ -141,7 +141,7 @@ like the ledger, and `refuse_past_price()` refuses an `INSERT` whose `effective_
 a price cannot be back-dated into a window already billed.
 
 The seeded prices are **placeholders, not commercial ones**, in BRL per million tokens (input / cached input /
-output): `carmonai/qwen3-0.6b` sync 0.10 / 0.05 / 0.40, `carmonai/qwen3-4b` sync 0.50 / 0.25 / 2.00, and half
+output): `carmona/qwen3-0.6b` sync 0.10 / 0.05 / 0.40, `carmona/qwen3-4b` sync 0.50 / 0.25 / 2.00, and half
 of each for the `batch` mode.
 
 ## Rounding happens once, per window
@@ -190,7 +190,7 @@ entry, so entries without a balance row can only be a torn state — a stray `DE
 inner or `LEFT JOIN` would report nothing for exactly that case; the outer join makes it a row that reads 0
 against a real ledger sum and fails the check.
 
-`reconcile()` runs every `carmonai.billing.reconcile-every` (10 minutes; compose runs the debit job every 2 s
+`reconcile()` runs every `carmona.billing.reconcile-every` (10 minutes; compose runs the debit job every 2 s
 rather than 60 s so billing is visible within seconds). It re-syncs every `no_credit` flag, logs the
 organizations whose balance differs from their ledger at ERROR with ids only, and **fixes nothing** — an
 automatic repair would erase the evidence of whatever produced the drift. Ask on demand at
@@ -229,9 +229,9 @@ grant and a flag can disagree for a moment, which is why the customer-facing bal
 
 - [billing V2026.10.03.001](https://github.com/carmonai/back/blob/main/api/billing-service/src/main/resources/db/migration/V2026.10.03.001__create_tables.sql)
   — the four tables, the seeded placeholder prices, and both triggers.
-- [Price.java](https://github.com/carmonai/back/blob/main/api/billing/src/main/java/ai/carmonai/billing/Price.java)
+- [Price.java](https://github.com/carmonai/back/blob/main/api/billing/src/main/java/ai/carmona/billing/Price.java)
   — the unit, `cost()`'s rounding, and `at()`, the rule both services share.
-- [BillingService.java](https://github.com/carmonai/back/blob/main/api/billing-service/src/main/java/ai/carmonai/billing/BillingService.java)
+- [BillingService.java](https://github.com/carmonai/back/blob/main/api/billing-service/src/main/java/ai/carmona/billing/BillingService.java)
   — one window, one transaction, the cursor, and `reconcile()`.
-- [BillingRepository.java](https://github.com/carmonai/back/blob/main/api/billing-service/src/main/java/ai/carmonai/billing/BillingRepository.java)
+- [BillingRepository.java](https://github.com/carmonai/back/blob/main/api/billing-service/src/main/java/ai/carmona/billing/BillingRepository.java)
   — the idempotent insert, the balance upsert and the `FULL OUTER JOIN`.

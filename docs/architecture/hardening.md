@@ -102,11 +102,11 @@ Compose pins every third-party image the same way (`postgres:17.11-bookworm`, `v
 // OWASP minimum for Argon2id: m=19 MiB, t=2, p=1.
 private static final Argon2PasswordEncoder ENCODER = new Argon2PasswordEncoder(16, 32, 1, 19 * 1024, 2);
 // Checked when the email is unknown, so a miss costs the same Argon2 run as a hit.
-private static final String DUMMY_HASH = ENCODER.encode("carmonai-timing-dummy");
+private static final String DUMMY_HASH = ENCODER.encode("carmona-timing-dummy");
 ```
 
 Salt 16 bytes, hash 32 bytes, parallelism 1, 19 MiB of memory, 2 iterations — the OWASP floor, in
-[AccountService.java](https://github.com/carmonai/back/blob/main/api/account-service/src/main/java/ai/carmonai/account/AccountService.java).
+[AccountService.java](https://github.com/carmonai/back/blob/main/api/account-service/src/main/java/ai/carmona/account/AccountService.java).
 `spring-security-crypto` and `bcprov-jdk18on` are its dependencies, and the encoded hash lives in
 `AccountModel` only: `AccountOut` carries an id, a name and an email, which is what makes
 `GET /accounts/{id}/export` safe to return to its owner. The dummy hash is what stops an unknown email
@@ -114,14 +114,14 @@ answering measurably faster than a known one.
 
 ## 3 · Tokens: RS256, verified locally (override 2)
 
-auth-service signs with a key derived from `carmonai.jwt.private-key` (base64 PKCS#8 DER, from the
+auth-service signs with a key derived from `carmona.jwt.private-key` (base64 PKCS#8 DER, from the
 environment) and publishes the public half at `GET /auth/jwks`; the token lives 15 minutes, and its claims
-are ids only — issuer `ai.carmonai`, subject = the account id.
+are ids only — issuer `ai.carmona`, subject = the account id.
 
 ```java
 NimbusReactiveJwtDecoder decoder = NimbusReactiveJwtDecoder.withJwkSetUri(jwksUri)   // http://auth:8080/auth/jwks
     .webClient(auth).build();
-decoder.setJwtValidator(JwtValidators.createDefaultWithIssuer("ai.carmonai"));
+decoder.setJwtValidator(JwtValidators.createDefaultWithIssuer("ai.carmona"));
 ```
 
 Nimbus caches the JWKS, so the fetch happens on a cold start rather than per request, and the `webClient` it
@@ -156,7 +156,7 @@ resilience4j:
 `disable-time-limiter: true` is deliberate: the Feign timeouts above already bound the call, and a second
 deadline with a different value races the first. `disable-thread-pool: true` keeps the call on the caller's
 thread so a Feign error reaches the code that knows how to read it. Retries exist only where a call is safe
-to repeat: [IdempotentRetryer.java](https://github.com/carmonai/back/blob/main/api/auth-service/src/main/java/ai/carmonai/auth/IdempotentRetryer.java)
+to repeat: [IdempotentRetryer.java](https://github.com/carmonai/back/blob/main/api/auth-service/src/main/java/ai/carmona/auth/IdempotentRetryer.java)
 retries **GETs only**, three attempts in total, backoff with full jitter. The gateway adds a breaker and a
 bulkhead per `/v1` route — [resilience](resilience.md) has the numbers and the routes that have neither.
 
@@ -208,11 +208,11 @@ a library the day a fourth needs it. The K8s manifest, tracing and an Alertmanag
 
 ## Where to look
 
-- [AccountService.java](https://github.com/carmonai/back/blob/main/api/account-service/src/main/java/ai/carmonai/account/AccountService.java)
+- [AccountService.java](https://github.com/carmonai/back/blob/main/api/account-service/src/main/java/ai/carmona/account/AccountService.java)
   — the Argon2id encoder, the dummy hash and the export/erasure order.
-- [JwtService.java](https://github.com/carmonai/back/blob/main/api/auth-service/src/main/java/ai/carmonai/auth/JwtService.java)
+- [JwtService.java](https://github.com/carmonai/back/blob/main/api/auth-service/src/main/java/ai/carmona/auth/JwtService.java)
   — RS256, the 15-minute TTL and the JWKS it publishes.
-- [GatewayApplication.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmonai/gateway/GatewayApplication.java)
+- [GatewayApplication.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/GatewayApplication.java)
   — the local JWKS decoder and both security chains.
 - [account-service application.yaml](https://github.com/carmonai/back/blob/main/api/account-service/src/main/resources/application.yaml)
   — the resilience4j block, the Feign timeouts and the management port in one file.

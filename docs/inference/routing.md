@@ -141,7 +141,7 @@ with status `cancelled`, billed for what it generated.
 
 ## Where to look
 
-- [`Engine.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmonai/inference/Engine.java) — the per-request engine call, the pool, and the retry that is allowed only before the first byte.
-- [`ChatHandler.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmonai/inference/ChatHandler.java) — the reactive stream in and out, and what happens when it ends.
+- [`Engine.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Engine.java) — the per-request engine call, the pool, and the retry that is allowed only before the first byte.
+- [`ChatHandler.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/ChatHandler.java) — the reactive stream in and out, and what happens when it ends.
 - [The relay](../requests/relay.md) — the same flow from the request's point of view, with its time limits.
 - [Batching](batching.md) — why the batch is re-formed every step, and why there is no Java batcher.

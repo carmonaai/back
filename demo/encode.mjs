@@ -16,7 +16,7 @@ const files = readdirSync(dir).filter(f => f.endsWith(".jpg")).sort();
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 const browser = spawn(BROWSER, ["--headless=new", `--remote-debugging-port=${PORT}`, "--no-first-run",
-  "--user-data-dir=" + mkdtempSync(join(tmpdir(), "carmonai-encode-")), "about:blank"], { stdio: "ignore" });
+  "--user-data-dir=" + mkdtempSync(join(tmpdir(), "carmona-encode-")), "about:blank"], { stdio: "ignore" });
 let page;
 for (let i = 0; i < 100 && !page; i++) {
   try { page = (await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json()).find(t => t.type === "page"); } catch {}

@@ -191,7 +191,7 @@ done
 
 A module added to `back` but not to the token's repository list fails here, in about a second, instead of
 minutes later inside a Maven resolution error that says nothing about permissions. That is not hypothetical:
-adding a module is a documented step in the `carmonai-new-service` skill precisely because the token has to be
+adding a module is a documented step in the `carmona-new-service` skill precisely because the token has to be
 updated by hand. The clone rewrites the URL rather than passing credentials per command —
 `git config --global url."https://x-access-token:${TOKEN}@github.com/carmonai/".insteadOf
 "https://github.com/carmonai/"`, then `git submodule update --init --recursive`, then
@@ -209,7 +209,7 @@ registry — each service resolves its library from the reactor in the same run.
 The workflow then runs `docker compose up -d --build --wait` and `bash smoke.sh`, both with
 `working-directory: docker`. `--wait` is what makes the next step meaningful: `smoke.sh` immediately issues real
 requests through `localhost:8080`. CI runs the CPU engine — GitHub's runners have no GPU — so `smoke.sh` uses
-its defaults, `MODEL=carmonai/qwen3-0.6b ENGINE=llama`. A *Service logs* step then runs only on
+its defaults, `MODEL=carmona/qwen3-0.6b ENGINE=llama`. A *Service logs* step then runs only on
 `failure() && steps.stack.outcome != 'skipped'`, and a *Stop the stack* step runs `docker compose down -v` on
 `always()` under the same condition.
 
@@ -237,7 +237,7 @@ overlay.
 The workflow then runs `docker compose up -d --build --wait` and `bash smoke.sh`, both with
 `working-directory: docker`. `--wait` is what makes the next step meaningful: `smoke.sh` immediately issues
 real requests through `localhost:8080`. CI runs the CPU engine — GitHub's runners have no GPU — so `smoke.sh`
-uses its defaults, `MODEL=carmonai/qwen3-0.6b ENGINE=llama`. A *Service logs* step then runs only on
+uses its defaults, `MODEL=carmona/qwen3-0.6b ENGINE=llama`. A *Service logs* step then runs only on
 `failure() && steps.stack.outcome != 'skipped'`, and a *Stop the stack* step runs `docker compose down -v` on
 `always()` under the same condition, so the volumes go with it.
 
@@ -254,7 +254,7 @@ its own branch while the combination is still broken.
    the whole repository is an aggregator `pom.xml`, `docker/`, `.github/` and thirteen pointers.
 
 The reason is mechanical. `git submodule update` checks out the exact commit a pointer names, and Maven
-resolves `ai.carmonai:account:1.0.0` from the reactor. A `back` pointer naming a service commit whose library
+resolves `ai.carmona:account:1.0.0` from the reactor. A `back` pointer naming a service commit whose library
 commit is not merged yet gives a fresh clone that cannot build, even though every repository is green on its
 own — and the failure appears in CI, not in the PR that caused it. The user's rule sits on top: never push to
 `main`, open a pull request, and merge only when the user says merge.

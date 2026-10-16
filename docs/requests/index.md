@@ -10,11 +10,11 @@ POST /v1/chat/completions
 Authorization: Bearer cmn_test_<43 base62><6 CRC>
 Content-Type: application/json
 
-{"model": "carmonai/qwen3-4b", "messages": [{"role": "user", "content": "Explique o Pix."}],
+{"model": "carmona/qwen3-4b", "messages": [{"role": "user", "content": "Explique o Pix."}],
  "stream": true, "max_tokens": 256}
 ```
 
-Model `carmonai/qwen3-4b` is the GPU engine in the `gpu` compose profile; `carmonai/qwen3-0.6b` is the
+Model `carmona/qwen3-4b` is the GPU engine in the `gpu` compose profile; `carmona/qwen3-0.6b` is the
 CPU one. Nothing on the path below depends on which of the two answers.
 
 ## What it is
@@ -202,15 +202,15 @@ request changes hands or changes state — which is also where it can be refused
 
 ## Where to look
 
-- [`V1RequestFilter.java`](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmonai/gateway/V1RequestFilter.java)
+- [`V1RequestFilter.java`](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/V1RequestFilter.java)
   — the four checks that run before authentication.
-- [`ApiKeyAuthenticationManager.java`](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmonai/gateway/ApiKeyAuthenticationManager.java)
+- [`ApiKeyAuthenticationManager.java`](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/ApiKeyAuthenticationManager.java)
   — key resolution, the 60 s cache and the credit flag.
-- [`ChatHandler.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmonai/inference/ChatHandler.java)
+- [`ChatHandler.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/ChatHandler.java)
   — the two routes, the relay and the ending.
-- [`Admission.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmonai/inference/Admission.java)
+- [`Admission.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Admission.java)
   — buckets, in-flight caps and the bounded wait.
-- [`Engine.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmonai/inference/Engine.java)
+- [`Engine.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Engine.java)
   — the engine call, its pool and its time limits.
 
 **Next:** [1 · The edge](edge.md) — the request arrives on a socket, and the first thing that happens to it

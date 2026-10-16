@@ -201,15 +201,15 @@ found was once real.
 
 ## Where to look
 
-- [`ApiKeyAuthenticationManager.java`](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmonai/gateway/ApiKeyAuthenticationManager.java)
+- [`ApiKeyAuthenticationManager.java`](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/ApiKeyAuthenticationManager.java)
   — the lookup order, the TTL, the expiry check and the credit flag.
-- [`ApiKeyFormat.java`](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmonai/gateway/ApiKeyFormat.java)
+- [`ApiKeyFormat.java`](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/ApiKeyFormat.java)
   — the key's shape and its CRC32, mirrored from auth-service.
-- [`IdentityHeadersFilter.java`](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmonai/gateway/IdentityHeadersFilter.java)
+- [`IdentityHeadersFilter.java`](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/IdentityHeadersFilter.java)
   — what is stripped, and what is set from the principal.
-- [`RateLimitFilter.java`](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmonai/gateway/RateLimitFilter.java)
+- [`RateLimitFilter.java`](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/RateLimitFilter.java)
   — the per-caller flood brake, and why it fails open.
-- [`Caller.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmonai/inference/Caller.java)
+- [`Caller.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Caller.java)
   — the other side of the contract: three headers or a 401.
 
 **Next:** [3 · Admission](admission.md) — the caller is known, and now the request has to earn a share of

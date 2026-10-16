@@ -1,10 +1,10 @@
-# Carmonai — verified fact sheet
+# Carmona — verified fact sheet
 
 Everything here was read from the code or measured. **Write from this file, not from guesswork.** If a page
 needs a fact that is not here, open the file and read it — do not invent a number, a name or a behaviour.
 Where a figure is a prototype value rather than a commercial one, say so.
 
-Paths are relative to the repository root (`carmonai/back`).
+Paths are relative to the repository root (`carmona/back`).
 
 ---
 
@@ -43,7 +43,7 @@ and the pitfalls list).
 ## Services, file by file
 
 ### gateway-service — the only public port
-`api/gateway-service/src/main/java/ai/carmonai/gateway/`
+`api/gateway-service/src/main/java/ai/carmona/gateway/`
 
 | Class | What it does |
 |---|---|
@@ -61,13 +61,13 @@ Routes live in `src/main/resources/application.yaml`. Management port **8081**, 
 routed.
 
 ### auth-service — authentication and API keys
-`api/auth-service/src/main/java/ai/carmonai/auth/` (schema `auth`, 3 migrations)
+`api/auth-service/src/main/java/ai/carmona/auth/` (schema `auth`, 3 migrations)
 
 - `AuthResource` implements `api/auth/.../AuthController`: `/auth/register`, `/auth/login`, `/auth/refresh`,
   `/auth/logout`, `/auth/whoami`, `/auth/jwks`, the API-key endpoints, and the internal `GET /api-keys/{hash}`.
 - `JwtService`: **RS256**, access token **15 minutes**, JWKS published. The gateway verifies locally from the
   cached JWKS, so no request-path call to auth-service.
-- `SessionService` + `SessionModel`: the console session behind the `__Host-carmonai-rt` refresh cookie
+- `SessionService` + `SessionModel`: the console session behind the `__Host-carmona-rt` refresh cookie
   (HttpOnly, Secure, SameSite=Strict). Only the secret's SHA-256 is stored. Every refresh rotates it; a
   reused cookie means it was copied, and **every** copy is ended. Idle limit **7 days**, absolute **30 days**.
 - `ApiKeyService`: `cmn_test_…` outside production; SHA-256 at rest; at most **50** live keys per organization;
@@ -76,7 +76,7 @@ routed.
 - `IdempotentRetryer`: the retry policy for calls that may be repeated.
 
 ### account-service — the person
-`api/account-service/src/main/java/ai/carmonai/account/` (schema `accounts`, 2 migrations)
+`api/account-service/src/main/java/ai/carmona/account/` (schema `accounts`, 2 migrations)
 
 - `AccountResource`: register (**always 202**, so nobody can probe who has an account), verify-email,
   password-reset request and confirm, `GET /accounts/{id}/export`, `DELETE /accounts/{id}`.
@@ -87,7 +87,7 @@ routed.
 - Email goes out through SMTP (Mailpit locally).
 
 ### organization-service — the tenant
-`api/organization-service/src/main/java/ai/carmonai/organization/` (schema `organizations`, 1 migration)
+`api/organization-service/src/main/java/ai/carmona/organization/` (schema `organizations`, 1 migration)
 
 - `OrganizationResource`: create, list mine, find by id (members only), close (`DELETE` → status `closed`),
   the internal `member(id, idAccount)` and `tenant(id)` lookups, and the erasure sweep endpoint.
@@ -95,7 +95,7 @@ routed.
 - `tenant(id)` answers status and tier for API-key authentication — ids only, no name.
 
 ### inference-service — the OpenAI surface and the engines
-`api/inference-service/src/main/java/ai/carmonai/inference/` (no database of its own)
+`api/inference-service/src/main/java/ai/carmona/inference/` (no database of its own)
 
 | Class | What it does |
 |---|---|
@@ -117,7 +117,7 @@ routed.
 Configuration (`application.yaml`): models come from configuration, one engine URL each.
 
 ### usage-service — what was consumed
-`api/usage-service/src/main/java/ai/carmonai/usage/` (schema `usage`, 2 migrations)
+`api/usage-service/src/main/java/ai/carmona/usage/` (schema `usage`, 2 migrations)
 
 - `UsageResource`: internal `POST /usage/events` (idempotent on `(event_id, started_at)`), the internal
   `GET /usage/windows/next` and `GET /usage/totals`, and the customer-facing
@@ -129,7 +129,7 @@ Configuration (`application.yaml`): models come from configuration, one engine U
   output, status, start time, TTFT, duration. **Never a prompt or an answer.**
 
 ### billing-service — what it costs
-`api/billing-service/src/main/java/ai/carmonai/billing/` (schema `billing`, 2 migrations)
+`api/billing-service/src/main/java/ai/carmona/billing/` (schema `billing`, 2 migrations)
 
 - `BillingService` pulls the next sealed window (cursor), prices it **at the window's start**, and in one
   transaction writes one ledger entry per (organization, model, mode) and updates the balance in the same
@@ -147,7 +147,7 @@ Configuration (`application.yaml`): models come from configuration, one engine U
 - `Price` (record + `cost`) lives in the **library**, so both services use one arithmetic.
 
 ### batch-service — Files and Batch API
-`api/batch-service/src/main/java/ai/carmonai/batch/` (schema `batch`, 2 migrations)
+`api/batch-service/src/main/java/ai/carmona/batch/` (schema `batch`, 2 migrations)
 
 - `BatchResource`: `/v1/files`, `/v1/files/{id}/content`, `/v1/batches`, `/v1/batches/{id}`,
   `/v1/batches/{id}/cancel`.
@@ -237,7 +237,7 @@ recording rules and 7 alerts and `docker/grafana/dashboards/` the three dashboar
 what is missing is an **Alertmanager destination**, so the rules fire into nothing. Tracing is not wired.
 Per-service p95/p99 needs
 `management.metrics.distribution.percentiles-histogram.http.server.requests: true` in each service. Full list
-in `.claude/skills/carmonai-architecture/references/inference-plan.md` §13.
+in `.claude/skills/carmona-architecture/references/inference-plan.md` §13.
 
 ## Which documents are current, and which lag
 
@@ -250,8 +250,8 @@ one will state something false:
 | `references/observability.md` | **Current.** Written with the Prometheus/Grafana work. |
 | `references/phase-*-progress.md`, `revenue-leaks-progress.md` | Current for their phase. |
 | `references/plan-review-2026-10-02.md` | A snapshot of the review that produced the ranked gaps. Its findings are inputs, not status. |
-| `.claude/skills/carmonai/SKILL.md` | **Stale.** It still calls observability "later" and says there is no refresh flow, which phase 7a part 2 built. |
-| The handoff page (`Carmonai Handoff.md`, 2026-10-04) | **Behind by one pass.** Its §13 still lists gaps 4 (fairness) and 6 (instant 429) as open — both were built on 2026-10-05 — and it contradicts itself about whether the demo console PR is merged. |
+| `.claude/skills/carmona/SKILL.md` | **Stale.** It still calls observability "later" and says there is no refresh flow, which phase 7a part 2 built. |
+| The handoff page (`Carmona Handoff.md`, 2026-10-04) | **Behind by one pass.** Its §13 still lists gaps 4 (fairness) and 6 (instant 429) as open — both were built on 2026-10-05 — and it contradicts itself about whether the demo console PR is merged. |
 
 **The rule the project already states, and which resolves every conflict: when a note and the repository
 disagree, the repository wins.**

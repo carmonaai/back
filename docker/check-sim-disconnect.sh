@@ -2,24 +2,24 @@
 # Live check that the simulated engine notices a client that hangs up (G1 of work/prototype-sim/FINDINGS-contract.md,
 # contract point E19) and reports usage on every chunk when asked (G3). It needs no compose stack: it starts the image
 # on a private network, drives it with python (the tools image's pinned base) over raw sockets, and removes both.
-#   bash docker/check-sim-disconnect.sh [image]       default: carmonai/llm-d-inference-sim:v0.11.4-disconnect.1 (docker/sim/build.sh)
+#   bash docker/check-sim-disconnect.sh [image]       default: carmona/llm-d-inference-sim:v0.11.4-disconnect.1 (docker/sim/build.sh)
 # It exits 1 on any failed assertion. It is also the negative control of the patch: against upstream's own image
 #   bash docker/check-sim-disconnect.sh ghcr.io/llm-d/llm-d-inference-sim:v0.11.4@sha256:d60f0fb00ac62d0eb7c100e7a6816b8acec487aa06f0f38dba72b0ab1754e8f6
 # every assertion about the hang-up and about usage fails (it keeps generating for nobody).
 # Run it through the slot semaphore: bash work/docker-slots.sh run <name> -- bash docker/check-sim-disconnect.sh
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-IMAGE=${1:-${ENGINE_IMAGE:-carmonai/llm-d-inference-sim:v0.11.4-disconnect.1}}
+IMAGE=${1:-${ENGINE_IMAGE:-carmona/llm-d-inference-sim:v0.11.4-disconnect.1}}
 PY=$(sed -nE 's/^FROM (python[^ ]+).*/\1/p' "$here/tools/Dockerfile")
-NET=carmonai-p2-har-simchk
-NAME=carmonai-p2-har-simchk-engine
+NET=carmona-p2-har-simchk
+NAME=carmona-p2-har-simchk-engine
 cleanup() { docker rm -f "$NAME" >/dev/null 2>&1; docker network rm "$NET" >/dev/null 2>&1; }
 trap cleanup EXIT
 cleanup
 docker network create "$NET" >/dev/null || exit 1
 # One slot and a queue of 4, so a second request has to wait; the latency of the engine in compose.yaml.
 docker run -d --name "$NAME" --network "$NET" --read-only --cap-drop ALL --security-opt no-new-privileges:true --memory 256m \
-  "$IMAGE" --model=carmonai/qwen3-4b --port=8000 --mode=echo --max-num-seqs=1 --max-waiting-queue-length=4 --max-model-len=4096 \
+  "$IMAGE" --model=carmona/qwen3-4b --port=8000 --mode=echo --max-num-seqs=1 --max-waiting-queue-length=4 --max-model-len=4096 \
   --latency-calculator=constant --time-to-first-token=600ms --time-to-first-token-std-dev=0ms \
   --inter-token-latency=24ms --inter-token-latency-std-dev=0ms --seed=42 >/dev/null || exit 1
 sleep 2
@@ -61,7 +61,7 @@ aborted = lambda: metric("vllm:request_success_total", 'finish_reason="abort"')
 
 def body(words, options=None):
     # in echo mode the answer is the prompt, so the number of words is the number of tokens (+ the chat template's)
-    req = {"model": "carmonai/qwen3-4b", "max_tokens": 1000, "stream": True,
+    req = {"model": "carmona/qwen3-4b", "max_tokens": 1000, "stream": True,
            "messages": [{"role": "user", "content": " ".join("w%d" % i for i in range(words))}]}
     if options:
         req["stream_options"] = options

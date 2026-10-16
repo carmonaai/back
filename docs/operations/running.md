@@ -1,6 +1,6 @@
 # Running it locally
 
-This page is meant to be followed top to bottom on a machine that has never run Carmonai. Every command is the
+This page is meant to be followed top to bottom on a machine that has never run Carmona. Every command is the
 one in the repository, and every file it names is one that exists. When you are done you have fourteen
 containers, a passing smoke test, and two model engines — one of them on your GPU, if you have one.
 
@@ -155,7 +155,7 @@ the file itself suggests:
 | `VLLM_API_KEY` | `openssl rand -hex 24` (only with `compose.gpu.yaml`) |
 | `GRAFANA_ADMIN_PASSWORD` | `openssl rand -base64 18` |
 
-`DB_NAME` and `DB_USER` are plain values (`carmonai` in the example). The JWT key must be the **body** of a
+`DB_NAME` and `DB_USER` are plain values (`carmona` in the example). The JWT key must be the **body** of a
 PKCS#8 PEM on one line, which is what the `grep -v -- -----` and `tr -d '\r\n'` produce; `openssl genpkey`
 writes PKCS#8, and some builds write `-outform DER` as PKCS#1 instead, which auth-service will refuse. `.env`
 is untracked, CI generates its own with fresh secrets, and nothing in the repository contains a credential.
@@ -189,11 +189,11 @@ refills at one request per second, so **wait about 20 seconds** before a second 
 ```bash
 cd docker
 docker compose -f compose.yaml -f compose.gpu.yaml up -d --build --wait
-MODEL=carmonai/qwen3-4b ENGINE=vllm bash smoke.sh
+MODEL=carmona/qwen3-4b ENGINE=vllm bash smoke.sh
 ```
 
 `compose.gpu.yaml` adds a `vllm` service serving `cyankiwi/Qwen3-4B-Instruct-2507-AWQ-4bit` — the planned
-Qwen3-4B-Instruct-2507 in 4-bit AWQ, revision pinned — as `carmonai/qwen3-4b`, and switches inference-service
+Qwen3-4B-Instruct-2507 in 4-bit AWQ, revision pinned — as `carmona/qwen3-4b`, and switches inference-service
 to the `gpu` profile so it lists both models. The flags encode everything the 6 GB card forced:
 `--max-model-len 4096 --max-num-seqs 4 --max-num-queued-reqs 8 --kv-cache-dtype fp8
 --gpu-memory-utilization 0.78 --scheduling-policy priority --enable-prompt-tokens-details

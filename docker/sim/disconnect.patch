@@ -1,4 +1,4 @@
-Carmonai patch for llm-d-inference-sim v0.11.4 (commit db3e12bdf8ccf500d93309dc73015fb811296404), applied by docker/sim/build.sh.
+Carmona patch for llm-d-inference-sim v0.11.4 (commit db3e12bdf8ccf500d93309dc73015fb811296404), applied by docker/sim/build.sh.
 Closes G1 (a client that hangs up is not noticed) and G3 (no usage before the last chunk) of work/prototype-sim/FINDINGS-contract.md.
 
 What it does:
@@ -70,7 +70,7 @@ index 0000000..c77274c
 +limitations under the License.
 +*/
 +
-+// Carmonai patch (docker/sim/disconnect.patch): the simulator learns that its client has gone.
++// Carmona patch (docker/sim/disconnect.patch): the simulator learns that its client has gone.
 +
 +package communication
 +
@@ -292,7 +292,7 @@ index 0000000..47b5e14
 +limitations under the License.
 +*/
 +
-+// Carmonai patch (docker/sim/disconnect.patch): a client that hangs up stops the generation, and
++// Carmona patch (docker/sim/disconnect.patch): a client that hangs up stops the generation, and
 +// stream_options.continuous_usage_stats puts the usage so far on every chunk.
 +
 +package communication
@@ -1068,7 +1068,7 @@ index c3bf91b..ecec59f 100644
  	}
  
 -	numChoices, isStream, channel, err, errInjected := c.simulator.HandleRequest(req)
-+	// The request lives as long as its client does (carmonai patch): link.ctx is done when the client hangs up, or
++	// The request lives as long as its client does (carmona patch): link.ctx is done when the client hangs up, or
 +	// when the response is complete. Done stops the generation; stock v0.11.4 ran every request to its end.
 +	link := newClientLink(req)
 +	numChoices, isStream, channel, err, errInjected := c.simulator.HandleRequestCtx(link.ctx, req)
@@ -1378,7 +1378,7 @@ index 0000000..d4f5b99
 +limitations under the License.
 +*/
 +
-+// Carmonai patch (docker/sim/disconnect.patch): the simulated sleeps and the waiting queue follow the client.
++// Carmona patch (docker/sim/disconnect.patch): the simulated sleeps and the waiting queue follow the client.
 +// The end-to-end specs of a hang-up are in pkg/communication/disconnect_test.go.
 +
 +package simulator
@@ -1455,7 +1455,7 @@ index 6462ef6..973c10a 100644
  	waitingUsageState loraUsageState = iota
  	runningUsageState
  	doneUsageState
-+	// droppedUsageState: a waiting request left the queue without ever running (carmonai patch)
++	// droppedUsageState: a waiting request left the queue without ever running (carmona patch)
 +	droppedUsageState
  )
  
@@ -1485,7 +1485,7 @@ index eb7c5ee..5ab92ae 100644
  	encode() ([]uint32, []string, *api.RenderMMFeatures, error)
  	choiceIndex() int
  	signalDone()
-+	// cancelCtx is done once the client of the request has gone (carmonai patch)
++	// cancelCtx is done once the client of the request has gone (carmona patch)
 +	cancelCtx() context.Context
 +	setCancelCtx(ctx context.Context)
  }
@@ -1523,7 +1523,7 @@ index 797236d..742aafc 100644
  	}
  	// increment the waiting requests metric
  	common.WriteToChannel(s.Context.metrics.waitingReqChan, common.MetricInfo{Value: 1}, s.Context.logger)
-+	// a waiting request whose client leaves frees its place in the queue at once (carmonai patch)
++	// a waiting request whose client leaves frees its place in the queue at once (carmona patch)
 +	// ponytail: the callback also runs, and finds nothing to drop, for a request that waited and then ran to its end
 +	// (one short goroutine per queued request); call the stop func of AfterFunc when a worker takes the request
 +	// if that ever shows in a profile.
@@ -1570,7 +1570,7 @@ index 797236d..742aafc 100644
 +}
 +
 +// HandleRequestCtx is HandleRequest for a client that can hang up: once ctx is done a waiting request leaves
-+// the queue and a running one stops generating at its next token (carmonai patch; stock v0.11.4 ran every
++// the queue and a running one stops generating at its next token (carmona patch; stock v0.11.4 ran every
 +// request to its end whether or not anyone was listening).
 +func (s *Simulator) HandleRequestCtx(ctx context.Context, req Request) (numChoices int, isStream bool,
  	channel *common.Channel[*ResponseInfo], err *api.Error, errInjected bool) {
@@ -1690,7 +1690,7 @@ index ea3691f..7ed03d8 100644
  
 -	s.simulateResponseProcessing(respCtx)
 +	if out := s.simulateResponseProcessing(respCtx); out.cancelled {
-+		// The client left (carmonai patch). The simulator's own accounting of an aborted request: the prompt once it was
++		// The client left (carmona patch). The simulator's own accounting of an aborted request: the prompt once it was
 +		// processed, the tokens produced so far, finish_reason "abort". The repo's own measurement (phase-6-progress.md:39)
 +		// left request_success_total{finished_reason="abort"} at 0 on vLLM v0.30.0.
 +		s.Context.logger.V(logging.DEBUG).Info("Client gone, request aborted", "id", req.GetRequestID(), "tokens", out.generated)

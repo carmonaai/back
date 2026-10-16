@@ -124,18 +124,18 @@ which the gateway routes. The library does not mark which is which — the gatew
 Every interface declares its target the same way:
 
 ```java
-@FeignClient(name = "organization", url = "${carmonai.organization.url:http://organization:8080}")
+@FeignClient(name = "organization", url = "${carmona.organization.url:http://organization:8080}")
 ```
 
 Two things are happening in that one string. The default, `http://organization:8080`, is what the compose
-network resolves — the service name is the hostname. The property placeholder, `carmonai.organization.url`, is
+network resolves — the service name is the hostname. The property placeholder, `carmona.organization.url`, is
 what a test sets to point the same client at a stub, so an integration test can exercise account-service's
 erasure without a real organization-service behind it. The source comments say exactly this: *"url is a
 placeholder so tests can point the client at a stub; compose resolves the default."*
 
 The same trick appears outside the libraries, which is why it is worth knowing. `GatewayApplication` builds its
 `WebClient` with `baseUrl("http://auth:8080")`, and its JWT decoder takes
-`@Value("${carmonai.jwt.jwks-uri:http://auth:8080/auth/jwks}")` so the gateway's integration test can point it
+`@Value("${carmona.jwt.jwks-uri:http://auth:8080/auth/jwks}")` so the gateway's integration test can point it
 at a JWKS stub.
 
 The wire details that Feign makes awkward are decided once, here, rather than in each caller:
@@ -157,7 +157,7 @@ their types.**
   batch-service, which posts the customer's own JSON. There is no Java type to share — the body is the
   contract, and it is OpenAI's.
 - **batch-service** uses the JDK's `java.net.http.HttpClient`, not Feign: `BatchWorker` posts the line's body
-  to `carmonai.batch.inference-url` + `/v1/chat/completions` with the `batch-line` header the gateway would
+  to `carmona.batch.inference-url` + `/v1/chat/completions` with the `batch-line` header the gateway would
   otherwise strip. A shared interface would only get in the way of passing a body through untouched.
 - **gateway-service** is in the same position from the other side. It calls auth-service's internal
   `GET /api-keys/{hash}` and account-service over plain HTTP, with its own `WebClient`, because a gateway filter
@@ -213,8 +213,8 @@ the one duplication in the arrangement, and it is commented as such.
 
 ## Where to look
 
-- [AuthController.java](https://github.com/carmonai/back/blob/main/api/auth/src/main/java/ai/carmonai/auth/AuthController.java) — the largest contract, public and internal.
-- [OrganizationController.java](https://github.com/carmonai/back/blob/main/api/organization/src/main/java/ai/carmonai/organization/OrganizationController.java) — the six-consumer contract, in full.
-- [Price.java](https://github.com/carmonai/back/blob/main/api/billing/src/main/java/ai/carmonai/billing/Price.java) — the one type both sides of the money compute with.
+- [AuthController.java](https://github.com/carmonai/back/blob/main/api/auth/src/main/java/ai/carmona/auth/AuthController.java) — the largest contract, public and internal.
+- [OrganizationController.java](https://github.com/carmonai/back/blob/main/api/organization/src/main/java/ai/carmona/organization/OrganizationController.java) — the six-consumer contract, in full.
+- [Price.java](https://github.com/carmonai/back/blob/main/api/billing/src/main/java/ai/carmona/billing/Price.java) — the one type both sides of the money compute with.
 - [organization/pom.xml](https://github.com/carmonai/back/blob/main/api/organization/pom.xml) — everything a library module is allowed to depend on.
 - [pom.xml](https://github.com/carmonai/back/blob/main/pom.xml) — the thirteen modules the reactor builds in order.

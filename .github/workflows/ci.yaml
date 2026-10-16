@@ -62,8 +62,8 @@ jobs:
         working-directory: docker
         run: |
           {
-            echo "DB_NAME=carmonai"
-            echo "DB_USER=carmonai"
+            echo "DB_NAME=carmona"
+            echo "DB_USER=carmona"
             echo "DB_PASSWORD=$(openssl rand -hex 24)"
             echo "VALKEY_PASSWORD=$(openssl rand -hex 24)"
             echo "ENGINE_API_KEY=$(openssl rand -hex 24)"
