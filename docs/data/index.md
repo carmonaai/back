@@ -220,11 +220,11 @@ counters are a `HashMap` in one JVM for the same reason — nothing shared on th
 
 ## Where to look
 
-- [compose.yaml](https://github.com/carmonai/back/blob/main/docker/compose.yaml) — `db` and `valkey`, their
+- [compose.yaml](https://github.com/carmonaai/back/blob/main/docker/compose.yaml) — `db` and `valkey`, their
   volumes, and Valkey's append-only settings.
-- [ApiKeyAuthenticationManager.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/ApiKeyAuthenticationManager.java)
+- [ApiKeyAuthenticationManager.java](https://github.com/carmonaai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/ApiKeyAuthenticationManager.java)
   — the 60 s cache, the credit flag and the fail-closed 503.
-- [Admission.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Admission.java)
+- [Admission.java](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Admission.java)
   — the per-organization buckets and the in-memory in-flight caps.
-- [UsageReporter.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/UsageReporter.java)
+- [UsageReporter.java](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/UsageReporter.java)
   — the `usage:events` stream and the relay that drains it.

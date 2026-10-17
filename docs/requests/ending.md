@@ -210,15 +210,15 @@ log, the access log and a database dump for a canary string to prove it.
 
 ## Where to look
 
-- [`ChatHandler.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/ChatHandler.java)
+- [`ChatHandler.java`](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/ChatHandler.java)
   — `usingWhen`, `doFinally` and the order inside `finish`.
-- [`Tracker.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Tracker.java)
+- [`Tracker.java`](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Tracker.java)
   — the outcome, the token counts and the estimate when the engine reported none.
-- [`UsageReporter.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/UsageReporter.java)
+- [`UsageReporter.java`](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/UsageReporter.java)
   — the stream, the relay, the batch and the shutdown grace.
-- [`usage-next.lua`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/resources/usage-next.lua)
+- [`usage-next.lua`](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/resources/usage-next.lua)
   — the claim of unconfirmed entries, then the new ones.
-- [`Admission.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Admission.java)
+- [`Admission.java`](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Admission.java)
   — `settle`, and the `charged` flag on the permit.
 
 **Next:** [Inference](../inference/index.md) takes the engine itself apart — the box that produced those tokens.

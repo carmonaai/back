@@ -212,11 +212,11 @@ in tension: the seal job reads by `received_at` and needs the separate `usage_ev
 
 ## Where to look
 
-- [usage-service V2026.10.03.001](https://github.com/carmonai/back/blob/main/api/usage-service/src/main/resources/db/migration/V2026.10.03.001__create_tables.sql)
+- [usage-service V2026.10.03.001](https://github.com/carmonaai/back/blob/main/api/usage-service/src/main/resources/db/migration/V2026.10.03.001__create_tables.sql)
   — the partitioned table, the default partition and the seal cursor's first value.
-- [batch-service V2026.10.03.001](https://github.com/carmonai/back/blob/main/api/batch-service/src/main/resources/db/migration/V2026.10.03.001__create_tables.sql)
+- [batch-service V2026.10.03.001](https://github.com/carmonaai/back/blob/main/api/batch-service/src/main/resources/db/migration/V2026.10.03.001__create_tables.sql)
   — `batch_line`, its partial index, and the `ponytail:` comment on storing content in Postgres.
-- [BatchRepository.java](https://github.com/carmonai/back/blob/main/api/batch-service/src/main/java/ai/carmona/batch/BatchRepository.java)
+- [BatchRepository.java](https://github.com/carmonaai/back/blob/main/api/batch-service/src/main/java/ai/carmona/batch/BatchRepository.java)
   — the claim query, and the `FOR UPDATE SKIP LOCKED` used to delete and expire pending lines safely.
-- [PartitionJob.java](https://github.com/carmonai/back/blob/main/api/usage-service/src/main/java/ai/carmona/usage/PartitionJob.java)
+- [PartitionJob.java](https://github.com/carmonaai/back/blob/main/api/usage-service/src/main/java/ai/carmona/usage/PartitionJob.java)
   — the 7-days-ahead window, the advisory lock and the 90-day drop.

@@ -196,8 +196,8 @@ that is over rather than one in flight.
 
 ## Where to look
 
-- [InferenceApplication.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/InferenceApplication.java) — the two routes, in full.
-- [ChatRequest.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/ChatRequest.java) — the allowlist, the refusals and the flex lane.
-- [Caller.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Caller.java) — the identity headers and the batch line.
-- [UsageEvent.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/UsageEvent.java) — what a finished request reports.
-- [application.yaml](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/resources/application.yaml) — the tiers, the timeouts and the model list.
+- [InferenceApplication.java](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/InferenceApplication.java) — the two routes, in full.
+- [ChatRequest.java](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/ChatRequest.java) — the allowlist, the refusals and the flex lane.
+- [Caller.java](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Caller.java) — the identity headers and the batch line.
+- [UsageEvent.java](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/UsageEvent.java) — what a finished request reports.
+- [application.yaml](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/resources/application.yaml) — the tiers, the timeouts and the model list.

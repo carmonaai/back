@@ -1,39 +1,39 @@
 [submodule "api/account"]
 	path = api/account
-	url = https://github.com/carmonai/account.git
+	url = https://github.com/carmonaai/account.git
 [submodule "api/account-service"]
 	path = api/account-service
-	url = https://github.com/carmonai/account-service.git
+	url = https://github.com/carmonaai/account-service.git
 [submodule "api/auth"]
 	path = api/auth
-	url = https://github.com/carmonai/auth.git
+	url = https://github.com/carmonaai/auth.git
 [submodule "api/auth-service"]
 	path = api/auth-service
-	url = https://github.com/carmonai/auth-service.git
+	url = https://github.com/carmonaai/auth-service.git
 [submodule "api/gateway-service"]
 	path = api/gateway-service
-	url = https://github.com/carmonai/gateway-service.git
+	url = https://github.com/carmonaai/gateway-service.git
 [submodule "api/organization"]
 	path = api/organization
-	url = https://github.com/carmonai/organization.git
+	url = https://github.com/carmonaai/organization.git
 [submodule "api/organization-service"]
 	path = api/organization-service
-	url = https://github.com/carmonai/organization-service.git
+	url = https://github.com/carmonaai/organization-service.git
 [submodule "api/usage"]
 	path = api/usage
-	url = https://github.com/carmonai/usage.git
+	url = https://github.com/carmonaai/usage.git
 [submodule "api/usage-service"]
 	path = api/usage-service
-	url = https://github.com/carmonai/usage-service.git
+	url = https://github.com/carmonaai/usage-service.git
 [submodule "api/inference-service"]
 	path = api/inference-service
-	url = https://github.com/carmonai/inference-service.git
+	url = https://github.com/carmonaai/inference-service.git
 [submodule "api/billing"]
 	path = api/billing
-	url = https://github.com/carmonai/billing.git
+	url = https://github.com/carmonaai/billing.git
 [submodule "api/billing-service"]
 	path = api/billing-service
-	url = https://github.com/carmonai/billing-service.git
+	url = https://github.com/carmonaai/billing-service.git
 [submodule "api/batch-service"]
 	path = api/batch-service
-	url = https://github.com/carmonai/batch-service.git
+	url = https://github.com/carmonaai/batch-service.git

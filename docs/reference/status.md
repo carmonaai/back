@@ -13,10 +13,10 @@ Two rules settle every conflict, and both are the project's own:
 
 | Document | What it holds |
 |---|---|
-| [`inference-plan.md`](https://github.com/carmonai/back/blob/main/.claude/skills/carmona-architecture/references/inference-plan.md) | The plan itself, plus a block at the top, **newest first**, recording every change and its deliberate deviations. This is the project's single best engineering record. |
-| [`observability.md`](https://github.com/carmonai/back/blob/main/.claude/skills/carmona-architecture/references/observability.md) | The SLIs, SLOs, metric contract, dashboards and alerts, written with the Prometheus/Grafana work. |
+| [`inference-plan.md`](https://github.com/carmonaai/back/blob/main/.claude/skills/carmona-architecture/references/inference-plan.md) | The plan itself, plus a block at the top, **newest first**, recording every change and its deliberate deviations. This is the project's single best engineering record. |
+| [`observability.md`](https://github.com/carmonaai/back/blob/main/.claude/skills/carmona-architecture/references/observability.md) | The SLIs, SLOs, metric contract, dashboards and alerts, written with the Prometheus/Grafana work. |
 | The phase logs — `phase-2-progress.md` … `phase-7-progress.md`, `revenue-leaks-progress.md` | One working log per phase: the checklist, the decisions to keep consistent, and everything found on the way. |
-| [`templates.md`](https://github.com/carmonai/back/blob/main/.claude/skills/carmona-new-service/references/templates.md) | The service template **and the pitfalls list** — the place to look before debugging anything. |
+| [`templates.md`](https://github.com/carmonaai/back/blob/main/.claude/skills/carmona-new-service/references/templates.md) | The service template **and the pitfalls list** — the place to look before debugging anything. |
 | `.github/workflows/` | What CI actually does. Read the workflow, not a description of it. |
 
 ## Behind, and by how much

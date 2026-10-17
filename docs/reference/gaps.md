@@ -209,8 +209,8 @@ A gap leaves this page when the code changes, and the rows above name their own 
 
 ## Where to look
 
-- [inference-plan.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmona-architecture/references/inference-plan.md) — §13 is the backlog, and the "Phase N built" blocks name each deliberate deviation and its reason.
-- [observability.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmona-architecture/references/observability.md) — the metrics contract, the gaps it names against itself, and the exact wording of each alert rule.
-- [plan-review-2026-10-02.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmona-architecture/references/plan-review-2026-10-02.md) — where the ranked findings came from, including the unverified advisories.
-- [docker/prometheus/rules.yml](https://github.com/carmonai/back/blob/main/docker/prometheus/rules.yml) — the alerts that fire into nothing.
-- [docker/revenue-check.sh](https://github.com/carmonai/back/blob/main/docker/revenue-check.sh) — the check that exits non-zero when the books and the ledger disagree.
+- [inference-plan.md](https://github.com/carmonaai/back/blob/main/.claude/skills/carmona-architecture/references/inference-plan.md) — §13 is the backlog, and the "Phase N built" blocks name each deliberate deviation and its reason.
+- [observability.md](https://github.com/carmonaai/back/blob/main/.claude/skills/carmona-architecture/references/observability.md) — the metrics contract, the gaps it names against itself, and the exact wording of each alert rule.
+- [plan-review-2026-10-02.md](https://github.com/carmonaai/back/blob/main/.claude/skills/carmona-architecture/references/plan-review-2026-10-02.md) — where the ranked findings came from, including the unverified advisories.
+- [docker/prometheus/rules.yml](https://github.com/carmonaai/back/blob/main/docker/prometheus/rules.yml) — the alerts that fire into nothing.
+- [docker/revenue-check.sh](https://github.com/carmonaai/back/blob/main/docker/revenue-check.sh) — the check that exits non-zero when the books and the ledger disagree.

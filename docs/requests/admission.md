@@ -206,15 +206,15 @@ priority 30, behind every interactive tier, and both are priced at half the sync
 
 ## Where to look
 
-- [`Admission.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Admission.java)
+- [`Admission.java`](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Admission.java)
   — both gates, the wait, the counter and the settlement.
-- [`buckets.lua`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/resources/buckets.lua)
+- [`buckets.lua`](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/resources/buckets.lua)
   — the three buckets, their linear refill and the exact wait they return.
-- [`ChatRequest.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/ChatRequest.java)
+- [`ChatRequest.java`](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/ChatRequest.java)
   — the input estimate, `max_tokens` and the `flex` flag.
-- [`application.yaml`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/resources/application.yaml)
+- [`application.yaml`](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/resources/application.yaml)
   — `admission-wait`, `max-connections`, the three tiers and each model's `slots` and `queue`.
-- [`Metrics.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Metrics.java)
+- [`Metrics.java`](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Metrics.java)
   — the queue-wait timer and the in-flight and capacity gauges.
 
 **Next:** [4 · The relay](relay.md) — the permit is held, the slot is taken, and the request goes to the

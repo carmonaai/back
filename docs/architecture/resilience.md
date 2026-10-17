@@ -204,17 +204,17 @@ The gateway's bulkhead and the flood brake's fallback bucket are per-JVM memory,
 doubles both limits, and a second inference replica breaks the in-flight caps and virtual token counters the
 same way. The reconciler's mismatch is a metric and a log line, not a page: there is no Alertmanager
 destination, and nothing is traced. Latency numbers on this page come from
-[docker/bench.sh](https://github.com/carmonai/back/blob/main/docker/bench.sh) and
-[docker/smoke.sh](https://github.com/carmonai/back/blob/main/docker/smoke.sh); the full list of ceilings is
+[docker/bench.sh](https://github.com/carmonaai/back/blob/main/docker/bench.sh) and
+[docker/smoke.sh](https://github.com/carmonaai/back/blob/main/docker/smoke.sh); the full list of ceilings is
 in [known gaps](../reference/gaps.md).
 
 ## Where to look
 
-- [Engine.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Engine.java)
+- [Engine.java](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Engine.java)
   — the pool, the timeouts and the one retry, in 84 lines.
-- [ApiError.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/ApiError.java)
+- [ApiError.java](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/ApiError.java)
   — every failure mapped to a status and an OpenAI-shaped code.
-- [RateLimitFilter.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/RateLimitFilter.java)
+- [RateLimitFilter.java](https://github.com/carmonaai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/RateLimitFilter.java)
   — the Lua token bucket, and the comment that explains failing open.
-- [ResilienceConfiguration.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/ResilienceConfiguration.java)
+- [ResilienceConfiguration.java](https://github.com/carmonaai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/ResilienceConfiguration.java)
   — the breaker numbers and why they are constants.

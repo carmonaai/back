@@ -211,10 +211,10 @@ model is the third ceiling. [Known gaps](../reference/gaps.md) has them.
 
 ## Where to look
 
-- [docker/compose.yaml](https://github.com/carmonai/back/blob/main/docker/compose.yaml) — the container set,
+- [docker/compose.yaml](https://github.com/carmonaai/back/blob/main/docker/compose.yaml) — the container set,
   healthchecks, volumes and every dependency edge (the GPU engine lives in `compose.gpu.yaml`).
-- [gateway application.yaml](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/resources/application.yaml)
+- [gateway application.yaml](https://github.com/carmonaai/back/blob/main/api/gateway-service/src/main/resources/application.yaml)
   — the route table: id, uri, path, timeout, bulkhead and fallback code per route.
-- [UsageApplication.java](https://github.com/carmonai/back/blob/main/api/usage-service/src/main/java/ai/carmona/usage/UsageApplication.java)
-  and [BillingApplication.java](https://github.com/carmonai/back/blob/main/api/billing-service/src/main/java/ai/carmona/billing/BillingApplication.java)
+- [UsageApplication.java](https://github.com/carmonaai/back/blob/main/api/usage-service/src/main/java/ai/carmona/usage/UsageApplication.java)
+  and [BillingApplication.java](https://github.com/carmonaai/back/blob/main/api/billing-service/src/main/java/ai/carmona/billing/BillingApplication.java)
   — the two `@EnableFeignClients` lines that close the mutual dependency.

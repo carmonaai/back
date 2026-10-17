@@ -209,7 +209,7 @@ report, and a maximum API key lifetime if a customer asks for a policy.
 
 ## Where to look
 
-- [inference-plan.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmona-architecture/references/inference-plan.md) — §12 is this page's spine, and the blocks at the top list every deviation, phase by phase.
-- [plan-review-2026-10-02.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmona-architecture/references/plan-review-2026-10-02.md) — the review that changed several of these decisions, with its sources.
-- [Price.java](https://github.com/carmonai/back/blob/main/api/billing/src/main/java/ai/carmona/billing/Price.java) — the one implementation of the money arithmetic, shared by the debit job and the customer summary.
-- [Admission.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Admission.java) — where the tier share, the organization cap and the virtual token counter actually meet.
+- [inference-plan.md](https://github.com/carmonaai/back/blob/main/.claude/skills/carmona-architecture/references/inference-plan.md) — §12 is this page's spine, and the blocks at the top list every deviation, phase by phase.
+- [plan-review-2026-10-02.md](https://github.com/carmonaai/back/blob/main/.claude/skills/carmona-architecture/references/plan-review-2026-10-02.md) — the review that changed several of these decisions, with its sources.
+- [Price.java](https://github.com/carmonaai/back/blob/main/api/billing/src/main/java/ai/carmona/billing/Price.java) — the one implementation of the money arithmetic, shared by the debit job and the customer summary.
+- [Admission.java](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Admission.java) — where the tier share, the organization cap and the virtual token counter actually meet.

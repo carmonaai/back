@@ -195,7 +195,7 @@ rather than 60 s so billing is visible within seconds). It re-syncs every `no_cr
 organizations whose balance differs from their ledger at ERROR with ids only, and **fixes nothing** — an
 automatic repair would erase the evidence of whatever produced the drift. Ask on demand at
 `GET /actuator/reconcile` on billing's management port (8081, never published, never routed), or run
-[revenue-check.sh](https://github.com/carmonai/back/blob/main/docker/revenue-check.sh), which calls it from
+[revenue-check.sh](https://github.com/carmonaai/back/blob/main/docker/revenue-check.sh), which calls it from
 inside the compose network and exits non-zero so cron or CI can fail on drift.
 
 ## Why it is like this
@@ -227,11 +227,11 @@ grant and a flag can disagree for a moment, which is why the customer-facing bal
 
 ## Where to look
 
-- [billing V2026.10.03.001](https://github.com/carmonai/back/blob/main/api/billing-service/src/main/resources/db/migration/V2026.10.03.001__create_tables.sql)
+- [billing V2026.10.03.001](https://github.com/carmonaai/back/blob/main/api/billing-service/src/main/resources/db/migration/V2026.10.03.001__create_tables.sql)
   — the four tables, the seeded placeholder prices, and both triggers.
-- [Price.java](https://github.com/carmonai/back/blob/main/api/billing/src/main/java/ai/carmona/billing/Price.java)
+- [Price.java](https://github.com/carmonaai/back/blob/main/api/billing/src/main/java/ai/carmona/billing/Price.java)
   — the unit, `cost()`'s rounding, and `at()`, the rule both services share.
-- [BillingService.java](https://github.com/carmonai/back/blob/main/api/billing-service/src/main/java/ai/carmona/billing/BillingService.java)
+- [BillingService.java](https://github.com/carmonaai/back/blob/main/api/billing-service/src/main/java/ai/carmona/billing/BillingService.java)
   — one window, one transaction, the cursor, and `reconcile()`.
-- [BillingRepository.java](https://github.com/carmonai/back/blob/main/api/billing-service/src/main/java/ai/carmona/billing/BillingRepository.java)
+- [BillingRepository.java](https://github.com/carmonaai/back/blob/main/api/billing-service/src/main/java/ai/carmona/billing/BillingRepository.java)
   — the idempotent insert, the balance upsert and the `FULL OUTER JOIN`.

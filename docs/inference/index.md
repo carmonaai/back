@@ -206,13 +206,13 @@ adds waiting.
 
 ## Where to look
 
-- [`InferenceApplication.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/InferenceApplication.java)
+- [`InferenceApplication.java`](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/InferenceApplication.java)
   — the whole surface: two routes.
-- [`ChatHandler.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/ChatHandler.java)
+- [`ChatHandler.java`](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/ChatHandler.java)
   — where a request becomes a stream and a stream becomes an event.
-- [`Engine.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Engine.java)
+- [`Engine.java`](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Engine.java)
   — the only caller of an engine, and its pool and timeouts.
-- [`application-gpu.yaml`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/resources/application-gpu.yaml)
+- [`application-gpu.yaml`](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/resources/application-gpu.yaml)
   — `slots` and `queue` per model, with the measurement they came from.
-- [`Metrics.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Metrics.java)
+- [`Metrics.java`](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Metrics.java)
   — TTFT, ITL, queue wait and in-flight, tagged by model and tier and never by organization.

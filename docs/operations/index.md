@@ -231,5 +231,5 @@ surface to the gateway, at the cost of having to be on the machine to look at a 
 - [CI and shipping](ci.md) — the workflow, the module token and the merge order.
 - [Batch API design](batch-api.md) — how the asynchronous path works and what a crash proved.
 - [Knowledge base](knowledge-base.md) — the project's own notes, and which of them to trust.
-- [compose.yaml](https://github.com/carmonai/back/blob/main/docker/compose.yaml) — all fourteen services,
+- [compose.yaml](https://github.com/carmonaai/back/blob/main/docker/compose.yaml) — all fourteen services,
   their health checks and their dependencies, in one file.

@@ -36,7 +36,7 @@ ask "why is it like that?" after every sentence they read.
 3. **`## Why it is like this`** — the decisions and the rejected alternatives, with the alternative named.
 4. **`## What would change it`** — the ceiling and the upgrade path, from the fact sheet's shortcuts table.
 5. **`## Where to look`** — a short list of the two to five files that matter, as repo-relative paths, each
-   with a six-word reason. Link them: `[ChatHandler.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/ChatHandler.java)`.
+   with a six-word reason. Link them: `[ChatHandler.java](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/ChatHandler.java)`.
 
 Not every page needs all five headings verbatim, but the *information* must be there. A page of 120–220 lines
 of Markdown is the target: dense, not padded.

@@ -290,13 +290,13 @@ permanent features with a recorded reason.
 
 ## Where to look
 
-- [carmona/SKILL.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmona/SKILL.md) — status,
+- [carmona/SKILL.md](https://github.com/carmonaai/back/blob/main/.claude/skills/carmona/SKILL.md) — status,
   repository map and pending decisions; load it first.
-- [carmona-architecture/SKILL.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmona-architecture/SKILL.md)
+- [carmona-architecture/SKILL.md](https://github.com/carmonaai/back/blob/main/.claude/skills/carmona-architecture/SKILL.md)
   — the architecture rules and the six hardening overrides that win over the reference.
-- [inference-plan.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmona-architecture/references/inference-plan.md)
+- [inference-plan.md](https://github.com/carmonaai/back/blob/main/.claude/skills/carmona-architecture/references/inference-plan.md)
   — the plan every inference page on this site is derived from, with its progress notes at the top.
-- [plan-review-2026-10-02.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmona-architecture/references/plan-review-2026-10-02.md)
+- [plan-review-2026-10-02.md](https://github.com/carmonaai/back/blob/main/.claude/skills/carmona-architecture/references/plan-review-2026-10-02.md)
   — the ranked findings, including the three billing bugs found before any of it was built.
-- [templates.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmona-new-service/references/templates.md)
+- [templates.md](https://github.com/carmonaai/back/blob/main/.claude/skills/carmona-new-service/references/templates.md)
   — the templates, and the thirty-seven-entry pitfalls list.

@@ -159,11 +159,11 @@ first customer.
 
 ## Where to look
 
-- [pom.xml](https://github.com/carmonai/back/blob/main/pom.xml) — the thirteen modules in dependency order.
-- [.gitmodules](https://github.com/carmonai/back/blob/main/.gitmodules) — each module is its own repository.
-- [organization/pom.xml](https://github.com/carmonai/back/blob/main/api/organization/pom.xml) — what a library module actually contains.
-- [auth-service application.yaml](https://github.com/carmonai/back/blob/main/api/auth-service/src/main/resources/application.yaml) — one schema, one datasource, one service.
-- [organization-service migration](https://github.com/carmonai/back/blob/main/api/organization-service/src/main/resources/db/migration/V2026.10.03.001__create_tables.sql) — the schema a service calls its own.
+- [pom.xml](https://github.com/carmonaai/back/blob/main/pom.xml) — the thirteen modules in dependency order.
+- [.gitmodules](https://github.com/carmonaai/back/blob/main/.gitmodules) — each module is its own repository.
+- [organization/pom.xml](https://github.com/carmonaai/back/blob/main/api/organization/pom.xml) — what a library module actually contains.
+- [auth-service application.yaml](https://github.com/carmonaai/back/blob/main/api/auth-service/src/main/resources/application.yaml) — one schema, one datasource, one service.
+- [organization-service migration](https://github.com/carmonaai/back/blob/main/api/organization-service/src/main/resources/db/migration/V2026.10.03.001__create_tables.sql) — the schema a service calls its own.
 
 <div class="grid cards" markdown>
 

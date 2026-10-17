@@ -178,11 +178,11 @@ than an event saga. [Known gaps](../reference/gaps.md) has the full list.
 
 ## Where to look
 
-- [OrganizationController.java](https://github.com/carmonai/back/blob/main/api/organization/src/main/java/ai/carmona/organization/OrganizationController.java)
+- [OrganizationController.java](https://github.com/carmonaai/back/blob/main/api/organization/src/main/java/ai/carmona/organization/OrganizationController.java)
   — the library contract, with a comment on every internal-only method.
-- [UsageService.java](https://github.com/carmonai/back/blob/main/api/usage-service/src/main/java/ai/carmona/usage/UsageService.java)
+- [UsageService.java](https://github.com/carmonaai/back/blob/main/api/usage-service/src/main/java/ai/carmona/usage/UsageService.java)
   — the membership check, the summary and the price read.
-- [BillingService.java](https://github.com/carmonai/back/blob/main/api/billing-service/src/main/java/ai/carmona/billing/BillingService.java)
+- [BillingService.java](https://github.com/carmonaai/back/blob/main/api/billing-service/src/main/java/ai/carmona/billing/BillingService.java)
   — the cursor pull, the one-transaction ledger write and the credit flag.
-- [BillingRepository.java](https://github.com/carmonai/back/blob/main/api/billing-service/src/main/java/ai/carmona/billing/BillingRepository.java)
+- [BillingRepository.java](https://github.com/carmonaai/back/blob/main/api/billing-service/src/main/java/ai/carmona/billing/BillingRepository.java)
   — plain JDBC against `currentSchema=billing`, including the reconciliation query.

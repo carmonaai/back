@@ -158,7 +158,7 @@ while the client is still waiting.</figcaption>
   things a request must read, and all three are in memory. The engine answers in 253 ms at p95; a database
   round trip on every token would be visible.
 - **Two lanes instead of one credential.** An API key cannot log into the console and a JWT cannot call
-  `/v1`; they are two Spring Security chains in [GatewayApplication.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/GatewayApplication.java),
+  `/v1`; they are two Spring Security chains in [GatewayApplication.java](https://github.com/carmonaai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/GatewayApplication.java),
   with the API-key chain first. The alternative — one credential type for both — was rejected because the
   key must be cheap to verify thousands of times per minute and revocable per key, while a console session
   must be short-lived and cookie-backed.
@@ -173,11 +173,11 @@ second consumer, and object storage for batch files are all written down with th
 
 ## Where to look
 
-- [docker/compose.yaml](https://github.com/carmonai/back/blob/main/docker/compose.yaml) — every container,
+- [docker/compose.yaml](https://github.com/carmonaai/back/blob/main/docker/compose.yaml) — every container,
   port, volume and dependency edge, with the reason in a comment above it.
-- [GatewayApplication.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/GatewayApplication.java)
+- [GatewayApplication.java](https://github.com/carmonaai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/GatewayApplication.java)
   — the two security chains and the JWKS-backed decoder.
-- [application.yaml](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/resources/application.yaml)
+- [application.yaml](https://github.com/carmonaai/back/blob/main/api/gateway-service/src/main/resources/application.yaml)
   — the route table, with a comment per route naming its timeout and its bulkhead.
-- [.claude/skills/carmona-architecture/SKILL.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmona-architecture/SKILL.md)
+- [.claude/skills/carmona-architecture/SKILL.md](https://github.com/carmonaai/back/blob/main/.claude/skills/carmona-architecture/SKILL.md)
   — the rules this section explains, in their original form.

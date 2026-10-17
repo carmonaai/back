@@ -291,13 +291,13 @@ ceiling because a timeout that fired first would abandon a call whose answer was
 
 ## Where to look
 
-- [BatchService.java](https://github.com/carmonai/back/blob/main/api/batch-service/src/main/java/ai/carmona/batch/BatchService.java)
+- [BatchService.java](https://github.com/carmonaai/back/blob/main/api/batch-service/src/main/java/ai/carmona/batch/BatchService.java)
   — upload, the line-by-line validation and the errors it produces.
-- [BatchWorker.java](https://github.com/carmonai/back/blob/main/api/batch-service/src/main/java/ai/carmona/batch/BatchWorker.java)
+- [BatchWorker.java](https://github.com/carmonaai/back/blob/main/api/batch-service/src/main/java/ai/carmona/batch/BatchWorker.java)
   — the claim, the held transaction, the per-status outcomes and the back-off clamp.
-- [BatchRepository.java](https://github.com/carmonai/back/blob/main/api/batch-service/src/main/java/ai/carmona/batch/BatchRepository.java)
+- [BatchRepository.java](https://github.com/carmonaai/back/blob/main/api/batch-service/src/main/java/ai/carmona/batch/BatchRepository.java)
   — `claim()`, `writeFile()` and the sweep queries, in SQL.
-- [BatchFinisher.java](https://github.com/carmonai/back/blob/main/api/batch-service/src/main/java/ai/carmona/batch/BatchFinisher.java)
+- [BatchFinisher.java](https://github.com/carmonaai/back/blob/main/api/batch-service/src/main/java/ai/carmona/batch/BatchFinisher.java)
   — completing, cancelling, expiring and erasing, plus the 30-day file sweep.
-- [batch-bench.sh](https://github.com/carmonai/back/blob/main/docker/batch-bench.sh) — the exit check,
+- [batch-bench.sh](https://github.com/carmonaai/back/blob/main/docker/batch-bench.sh) — the exit check,
   including the kill and the usage-event count.

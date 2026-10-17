@@ -187,15 +187,15 @@ deadline — and 600 s sits under the gateway's 660 s so the error comes from th
 
 ## Where to look
 
-- [`Engine.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Engine.java)
+- [`Engine.java`](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Engine.java)
   — the pool, the retry rule and the two streaming timeouts.
-- [`ChatHandler.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/ChatHandler.java)
+- [`ChatHandler.java`](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/ChatHandler.java)
   — the SSE response and what happens to an error before and after the first byte.
-- [`Tracker.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Tracker.java)
+- [`Tracker.java`](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Tracker.java)
   — one chunk at a time: first token, gaps, usage, and no text kept.
-- [`ChatRequest.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/ChatRequest.java)
+- [`ChatRequest.java`](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/ChatRequest.java)
   — the allowlist, `priority` and `cache_salt`.
-- [`ApiError.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/ApiError.java)
+- [`ApiError.java`](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/ApiError.java)
   — how an engine failure becomes a status and a code.
 
 **Next:** [5 · The end, however it ends](ending.md) — the last frame has been written, and now the platform

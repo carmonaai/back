@@ -192,15 +192,15 @@ that honours the millisecond header does not back off by a second for a wait of 
 
 ## Where to look
 
-- [`Admission.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Admission.java)
+- [`Admission.java`](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Admission.java)
   — `tierCap`, the two in-flight checks and the order they run in.
-- [`application-gpu.yaml`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/resources/application-gpu.yaml)
+- [`application-gpu.yaml`](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/resources/application-gpu.yaml)
   — `slots: 4`, `queue: 2`, and the bench they came from.
-- [`compose.gpu.yaml`](https://github.com/carmonai/back/blob/main/docker/compose.gpu.yaml)
+- [`compose.gpu.yaml`](https://github.com/carmonaai/back/blob/main/docker/compose.gpu.yaml)
   — the engine's side of the same limit: `--max-num-seqs`, `--max-num-queued-reqs`, `--kv-cache-dtype fp8`.
-- [`application.yaml`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/resources/application.yaml)
+- [`application.yaml`](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/resources/application.yaml)
   — the three tiers' per-minute budgets and `max-in-flight`, with the prototype note on them.
-- [`Metrics.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Metrics.java)
+- [`Metrics.java`](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Metrics.java)
   — the in-flight gauge and the capacity gauge a dashboard reads.
 
 **Back to:** [Batching and response routing](batching.md) for why one model serves four requests at once at

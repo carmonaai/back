@@ -189,8 +189,8 @@ failure rate readable.
 
 ## Where to look
 
-- [UsageController.java](https://github.com/carmonai/back/blob/main/api/usage/src/main/java/ai/carmona/usage/UsageController.java) — the four endpoints, internal and customer-facing.
-- [UsageService.java](https://github.com/carmonai/back/blob/main/api/usage-service/src/main/java/ai/carmona/usage/UsageService.java) — validation, the summary and its pricing.
-- [SealJob.java](https://github.com/carmonai/back/blob/main/api/usage-service/src/main/java/ai/carmona/usage/SealJob.java) — the window, the grace and the cursor lock.
-- [PartitionJob.java](https://github.com/carmonai/back/blob/main/api/usage-service/src/main/java/ai/carmona/usage/PartitionJob.java) — partition creation, retention and the advisory lock.
-- [create_tables.sql](https://github.com/carmonai/back/blob/main/api/usage-service/src/main/resources/db/migration/V2026.10.03.001__create_tables.sql) — the partitioned table and the seal cursor.
+- [UsageController.java](https://github.com/carmonaai/back/blob/main/api/usage/src/main/java/ai/carmona/usage/UsageController.java) — the four endpoints, internal and customer-facing.
+- [UsageService.java](https://github.com/carmonaai/back/blob/main/api/usage-service/src/main/java/ai/carmona/usage/UsageService.java) — validation, the summary and its pricing.
+- [SealJob.java](https://github.com/carmonaai/back/blob/main/api/usage-service/src/main/java/ai/carmona/usage/SealJob.java) — the window, the grace and the cursor lock.
+- [PartitionJob.java](https://github.com/carmonaai/back/blob/main/api/usage-service/src/main/java/ai/carmona/usage/PartitionJob.java) — partition creation, retention and the advisory lock.
+- [create_tables.sql](https://github.com/carmonaai/back/blob/main/api/usage-service/src/main/resources/db/migration/V2026.10.03.001__create_tables.sql) — the partitioned table and the seal cursor.

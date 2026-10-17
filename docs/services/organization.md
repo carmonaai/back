@@ -186,8 +186,8 @@ left.
 
 ## Where to look
 
-- [OrganizationController.java](https://github.com/carmonai/back/blob/main/api/organization/src/main/java/ai/carmona/organization/OrganizationController.java) — the contract, public and internal endpoints.
-- [OrganizationService.java](https://github.com/carmonai/back/blob/main/api/organization-service/src/main/java/ai/carmona/organization/OrganizationService.java) — creation, closing and the lock-before-count erasure.
-- [create_tables.sql](https://github.com/carmonai/back/blob/main/api/organization-service/src/main/resources/db/migration/V2026.10.03.001__create_tables.sql) — the two tables and the LGPD comments on them.
-- [TenantOut.java](https://github.com/carmonai/back/blob/main/api/organization/src/main/java/ai/carmona/organization/TenantOut.java) — the three fields that authenticate an API key.
-- [BatchFinisher.java](https://github.com/carmonai/back/blob/main/api/batch-service/src/main/java/ai/carmona/batch/BatchFinisher.java) — the sweep that asks this service for status.
+- [OrganizationController.java](https://github.com/carmonaai/back/blob/main/api/organization/src/main/java/ai/carmona/organization/OrganizationController.java) — the contract, public and internal endpoints.
+- [OrganizationService.java](https://github.com/carmonaai/back/blob/main/api/organization-service/src/main/java/ai/carmona/organization/OrganizationService.java) — creation, closing and the lock-before-count erasure.
+- [create_tables.sql](https://github.com/carmonaai/back/blob/main/api/organization-service/src/main/resources/db/migration/V2026.10.03.001__create_tables.sql) — the two tables and the LGPD comments on them.
+- [TenantOut.java](https://github.com/carmonaai/back/blob/main/api/organization/src/main/java/ai/carmona/organization/TenantOut.java) — the three fields that authenticate an API key.
+- [BatchFinisher.java](https://github.com/carmonaai/back/blob/main/api/batch-service/src/main/java/ai/carmona/batch/BatchFinisher.java) — the sweep that asks this service for status.

@@ -190,11 +190,11 @@ recorded with their dates rather than silently corrected.
 
 ## Where to look
 
-- [inference-plan.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmona-architecture/references/inference-plan.md) — §12 the decisions, §13 the backlog, and one deviation block per phase at the top.
-- [plan-review-2026-10-02.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmona-architecture/references/plan-review-2026-10-02.md) — the second planning pass, topic by topic, with the sources each finding was read from.
-- [observability.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmona-architecture/references/observability.md) — the metrics contract, the SLOs, and a gaps section that names its own holes.
-- [templates.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmona-new-service/references/templates.md) — the conventions for a new service, and "Pitfalls already hit", read before debugging anything.
-- [revenue-leaks-progress.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmona-architecture/references/revenue-leaks-progress.md) — the working log of the two leaks that were found, ranked first, and fixed.
+- [inference-plan.md](https://github.com/carmonaai/back/blob/main/.claude/skills/carmona-architecture/references/inference-plan.md) — §12 the decisions, §13 the backlog, and one deviation block per phase at the top.
+- [plan-review-2026-10-02.md](https://github.com/carmonaai/back/blob/main/.claude/skills/carmona-architecture/references/plan-review-2026-10-02.md) — the second planning pass, topic by topic, with the sources each finding was read from.
+- [observability.md](https://github.com/carmonaai/back/blob/main/.claude/skills/carmona-architecture/references/observability.md) — the metrics contract, the SLOs, and a gaps section that names its own holes.
+- [templates.md](https://github.com/carmonaai/back/blob/main/.claude/skills/carmona-new-service/references/templates.md) — the conventions for a new service, and "Pitfalls already hit", read before debugging anything.
+- [revenue-leaks-progress.md](https://github.com/carmonaai/back/blob/main/.claude/skills/carmona-architecture/references/revenue-leaks-progress.md) — the working log of the two leaks that were found, ranked first, and fixed.
 
 The four pages were written from those files plus the handoff the project wrote for its next engineer at the
 end of phase 7a. The plan, the review and the logs are files in `back`; the handoff is not, so it is named

@@ -206,16 +206,16 @@ whole reason for being is the scheduler. The CPU engine is the dev-and-CI path �
 
 ## Where to look
 
-- [`Engine.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Engine.java)
+- [`Engine.java`](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Engine.java)
   — one API call, one SSE stream: no grouping anywhere.
-- [`ChatRequest.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/ChatRequest.java)
+- [`ChatRequest.java`](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/ChatRequest.java)
   — `priority` from the tier and `cache_salt` from the organization: the only two hints the engine gets.
-- [`application-gpu.yaml`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/resources/application-gpu.yaml)
+- [`application-gpu.yaml`](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/resources/application-gpu.yaml)
   — `slots: 4` and `queue: 2`, and the bench comment behind them.
-- [`compose.gpu.yaml`](https://github.com/carmonai/back/blob/main/docker/compose.gpu.yaml)
+- [`compose.gpu.yaml`](https://github.com/carmonaai/back/blob/main/docker/compose.gpu.yaml)
   — the engine's own flags: `--max-num-seqs`, `--max-num-queued-reqs`, `--scheduling-policy priority`,
   `--kv-cache-dtype fp8`.
-- [`Admission.java`](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Admission.java)
+- [`Admission.java`](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Admission.java)
   — the only queue we own, and it refuses rather than buffers.
 
 **Next:** [Routing responses](routing.md) picks up the stream this page left running, and

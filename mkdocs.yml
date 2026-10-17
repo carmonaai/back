@@ -3,16 +3,16 @@
 # Structure follows the course-site template this project's architecture is based on
 # (https://insper.github.io/ann-dl/2026.2/): a dated edition at the root, then numbered sections.
 #
-# Published to https://carmonai.github.io/back/ by .github/workflows/docs.yaml.
+# Published to https://carmonaai.github.io/back/ by .github/workflows/docs.yaml.
 
 site_name: Carmona · Architecture
 site_description: >-
   Inference-as-a-service for Brazil: how the platform is built, how a request travels through it,
   and why each decision was made.
 site_author: Carmona
-site_url: https://carmonai.github.io/back/
-repo_url: https://github.com/carmonai/back
-repo_name: carmona/back
+site_url: https://carmonaai.github.io/back/
+repo_url: https://github.com/carmonaai/back
+repo_name: carmonaai/back
 edit_uri: edit/main/docs/
 
 copyright: Carmona — LGPD by design, prepaid in BRL, built in Brazil.

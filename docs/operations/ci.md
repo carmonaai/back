@@ -193,8 +193,8 @@ A module added to `back` but not to the token's repository list fails here, in a
 minutes later inside a Maven resolution error that says nothing about permissions. That is not hypothetical:
 adding a module is a documented step in the `carmona-new-service` skill precisely because the token has to be
 updated by hand. The clone rewrites the URL rather than passing credentials per command —
-`git config --global url."https://x-access-token:${TOKEN}@github.com/carmonai/".insteadOf
-"https://github.com/carmonai/"`, then `git submodule update --init --recursive`, then
+`git config --global url."https://x-access-token:${TOKEN}@github.com/carmonaai/".insteadOf
+"https://github.com/carmonaai/"`, then `git submodule update --init --recursive`, then
 `git config --global --remove-section` on the same key — because `git -c` settings do not reliably reach the
 `git submodule` child processes. Removing it immediately keeps the token out of any later `git config --list`.
 
@@ -306,13 +306,13 @@ token that cannot write anything.
 
 ## Where to look
 
-- [ci.yaml](https://github.com/carmonai/back/blob/main/.github/workflows/ci.yaml) — the whole workflow, 80
+- [ci.yaml](https://github.com/carmonaai/back/blob/main/.github/workflows/ci.yaml) — the whole workflow, 80
   lines, including the generated `.env` this page flags.
-- [docs.yaml](https://github.com/carmonai/back/blob/main/.github/workflows/docs.yaml) — the site build and
+- [docs.yaml](https://github.com/carmonaai/back/blob/main/.github/workflows/docs.yaml) — the site build and
   the two repository settings it needs.
-- [pom.xml](https://github.com/carmonai/back/blob/main/pom.xml) — the thirteen modules in dependency order,
+- [pom.xml](https://github.com/carmonaai/back/blob/main/pom.xml) — the thirteen modules in dependency order,
   which is the merge order written down.
-- [.gitmodules](https://github.com/carmonai/back/blob/main/.gitmodules) — the repositories the token has to
+- [.gitmodules](https://github.com/carmonaai/back/blob/main/.gitmodules) — the repositories the token has to
   be able to read.
-- [smoke.sh](https://github.com/carmonai/back/blob/main/docker/smoke.sh) — what the workflow is actually
+- [smoke.sh](https://github.com/carmonaai/back/blob/main/docker/smoke.sh) — what the workflow is actually
   asserting, in 443 lines.

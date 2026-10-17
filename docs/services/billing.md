@@ -213,8 +213,8 @@ token generated.
 
 ## Where to look
 
-- [create_tables.sql](https://github.com/carmonai/back/blob/main/api/billing-service/src/main/resources/db/migration/V2026.10.03.001__create_tables.sql) — prices, the ledger, the balance and the triggers.
-- [BillingService.java](https://github.com/carmonai/back/blob/main/api/billing-service/src/main/java/ai/carmona/billing/BillingService.java) — one window, one transaction, and the missing-price stop.
-- [BillingRepository.java](https://github.com/carmonai/back/blob/main/api/billing-service/src/main/java/ai/carmona/billing/BillingRepository.java) — the idempotent insert, the balance upsert and the outer join.
-- [CreditFlags.java](https://github.com/carmonai/back/blob/main/api/billing-service/src/main/java/ai/carmona/billing/CreditFlags.java) — the flag the gateway reads.
-- [Price.java](https://github.com/carmonai/back/blob/main/api/billing/src/main/java/ai/carmona/billing/Price.java) — the one arithmetic both sides of the money use.
+- [create_tables.sql](https://github.com/carmonaai/back/blob/main/api/billing-service/src/main/resources/db/migration/V2026.10.03.001__create_tables.sql) — prices, the ledger, the balance and the triggers.
+- [BillingService.java](https://github.com/carmonaai/back/blob/main/api/billing-service/src/main/java/ai/carmona/billing/BillingService.java) — one window, one transaction, and the missing-price stop.
+- [BillingRepository.java](https://github.com/carmonaai/back/blob/main/api/billing-service/src/main/java/ai/carmona/billing/BillingRepository.java) — the idempotent insert, the balance upsert and the outer join.
+- [CreditFlags.java](https://github.com/carmonaai/back/blob/main/api/billing-service/src/main/java/ai/carmona/billing/CreditFlags.java) — the flag the gateway reads.
+- [Price.java](https://github.com/carmonaai/back/blob/main/api/billing/src/main/java/ai/carmona/billing/Price.java) — the one arithmetic both sides of the money use.

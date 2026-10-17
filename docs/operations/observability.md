@@ -278,13 +278,13 @@ which is the goodput definition the benches already use.
 
 ## Where to look
 
-- [Metrics.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Metrics.java)
+- [Metrics.java](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Metrics.java)
   — every metric name, tag and bucket boundary, in one file, with the tag rule in its comment.
-- [Reconciler.java](https://github.com/carmonai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Reconciler.java)
+- [Reconciler.java](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Reconciler.java)
   — the tolerance, the engine counter mappings and the mismatch gauge.
-- [rules.yml](https://github.com/carmonai/back/blob/main/docker/prometheus/rules.yml) — the recording rules and
+- [rules.yml](https://github.com/carmonaai/back/blob/main/docker/prometheus/rules.yml) — the recording rules and
   all seven alerts, each with what an operator should do about it.
-- [prometheus.yml](https://github.com/carmonai/back/blob/main/docker/prometheus/prometheus.yml) — the scrape
+- [prometheus.yml](https://github.com/carmonaai/back/blob/main/docker/prometheus/prometheus.yml) — the scrape
   jobs, the 15 s interval and the engine's token file.
-- [observability.md](https://github.com/carmonai/back/blob/main/.claude/skills/carmona-architecture/references/observability.md)
+- [observability.md](https://github.com/carmonaai/back/blob/main/.claude/skills/carmona-architecture/references/observability.md)
   — the SLI/SLO table this page summarises, the verification pass, and the gaps list.

@@ -213,8 +213,8 @@ would be a complete authentication bypass. `Cookie` is removed too, except on th
 
 ## Where to look
 
-- [application.yaml](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/resources/application.yaml) — the route table and every timeout.
-- [GatewayApplication.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/GatewayApplication.java) — the two security chains and the JWKS decoder.
-- [ApiKeyAuthenticationManager.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/ApiKeyAuthenticationManager.java) — the key cache, the TTL and the credit gate.
-- [IdentityHeadersFilter.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/IdentityHeadersFilter.java) — the strip list and the headers it sets.
-- [OpenAiErrors.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/OpenAiErrors.java) — every error body the gateway can write.
+- [application.yaml](https://github.com/carmonaai/back/blob/main/api/gateway-service/src/main/resources/application.yaml) — the route table and every timeout.
+- [GatewayApplication.java](https://github.com/carmonaai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/GatewayApplication.java) — the two security chains and the JWKS decoder.
+- [ApiKeyAuthenticationManager.java](https://github.com/carmonaai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/ApiKeyAuthenticationManager.java) — the key cache, the TTL and the credit gate.
+- [IdentityHeadersFilter.java](https://github.com/carmonaai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/IdentityHeadersFilter.java) — the strip list and the headers it sets.
+- [OpenAiErrors.java](https://github.com/carmonaai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/OpenAiErrors.java) — every error body the gateway can write.

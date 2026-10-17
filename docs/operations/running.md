@@ -253,11 +253,11 @@ forgetting one is a startup error with a readable message rather than a service 
 
 ## Where to look
 
-- [compose.yaml](https://github.com/carmonai/back/blob/main/docker/compose.yaml) — fourteen services, the
+- [compose.yaml](https://github.com/carmonaai/back/blob/main/docker/compose.yaml) — fourteen services, the
   shared `x-readiness` health check, and every `depends_on` condition this page draws.
-- [.env.example](https://github.com/carmonai/back/blob/main/docker/.env.example) — the six secrets and the
+- [.env.example](https://github.com/carmonaai/back/blob/main/docker/.env.example) — the six secrets and the
   `openssl` command for each.
-- [compose.gpu.yaml](https://github.com/carmonai/back/blob/main/docker/compose.gpu.yaml) — the vLLM service
+- [compose.gpu.yaml](https://github.com/carmonaai/back/blob/main/docker/compose.gpu.yaml) — the vLLM service
   and the reasoning behind every flag in its command line.
-- [account/pom.xml](https://github.com/carmonai/back/blob/main/api/account/pom.xml) — the Java 25 target, the
+- [account/pom.xml](https://github.com/carmonaai/back/blob/main/api/account/pom.xml) — the Java 25 target, the
   `<release>` flag and the pinned Lombok version.

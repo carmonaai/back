@@ -4,7 +4,7 @@ Everything here was read from the code or measured. **Write from this file, not 
 needs a fact that is not here, open the file and read it — do not invent a number, a name or a behaviour.
 Where a figure is a prototype value rather than a commercial one, say so.
 
-Paths are relative to the repository root (`carmona/back`).
+Paths are relative to the repository root (`carmonaai/back`).
 
 ---
 

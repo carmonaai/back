@@ -195,8 +195,8 @@ integration with them, and the 50-key cap is a property of the tenant.
 
 ## Where to look
 
-- [AuthController.java](https://github.com/carmonai/back/blob/main/api/auth/src/main/java/ai/carmona/auth/AuthController.java) — the contract, including the two raw-cookie methods.
-- [JwtService.java](https://github.com/carmonai/back/blob/main/api/auth-service/src/main/java/ai/carmona/auth/JwtService.java) — RS256, the 15-minute TTL and the JWKS.
-- [SessionService.java](https://github.com/carmonai/back/blob/main/api/auth-service/src/main/java/ai/carmona/auth/SessionService.java) — the cookie, the rotation and the reuse check.
-- [ApiKeyService.java](https://github.com/carmonai/back/blob/main/api/auth-service/src/main/java/ai/carmona/auth/ApiKeyService.java) — the cap, the expiry rule and the transactional rotate.
-- [ApiKeys.java](https://github.com/carmonai/back/blob/main/api/auth-service/src/main/java/ai/carmona/auth/ApiKeys.java) — the key's shape, mirrored by the gateway.
+- [AuthController.java](https://github.com/carmonaai/back/blob/main/api/auth/src/main/java/ai/carmona/auth/AuthController.java) — the contract, including the two raw-cookie methods.
+- [JwtService.java](https://github.com/carmonaai/back/blob/main/api/auth-service/src/main/java/ai/carmona/auth/JwtService.java) — RS256, the 15-minute TTL and the JWKS.
+- [SessionService.java](https://github.com/carmonaai/back/blob/main/api/auth-service/src/main/java/ai/carmona/auth/SessionService.java) — the cookie, the rotation and the reuse check.
+- [ApiKeyService.java](https://github.com/carmonaai/back/blob/main/api/auth-service/src/main/java/ai/carmona/auth/ApiKeyService.java) — the cap, the expiry rule and the transactional rotate.
+- [ApiKeys.java](https://github.com/carmonaai/back/blob/main/api/auth-service/src/main/java/ai/carmona/auth/ApiKeys.java) — the key's shape, mirrored by the gateway.

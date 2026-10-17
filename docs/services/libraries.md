@@ -213,8 +213,8 @@ the one duplication in the arrangement, and it is commented as such.
 
 ## Where to look
 
-- [AuthController.java](https://github.com/carmonai/back/blob/main/api/auth/src/main/java/ai/carmona/auth/AuthController.java) — the largest contract, public and internal.
-- [OrganizationController.java](https://github.com/carmonai/back/blob/main/api/organization/src/main/java/ai/carmona/organization/OrganizationController.java) — the six-consumer contract, in full.
-- [Price.java](https://github.com/carmonai/back/blob/main/api/billing/src/main/java/ai/carmona/billing/Price.java) — the one type both sides of the money compute with.
-- [organization/pom.xml](https://github.com/carmonai/back/blob/main/api/organization/pom.xml) — everything a library module is allowed to depend on.
-- [pom.xml](https://github.com/carmonai/back/blob/main/pom.xml) — the thirteen modules the reactor builds in order.
+- [AuthController.java](https://github.com/carmonaai/back/blob/main/api/auth/src/main/java/ai/carmona/auth/AuthController.java) — the largest contract, public and internal.
+- [OrganizationController.java](https://github.com/carmonaai/back/blob/main/api/organization/src/main/java/ai/carmona/organization/OrganizationController.java) — the six-consumer contract, in full.
+- [Price.java](https://github.com/carmonaai/back/blob/main/api/billing/src/main/java/ai/carmona/billing/Price.java) — the one type both sides of the money compute with.
+- [organization/pom.xml](https://github.com/carmonaai/back/blob/main/api/organization/pom.xml) — everything a library module is allowed to depend on.
+- [pom.xml](https://github.com/carmonaai/back/blob/main/pom.xml) — the thirteen modules the reactor builds in order.

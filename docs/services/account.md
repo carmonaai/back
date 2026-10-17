@@ -184,8 +184,8 @@ is an account nobody can log into; leaving it behind would also occupy the addre
 
 ## Where to look
 
-- [AccountController.java](https://github.com/carmonai/back/blob/main/api/account/src/main/java/ai/carmona/account/AccountController.java) — the contract, including the public and internal endpoints.
-- [AccountService.java](https://github.com/carmonai/back/blob/main/api/account-service/src/main/java/ai/carmona/account/AccountService.java) — Argon2id, the dummy hash and the erasure order.
-- [AccountTokens.java](https://github.com/carmonai/back/blob/main/api/account-service/src/main/java/ai/carmona/account/AccountTokens.java) — issue and spend, in one statement.
-- [Mailer.java](https://github.com/carmonai/back/blob/main/api/account-service/src/main/java/ai/carmona/account/Mailer.java) — the three emails and the console links.
-- [email_flows.sql](https://github.com/carmonai/back/blob/main/api/account-service/src/main/resources/db/migration/V2026.10.03.001__email_flows.sql) — the token table and the verified column.
+- [AccountController.java](https://github.com/carmonaai/back/blob/main/api/account/src/main/java/ai/carmona/account/AccountController.java) — the contract, including the public and internal endpoints.
+- [AccountService.java](https://github.com/carmonaai/back/blob/main/api/account-service/src/main/java/ai/carmona/account/AccountService.java) — Argon2id, the dummy hash and the erasure order.
+- [AccountTokens.java](https://github.com/carmonaai/back/blob/main/api/account-service/src/main/java/ai/carmona/account/AccountTokens.java) — issue and spend, in one statement.
+- [Mailer.java](https://github.com/carmonaai/back/blob/main/api/account-service/src/main/java/ai/carmona/account/Mailer.java) — the three emails and the console links.
+- [email_flows.sql](https://github.com/carmonaai/back/blob/main/api/account-service/src/main/resources/db/migration/V2026.10.03.001__email_flows.sql) — the token table and the verified column.

@@ -44,9 +44,9 @@ jobs:
             [ "$code" = 200 ] || { echo "::error::CARMONAI_TOKEN cannot read $repo (HTTP $code)"; exit 1; }
           done
           # Global config reaches the submodule clones (git -c settings may not); removed right after.
-          git config --global url."https://x-access-token:${TOKEN}@github.com/carmonai/".insteadOf "https://github.com/carmonai/"
+          git config --global url."https://x-access-token:${TOKEN}@github.com/carmonaai/".insteadOf "https://github.com/carmonaai/"
           git submodule update --init --recursive
-          git config --global --remove-section url."https://x-access-token:${TOKEN}@github.com/carmonai/"
+          git config --global --remove-section url."https://x-access-token:${TOKEN}@github.com/carmonaai/"
 
       - uses: actions/setup-java@v6
         with:

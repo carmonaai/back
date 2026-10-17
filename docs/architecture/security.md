@@ -196,14 +196,14 @@ nginx terminates it, and nginx is not built. Every one of those is listed in
 
 ## Where to look
 
-- [IdentityHeadersFilter.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/IdentityHeadersFilter.java)
+- [IdentityHeadersFilter.java](https://github.com/carmonaai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/IdentityHeadersFilter.java)
   — the strip list, the identity headers and the two endpoints that keep the cookie.
-- [ApiKeyAuthenticationManager.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/ApiKeyAuthenticationManager.java)
+- [ApiKeyAuthenticationManager.java](https://github.com/carmonaai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/ApiKeyAuthenticationManager.java)
   — the format check, the hash, the 60 s cache and the 402.
-- [V1RequestFilter.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/V1RequestFilter.java)
+- [V1RequestFilter.java](https://github.com/carmonaai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/V1RequestFilter.java)
   — the four refusals that run before authentication.
-- [AccessLogFilter.java](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/AccessLogFilter.java)
-  and [logback-spring.xml](https://github.com/carmonai/back/blob/main/api/gateway-service/src/main/resources/logback-spring.xml)
+- [AccessLogFilter.java](https://github.com/carmonaai/back/blob/main/api/gateway-service/src/main/java/ai/carmona/gateway/AccessLogFilter.java)
+  and [logback-spring.xml](https://github.com/carmonaai/back/blob/main/api/gateway-service/src/main/resources/logback-spring.xml)
   — the fields, the file and the 184-day retention.
-- [docker/smoke.sh](https://github.com/carmonai/back/blob/main/docker/smoke.sh) — the canary check and the
+- [docker/smoke.sh](https://github.com/carmonaai/back/blob/main/docker/smoke.sh) — the canary check and the
   fail-closed assertion, at the end of the run.
