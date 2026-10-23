@@ -332,21 +332,35 @@ drain_set() {
   [[ $dcode == 200 ]] && grep -q "\"state\":\"$2\"" "$BODY" && echo "ok   200  replica $1 of $M is $2" \
     || { echo "FAIL replica $1 to $2 got '$dcode'"; head -c 300 "$BODY"; echo; note_fail; }
 }
+# The states live in Valkey and outlive this script. However it ends from here on (a Ctrl-C, a killed run, a docker call that fails), the
+# replicas it drained are put back, or every client of the stack and the next run of this script are answered 503 engine_unavailable.
+drained_by_smoke=0
+undrain() {
+  [[ $drained_by_smoke == 1 ]] || return 0
+  local r
+  for r in $(seq 0 $((${replicas:-1} - 1))); do
+    "${DC[@]}" exec -T tools curl -s -o /dev/null -X POST -H 'Content-Type: application/json' \
+      -d "{\"model\":\"$M\",\"replica\":$r,\"state\":\"READY\"}" http://inference:8081/actuator/drain || true
+  done
+}
+longout=$(mktemp)
+trap 'undrain; rm -f "$BODY" "$HDRS" "$longout"' EXIT
 drain_call GET
 replicas=$(grep -o "\"model\":\"$M\"" "$BODY" | wc -l | tr -d ' ')
 [[ $dcode == 200 && ${replicas:-0} -ge 1 ]] && grep -q '"state":"READY"' "$BODY" && echo "ok   200  GET /actuator/drain lists $replicas replica(s) of $M, all READY" \
   || { echo "FAIL GET /actuator/drain got '$dcode', $replicas replica(s)"; head -c 300 "$BODY"; echo; note_fail; replicas=1; }
 # Several replicas (compose.fleet.yaml): draining one leaves the rest serving.
 if [[ $replicas -gt 1 ]]; then
+  drained_by_smoke=1
   drain_set 0 DRAINING ',"grace":"60s"'
   sleep 2   # every inference-service replica refreshes its view of the states once a second
   expect 200 "${K2[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" -d "$(chat 'Say hi.' 8)"
 fi
 # A stream is running when the drain starts: the long simulator answer (LONGP, about 22 s) outlives the drain call.
-longout=$(mktemp)
 curl -sN --max-time 45 "${K2[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" -d "$(chat "$LONGP" 1000 ',"stream":true,"temperature":0')" > "$longout" &
 longpid=$!
 sleep 3
+drained_by_smoke=1
 for r in $(seq 0 $((replicas - 1))); do drain_set "$r" DRAINING ',"grace":"60s"'; done
 sleep 2
 expect 503 -D "$HDRS" "${K2[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" -d "$(chat 'Say hi.' 8)"
@@ -369,6 +383,7 @@ for _ in $(seq 20); do
 done
 [[ $drained == "$replicas" ]] && echo "ok   drained is true on all $replicas replica(s) once the stream ended" || { echo "FAIL $drained of $replicas drained after the stream ended"; note_fail; }
 for r in $(seq 0 $((replicas - 1))); do drain_set "$r" READY ''; done
+drained_by_smoke=0
 code=""
 for _ in $(seq 10); do
   code=$(curl -s -o /dev/null -w '%{http_code}' "${K2[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" -d "$(chat 'Say hi.' 8)")
