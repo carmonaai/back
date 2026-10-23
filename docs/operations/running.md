@@ -275,7 +275,8 @@ A drill with two replicas and no GPU: `docker compose -f compose.yaml -f compose
 named simulators (`engine-a`, `engine-b`) with the health gate on. Drain one and watch the other serve;
 `docker compose stop engine-a` under load moves the traffic to `engine-b` within about 15 seconds (the gate needs three
 unanswered scrapes of 5 s). Prometheus evaluates the rules once a minute, so `ReplicaWentUnhealthy` shows within about a
-minute and `ReplicaUnhealthy` (a `for` of 1 m, two evaluations) in two to three. `smoke.sh` runs on this stack too; its
+minute and `ReplicaUnhealthy` (a `for` of 1 m, two evaluations) in two to three. `smoke.sh` runs on this stack too, with `FLEET=1 bash docker/smoke.sh` (it keeps `compose.fleet.yaml` on every
+compose call, fails if fewer than two replicas are listed, and expects the organization cap on 8 slots); its
 check that the engine goes idle after a client hangs up asks the name `engine`, which here answers with either
 simulator, so on the drill stack that one check can read the idle one and pass without having looked at the busy one.
 
