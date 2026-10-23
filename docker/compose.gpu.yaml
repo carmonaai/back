@@ -16,11 +16,17 @@ services:
     # 4 requests at once; priority scheduling
     # (inference-service sets the tier), usage with cached tokens, hermes tool calls. Request logging
     # stays at vLLM's default (off): prompts must never reach a log.
+    # --max-num-queued-reqs counts running + waiting (vLLM v0.30.0 scheduler config, engine-contract section 4 row 12 and finding A),
+    # so it is the slots plus the queue places inference-service admits: 4 + 2 = 6, the defaults of compose.yaml (ENGINE_SLOTS,
+    # ENGINE_QUEUE). The earlier 8 let 8 requests in, 4 of them waiting, where admission only ever lets 2 wait. Day A step 8 checks it.
+    # --shutdown-timeout: vLLM aborts what it holds on SIGTERM unless this is positive (mvp-vllm section 3.1, OPEN-13). 600 s matches the
+    # runbook of mvp-vllm; stop_grace_period must exceed it or Docker sends SIGKILL first, and inference-service's own 720 s must too.
     command: ["cyankiwi/Qwen3-4B-Instruct-2507-AWQ-4bit",
               "--revision", "c46e2277ae3dee7d030f45c58987b291edc5c1d6",
               "--served-model-name", "carmona/qwen3-4b",
               "--host", "0.0.0.0", "--port", "8000",
-              "--max-model-len", "4096", "--max-num-seqs", "4", "--max-num-queued-reqs", "8",
+              "--max-model-len", "4096", "--max-num-seqs", "4", "--max-num-queued-reqs", "6",
+              "--shutdown-timeout", "600",
               "--kv-cache-dtype", "fp8",
               "--gpu-memory-utilization", "0.78",
               "--scheduling-policy", "priority",
@@ -30,6 +36,7 @@ services:
       VLLM_API_KEY: ${VLLM_API_KEY:?set in .env}
     volumes: [hf-cache:/root/.cache/huggingface]
     shm_size: 2gb
+    stop_grace_period: 660s            # above --shutdown-timeout (600 s): a restart waits for the streams vLLM holds
     deploy:
       resources:
         reservations:
@@ -52,6 +59,9 @@ services:
       # are C and q from the phase-3 bench, the defaults of compose.yaml.
       CARMONA_INFERENCE_MODELS_0_URL: http://vllm:8000
       CARMONA_INFERENCE_MODELS_0_APIKEY: ${VLLM_API_KEY:?set in .env}
+      # compose.yaml narrows the contract check to the simulator's four metric families; the real engine is held to the code default (vLLM's
+      # eight), which `!reset` brings back by removing the variable.
+      CARMONA_INFERENCE_CONTRACT_REQUIREDFAMILIES: !reset null
     depends_on: !override
       valkey: { condition: service_healthy }
       usage: { condition: service_healthy }
