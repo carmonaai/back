@@ -138,3 +138,38 @@ tests:
                 A replica of inference no longer resolves or no longer exists, and the rest still answer, so no `up == 0`
                 exists to alert on. Compare `docker compose ps inference` with the replicas you asked for.
       - {eval_time: 20m, alertname: ServiceDown, exp_alerts: []}
+
+  # --- Alerts on metrics that already exist (OPEN-15) ----------------------------------------------------------------
+  # Every case below pins the three edges of an alert's `for`: true for one scrape less than `for` never fires, true for
+  # `for` exactly fires, and a series that goes back to normal resolves. So lengthening or shortening `for` fails here.
+
+  # inference-service answers while Valkey does not (each replica admits against its own share of the slots). One series
+  # per replica, so the alert names the replica; the replica that can reach Valkey stays out of it.
+  - name: LeaseStoreDown fires after 1m, names the replica, and resolves when Valkey answers
+    interval: 15s
+    input_series:
+      - {series: 'carmona_inference_lease_store_unavailable{job="inference", instance="10.0.0.2:8081"}', values: '1x12 0x12'}
+      - {series: 'carmona_inference_lease_store_unavailable{job="inference", instance="10.0.0.3:8081"}', values: '0x24'}
+    alert_rule_test:
+      - {eval_time: 45s, alertname: LeaseStoreDown, exp_alerts: []}
+      - eval_time: 1m
+        alertname: LeaseStoreDown
+        exp_alerts:
+          - exp_labels: {severity: critical, job: inference, instance: "10.0.0.2:8081"}
+            exp_annotations:
+              summary: "inference 10.0.0.2:8081 cannot reach Valkey (the lease store) for 1m"
+              description: >-
+                Requests are still served: this replica admits against its own share of the slots and queue places
+                (the model's, the tier's and the organization's, divided by the number of inference replicas) and does
+                not check the lease token budget, so the caps are only approximate until Valkey answers again. Check
+                the valkey container and its health, then this replica's log for "lease store unavailable".
+      - {eval_time: 4m, alertname: LeaseStoreDown, exp_alerts: []}
+
+  - name: LeaseStoreDown does not fire when Valkey is back before a minute is up
+    interval: 15s
+    input_series:
+      - {series: 'carmona_inference_lease_store_unavailable{job="inference", instance="10.0.0.2:8081"}', values: '1x3 0x20'}
+    alert_rule_test:
+      - {eval_time: 45s, alertname: LeaseStoreDown, exp_alerts: []}
+      - {eval_time: 1m, alertname: LeaseStoreDown, exp_alerts: []}
+      - {eval_time: 2m, alertname: LeaseStoreDown, exp_alerts: []}

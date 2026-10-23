@@ -185,3 +185,22 @@ groups:
             A paying tier is hitting model_busy or rate_limit_exceeded beyond the 95% goodput the phase-4
             exit check demands. Trial is shed first by design, so refusals there are not this alert: here it
             is capacity (C), a tier's share, or one organization holding the slots (VTC, gap 4).
+
+  # Pipelines that fail without anything going down (OPEN-15). Each reads a gauge the service already exports, so none of
+  # these needs new Java; each threshold is derived from the services' own timings and is wrong if those are re-tuned.
+  - name: pipeline-health
+    rules:
+      # carmona_inference_lease_store_unavailable is 1 while a replica's call to Valkey fails (Leases.unavailable); the
+      # replica keeps answering, admitting against its own share of the slots, so nothing else notices. Valkey is
+      # restarted by Docker in seconds, so a minute is an outage and not a restart. One series per replica.
+      - alert: LeaseStoreDown
+        expr: carmona_inference_lease_store_unavailable == 1
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $labels.job }} {{ $labels.instance }} cannot reach Valkey (the lease store) for 1m"
+          description: >-
+            Requests are still served: this replica admits against its own share of the slots and queue places
+            (the model's, the tier's and the organization's, divided by the number of inference replicas) and does
+            not check the lease token budget, so the caps are only approximate until Valkey answers again. Check
+            the valkey container and its health, then this replica's log for "lease store unavailable".
