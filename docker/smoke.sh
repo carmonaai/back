@@ -9,7 +9,8 @@
 # It starts by waiting, at most 60 s, until the console login route answers something other than 503: right after `up --wait`
 # the gateway has answered 503 there once in four runs, before any assertion. The wait costs one login attempt of this IP's bucket.
 # It stops and restarts valkey once (API-key lookups must fail closed with 503), runs chats on the engine
-# (the simulator by default, vLLM with ENGINE=vllm), and greps every log and a database dump for a canary string.
+# (the simulator by default, vLLM with ENGINE=vllm), drains every engine replica through inference-service's management port and
+# puts it back (503 engine_unavailable while drained; a running stream finishes), and greps every log and a database dump for a canary string.
 # Run it against another compose project with COMPOSE_PROJECT_NAME=... (compose reads it; the stack must run under it).
 # Continue-on-fail: a failed assertion is counted (note_fail) and the run goes on, so one run lists every failure; the
 # exit status is the number of failures (capped at 1). Later assertions that depend on a failed one can fail as a
@@ -311,6 +312,76 @@ read -r code took < <(curl -s -o "$BODY" -w '%{http_code} %{time_total}\n' "${K2
   || { echo "FAIL trial over its share got $code in ${took}s"; cat "$BODY"; note_fail; }
 expect 200 "${K4[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" -d "$(chat 'Say hi.' 8)"   # enterprise still served
 wait
+
+## Replica drain (WP-09B): the owner takes the engine out of rotation. A stream that is running is not cut, a new request gets an
+## honest 503 engine_unavailable with retry-after (nothing is charged), and READY puts the engine back. No GPU needed: the gate
+## sits in front of the lease, so the simulator shows it as well as vLLM does. The health gate (WP-08) is off by default and is not
+## asserted here: it needs an engine to be killed, which compose.fleet.yaml and a drill do, not a smoke run.
+# inference-service has no curl (JRE image) and its management port is never published: the call is made from inside the container
+# with bash's /dev/tcp, as the compose healthcheck does. HTTP/1.0, so the server closes the connection when it has answered.
+# Prints the status line, the headers and the body; the status goes to $dcode and the body to $BODY.
+actuator() {   # actuator METHOD PATH [JSON]
+  "${DC[@]}" exec -T inference bash -c '
+    exec 3<>/dev/tcp/127.0.0.1/8081
+    printf "%s %s HTTP/1.0\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s" "$1" "$2" "${#3}" "$3" >&3
+    cat <&3' bash "$1" "$2" "${3:-}" | tr -d '\r'
+}
+drain_call() {   # drain_call METHOD [JSON]
+  local out
+  out=$(actuator "$1" /actuator/drain "${2:-}")
+  dcode=$(sed -nE '1s#^HTTP/[0-9.]+ ([0-9]{3}).*#\1#p' <<<"$out")
+  sed '1,/^$/d' <<<"$out" > "$BODY"
+}
+# drain_set REPLICA STATE [EXTRA JSON FIELDS]: POSTs the state for that replica of $M; expects 200 and the state in the answer.
+drain_set() {
+  drain_call POST "{\"model\":\"$M\",\"replica\":$1,\"state\":\"$2\"$3}"
+  [[ $dcode == 200 ]] && grep -q "\"state\":\"$2\"" "$BODY" && echo "ok   200  replica $1 of $M is $2" \
+    || { echo "FAIL replica $1 to $2 got '$dcode'"; head -c 300 "$BODY"; echo; note_fail; }
+}
+drain_call GET
+replicas=$(grep -o "\"model\":\"$M\"" "$BODY" | wc -l | tr -d ' ')
+[[ $dcode == 200 && ${replicas:-0} -ge 1 ]] && grep -q '"state":"READY"' "$BODY" && echo "ok   200  GET /actuator/drain lists $replicas replica(s) of $M, all READY" \
+  || { echo "FAIL GET /actuator/drain got '$dcode', $replicas replica(s)"; head -c 300 "$BODY"; echo; note_fail; replicas=1; }
+# Several replicas (compose.fleet.yaml): draining one leaves the rest serving.
+if [[ $replicas -gt 1 ]]; then
+  drain_set 0 DRAINING ',"grace":"60s"'
+  sleep 2   # every inference-service replica refreshes its view of the states once a second
+  expect 200 "${K2[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" -d "$(chat 'Say hi.' 8)"
+fi
+# A stream is running when the drain starts: the long simulator answer (LONGP, about 22 s) outlives the drain call.
+longout=$(mktemp)
+curl -sN --max-time 45 "${K2[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" -d "$(chat "$LONGP" 1000 ',"stream":true,"temperature":0')" > "$longout" &
+longpid=$!
+sleep 3
+for r in $(seq 0 $((replicas - 1))); do drain_set "$r" DRAINING ',"grace":"60s"'; done
+sleep 2
+expect 503 -D "$HDRS" "${K2[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" -d "$(chat 'Say hi.' 8)"
+grep -q '"engine_unavailable"' "$BODY" && grep -qi '^retry-after:' "$HDRS" \
+  && echo "ok   503  every replica drained: engine_unavailable with retry-after" \
+  || { echo "FAIL the drained answer lacks engine_unavailable or retry-after"; head -c 300 "$BODY"; echo; note_fail; }
+drain_call GET
+grep -q '"drained":false' "$BODY" && echo "ok   the replica with the running stream is not drained yet" \
+  || { echo "FAIL drained is true while a stream runs"; head -c 300 "$BODY"; echo; note_fail; }
+wait "$longpid" || true
+grep -qE '^data: ?\[DONE\]' "$longout" && echo "ok   the stream that was running when the drain began finished, [DONE] and all" \
+  || { echo "FAIL the stream running at the drain was cut ($(grep -c '^data:' "$longout") events)"; note_fail; }
+rm -f "$longout"
+drained=0
+for _ in $(seq 20); do
+  drain_call GET
+  drained=$(grep -o "\"model\":\"$M\"[^}]*\"drained\":true" "$BODY" | wc -l | tr -d ' ')
+  [[ $drained == "$replicas" ]] && break
+  sleep 0.5
+done
+[[ $drained == "$replicas" ]] && echo "ok   drained is true on all $replicas replica(s) once the stream ended" || { echo "FAIL $drained of $replicas drained after the stream ended"; note_fail; }
+for r in $(seq 0 $((replicas - 1))); do drain_set "$r" READY ''; done
+code=""
+for _ in $(seq 10); do
+  code=$(curl -s -o /dev/null -w '%{http_code}' "${K2[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" -d "$(chat 'Say hi.' 8)")
+  [[ $code == 200 ]] && break
+  sleep 1
+done
+[[ $code == 200 ]] && echo "ok   200  READY restores service" || { echo "FAIL READY did not restore service (last status $code)"; note_fail; }
 
 ## Batch API: a JSONL file runs line by line at the lowest priority; the results come back as files
 bline() { echo "{\"custom_id\":\"$1\",\"method\":\"POST\",\"url\":\"/v1/chat/completions\",\"body\":{\"model\":\"$M\",\"messages\":[{\"role\":\"user\",\"content\":\"Say hi.\"}],\"max_tokens\":$2}}"; }
