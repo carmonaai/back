@@ -55,11 +55,12 @@ groups:
       # replicas' waiting (engine:requests_waiting_total) against the sum of their places (engine:queue_places), so a single
       # replica with room keeps it quiet, as admission sends the next request there. While the places gauge is not reported
       # (inference-service down, or a build before WP-03) there is no threshold and the alert stays quiet, not guessing;
-      # ServiceDown is what names a dead inference-service. Tested in rules.test.yml.
+      # ServiceDown is what names a dead inference-service. The trailing `> 0`: a model may have no queue places (queue: 0 is valid),
+      # and an idle engine would then read 0 >= 0 for ever. Tested in rules.test.yml.
       # In the engine group, after the two records it reads: rules of one group run in order, so the alert sees the value of
       # the same evaluation (across groups it would see the last one, and promtool does not fix the order of groups).
       - alert: EngineQueueSustained
-        expr: engine:requests_waiting_total{job=~"engine|vllm"} >= on() group_left() engine:queue_places
+        expr: (engine:requests_waiting_total{job=~"engine|vllm"} >= on() group_left() engine:queue_places) > 0
         for: 2m
         labels: {severity: warning}
         annotations:

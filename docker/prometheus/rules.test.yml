@@ -121,6 +121,37 @@ tests:
     alert_rule_test:
       - {eval_time: 5m, alertname: EngineQueueSustained, exp_alerts: []}
 
+  # A model may have no queue places (queue: 0 is valid, slots + 0 in flight). An idle engine then reads 0 waiting against 0
+  # places, and `0 >= 0` alone would hold the alert open forever: only requests that actually wait count.
+  - name: EngineQueueSustained stays quiet on an idle engine when the model has no queue places
+    interval: 15s
+    input_series:
+      - {series: 'carmona_engine_queue_places{model="m1", job="inference", instance="10.0.0.2:8081"}', values: '0x40'}
+      - {series: 'vllm:num_requests_waiting{job="vllm", instance="a"}', values: '0x40'}
+    alert_rule_test:
+      - {eval_time: 5m, alertname: EngineQueueSustained, exp_alerts: []}
+
+  # ... but a request waiting where the model admits none is past the places and does fire.
+  - name: EngineQueueSustained fires when a request waits and the model has no queue places
+    interval: 15s
+    input_series:
+      - {series: 'carmona_engine_queue_places{model="m1", job="inference", instance="10.0.0.2:8081"}', values: '0x40'}
+      - {series: 'vllm:num_requests_waiting{job="vllm", instance="a"}', values: '1x40'}
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: EngineQueueSustained
+        exp_alerts:
+          - exp_labels: {severity: warning, job: vllm}
+            exp_annotations:
+              summary: "vllm has 1 requests waiting, every queue place inference-service admits, for 2m"
+              description: >-
+                The engine holds as many waiting requests as inference-service lets queue behind the slots (the
+                queue places, summed over the engine replicas): admission is running the engine at its full
+                stretch, and the next request waits in TTFT or is refused. Check TTFT p95 and the refusals on the
+                SLO dashboard; if the engine is healthy, C (slots) is the number to revisit. The engine's own cap
+                (vLLM --max-num-queued-reqs counts running + waiting) must be slots + queue places, or it refuses
+                before this fires.
+
   # Full for 1m45s and then drained: pending, never firing.
   - name: EngineQueueSustained does not fire when the queue drains before 2m
     interval: 15s
