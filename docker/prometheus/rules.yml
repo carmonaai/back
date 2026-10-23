@@ -207,8 +207,8 @@ groups:
 
       # carmona_inference_queue_wait_seconds is the time from a request being understood to its engine call starting (WP-01
       # moved the clock to the start; before that it read about zero whatever the customer waited). A paying tier waits at
-      # most admission-wait (1.5 s) for a slot before the 429, so a p95 over 1 s means most admitted requests are at that
-      # edge: capacity, or a slow Valkey. Only requests that reached the engine are in it, so refusals do not move it. By
+      # most admission-wait (1.5 s) for a slot before the 429, so a p95 over 1 s means one in twenty admitted requests is at that
+      # edge or past it: capacity, or a slow Valkey. Only requests that reached the engine are in it, so refusals do not move it. By
       # model and tier, like the TTFT rules; a tier with no traffic has a rate of 0, a quantile of NaN, and NaN is not > 1.
       # 10m, because a queue that drains within minutes is a burst, which the SLO panels show and nobody needs paged for.
       - alert: QueueWaitHigh
