@@ -204,3 +204,23 @@ groups:
             (the model's, the tier's and the organization's, divided by the number of inference replicas) and does
             not check the lease token budget, so the caps are only approximate until Valkey answers again. Check
             the valkey container and its health, then this replica's log for "lease store unavailable".
+
+      # carmona_usage_seal_lag_seconds (UsageGauges) is how long the oldest window that is due has waited to be sealed. A
+      # healthy usage-service reads 0, or between grace and grace + seal-every while the next run is pending: 60 s to 120 s,
+      # plus up to 10 s of gauge-every, so 130 s at most. 180 s is that with a minute of margin, 5m is several missed seal
+      # runs. A warning: nothing is lost, billing waits for the seal; DebitLagHigh is the page when the wait costs money.
+      # The gauge is ABSENT while usage-service cannot read its database, so this stays quiet then (ServiceDown names a
+      # dead service; a live one with a dead database logs it).
+      # ponytail: the 180 is carmona.usage.grace + seal-every + gauge-every (60 + 60 + 10 s) plus margin, typed here and not
+      # derived, so it is wrong if those are re-tuned; upgrade path: export them as a gauge and compare against it.
+      - alert: SealLagHigh
+        expr: carmona_usage_seal_lag_seconds > 180
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "usage windows are sealed {{ $value | humanizeDuration }} late (above 3m for 5m)"
+          description: >-
+            usage-service has not sealed the windows that are due: billing only bills sealed windows, so usage is
+            piling up unbilled and the credit check runs on old balances. A healthy seal reads 0 to about 130 s
+            (grace 60 s, seal-every 60 s, gauge-every 10 s). Check the usage container's log for seal errors, the
+            database it seals in, and whether the seal job is held up behind another scheduled job.

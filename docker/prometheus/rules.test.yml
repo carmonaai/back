@@ -173,3 +173,40 @@ tests:
       - {eval_time: 45s, alertname: LeaseStoreDown, exp_alerts: []}
       - {eval_time: 1m, alertname: LeaseStoreDown, exp_alerts: []}
       - {eval_time: 2m, alertname: LeaseStoreDown, exp_alerts: []}
+
+  # usage-service seals a 5 m window grace (60 s) after it ends, on a 60 s timer, and refreshes the gauge every 10 s, so a
+  # healthy seal reads 0 or up to 130 s; 180 is that plus a margin. The series is per usage replica and has no other label.
+  - name: SealLagHigh fires after 5m above 180 s and resolves when the seal catches up
+    interval: 15s
+    input_series:
+      - {series: 'carmona_usage_seal_lag_seconds{job="usage", instance="10.0.0.7:8081"}', values: '200x40 0x40'}
+    alert_rule_test:
+      - {eval_time: 4m45s, alertname: SealLagHigh, exp_alerts: []}
+      - eval_time: 5m
+        alertname: SealLagHigh
+        exp_alerts:
+          - exp_labels: {severity: warning, job: usage, instance: "10.0.0.7:8081"}
+            exp_annotations:
+              summary: "usage windows are sealed 3m 20s late (above 3m for 5m)"
+              description: >-
+                usage-service has not sealed the windows that are due: billing only bills sealed windows, so usage is
+                piling up unbilled and the credit check runs on old balances. A healthy seal reads 0 to about 130 s
+                (grace 60 s, seal-every 60 s, gauge-every 10 s). Check the usage container's log for seal errors, the
+                database it seals in, and whether the seal job is held up behind another scheduled job.
+      - {eval_time: 12m, alertname: SealLagHigh, exp_alerts: []}
+
+  - name: SealLagHigh does not fire when the lag is back under the line before 5m
+    interval: 15s
+    input_series:
+      - {series: 'carmona_usage_seal_lag_seconds{job="usage", instance="10.0.0.7:8081"}', values: '200x18 0x40'}
+    alert_rule_test:
+      - {eval_time: 5m, alertname: SealLagHigh, exp_alerts: []}
+      - {eval_time: 10m, alertname: SealLagHigh, exp_alerts: []}
+
+  # The line is strict: 180 is the last healthy-with-margin value, so a lag stuck at exactly 180 is not an alert.
+  - name: SealLagHigh stays quiet at exactly 180 s
+    interval: 15s
+    input_series:
+      - {series: 'carmona_usage_seal_lag_seconds{job="usage", instance="10.0.0.7:8081"}', values: '180x60'}
+    alert_rule_test:
+      - {eval_time: 10m, alertname: SealLagHigh, exp_alerts: []}
