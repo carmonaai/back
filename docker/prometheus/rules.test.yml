@@ -53,31 +53,92 @@ tests:
     alert_rule_test:
       - {eval_time: 2m, alertname: EngineUnreachable, exp_alerts: []}
 
-  # The simulator refuses past --max-waiting-queue-length=8, so its gauge tops out at 8: the alert must fire AT 8.
-  - name: EngineQueueSustained fires at the full queue the engine can report
+  # The alert fires when the engine's waiting requests reach the queue places inference-service admits
+  # (carmona_engine_queue_places, the model's total over its engine replicas), not a constant. A real vLLM counts running +
+  # waiting against its cap, so with 4 slots and 2 places it never shows more than 2 waiting and the old `>= 8` could not
+  # fire. Two inference-service replicas report the same gauge: it is the fleet's number, not twice of it.
+  - name: EngineQueueSustained fires when the waiting requests reach the queue places, not the old constant 8
     interval: 15s
     input_series:
-      - {series: 'vllm:num_requests_waiting{job="engine", instance="a"}', values: '8x20'}
+      - {series: 'carmona_engine_queue_places{model="m1", job="inference", instance="10.0.0.2:8081"}', values: '2x40'}
+      - {series: 'carmona_engine_queue_places{model="m1", job="inference", instance="10.0.0.3:8081"}', values: '2x40'}
+      - {series: 'vllm:num_requests_waiting{job="vllm", instance="a"}', values: '2x12 0x30'}
     alert_rule_test:
-      - {eval_time: 1m, alertname: EngineQueueSustained, exp_alerts: []}
+      - {eval_time: 1m45s, alertname: EngineQueueSustained, exp_alerts: []}
+      - eval_time: 2m
+        alertname: EngineQueueSustained
+        exp_alerts:
+          - exp_labels: {severity: warning, job: vllm}
+            exp_annotations:
+              summary: "vllm has 2 requests waiting, every queue place inference-service admits, for 2m"
+              description: >-
+                The engine holds as many waiting requests as inference-service lets queue behind the slots (the
+                queue places, summed over the engine replicas): admission is running the engine at its full
+                stretch, and the next request waits in TTFT or is refused. Check TTFT p95 and the refusals on the
+                SLO dashboard; if the engine is healthy, C (slots) is the number to revisit. The engine's own cap
+                (vLLM --max-num-queued-reqs counts running + waiting) must be slots + queue places, or it refuses
+                before this fires.
+      - {eval_time: 4m, alertname: EngineQueueSustained, exp_alerts: []}
+
+  # The simulator fleet: 2 queue places per simulator and 2 simulators here, so 4 in total, and both queues are full.
+  - name: EngineQueueSustained compares the fleet's waiting requests with the fleet's queue places
+    interval: 15s
+    input_series:
+      - {series: 'carmona_engine_queue_places{model="m1", job="inference", instance="10.0.0.2:8081"}', values: '4x40'}
+      - {series: 'vllm:num_requests_waiting{job="engine", instance="a"}', values: '2x40'}
+      - {series: 'vllm:num_requests_waiting{job="engine", instance="b"}', values: '2x40'}
+    alert_rule_test:
       - eval_time: 3m
         alertname: EngineQueueSustained
         exp_alerts:
           - exp_labels: {severity: warning, job: engine}
             exp_annotations:
-              summary: "engine queue full (8 waiting) for 2m"
+              summary: "engine has 4 requests waiting, every queue place inference-service admits, for 2m"
               description: >-
-                The engine has as many requests waiting as it is configured to hold (and refuses the next): admission
-                is letting more through than the engine can start, and the waiting requests are paying for it in TTFT. Check
-                TTFT p95 and the refusals on the SLO dashboard; if the engine is healthy, C (slots) is the
-                number to revisit.
+                The engine holds as many waiting requests as inference-service lets queue behind the slots (the
+                queue places, summed over the engine replicas): admission is running the engine at its full
+                stretch, and the next request waits in TTFT or is refused. Check TTFT p95 and the refusals on the
+                SLO dashboard; if the engine is healthy, C (slots) is the number to revisit. The engine's own cap
+                (vLLM --max-num-queued-reqs counts running + waiting) must be slots + queue places, or it refuses
+                before this fires.
 
-  - name: EngineQueueSustained stays quiet below the full queue
+  # One replica with a full queue while the other is empty is not the fleet at its limit: admission sends the next request to
+  # the replica with room.
+  - name: EngineQueueSustained stays quiet while one replica has room
     interval: 15s
     input_series:
-      - {series: 'vllm:num_requests_waiting{job="engine", instance="a"}', values: '7x20'}
+      - {series: 'carmona_engine_queue_places{model="m1", job="inference", instance="10.0.0.2:8081"}', values: '4x40'}
+      - {series: 'vllm:num_requests_waiting{job="engine", instance="a"}', values: '2x40'}
+      - {series: 'vllm:num_requests_waiting{job="engine", instance="b"}', values: '0x40'}
     alert_rule_test:
-      - {eval_time: 3m, alertname: EngineQueueSustained, exp_alerts: []}
+      - {eval_time: 5m, alertname: EngineQueueSustained, exp_alerts: []}
+
+  - name: EngineQueueSustained stays quiet one request below the queue places
+    interval: 15s
+    input_series:
+      - {series: 'carmona_engine_queue_places{model="m1", job="inference", instance="10.0.0.2:8081"}', values: '2x40'}
+      - {series: 'vllm:num_requests_waiting{job="vllm", instance="a"}', values: '1x40'}
+    alert_rule_test:
+      - {eval_time: 5m, alertname: EngineQueueSustained, exp_alerts: []}
+
+  # Full for 1m45s and then drained: pending, never firing.
+  - name: EngineQueueSustained does not fire when the queue drains before 2m
+    interval: 15s
+    input_series:
+      - {series: 'carmona_engine_queue_places{model="m1", job="inference", instance="10.0.0.2:8081"}', values: '2x40'}
+      - {series: 'vllm:num_requests_waiting{job="vllm", instance="a"}', values: '2x7 0x30'}
+    alert_rule_test:
+      - {eval_time: 2m, alertname: EngineQueueSustained, exp_alerts: []}
+      - {eval_time: 5m, alertname: EngineQueueSustained, exp_alerts: []}
+
+  # Without the places gauge (inference-service down or an old build) the threshold is unknown, so the alert stays quiet
+  # instead of guessing; ServiceDown is what names a dead inference-service.
+  - name: EngineQueueSustained stays quiet while the queue places are not reported
+    interval: 15s
+    input_series:
+      - {series: 'vllm:num_requests_waiting{job="vllm", instance="a"}', values: '9x40'}
+    alert_rule_test:
+      - {eval_time: 5m, alertname: EngineQueueSustained, exp_alerts: []}
 
   # One replica of a replicated service down is visible on its own series (dns_sd gives one `up` per replica); the one that
   # still answers is not named. A static single name had one series, so this could not be told apart.

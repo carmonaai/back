@@ -31,6 +31,16 @@ groups:
       - record: engine:requests_waiting
         expr: max by (job) (vllm:num_requests_waiting)
 
+      # What EngineQueueSustained compares: the waiting requests of ALL replicas of the engine against the queue places
+      # inference-service admits (carmona_engine_queue_places), which is the model's total over its replicas and is
+      # reported identically by every inference-service replica, hence max by (model) before the sum over models. The
+      # per-replica maximum above would be compared with a fleet number and never reach it.
+      - record: engine:requests_waiting_total
+        expr: sum by (job) (vllm:num_requests_waiting)
+
+      - record: engine:queue_places
+        expr: sum(max by (model) (carmona_engine_queue_places))
+
       # vLLM v0.30.0 reports kv_cache_usage_perc ("1 means 100 percent usage" in its own help text) -- not the
       # gpu_cache_usage_perc the task A brief names, which that image does not expose. The simulator reports
       # the same series, at 0 unless it runs with --enable-kvcache.
@@ -105,22 +115,28 @@ groups:
             the container reports starting, not failing) and confirm the key in .env still matches the one
             the engine was started with.
 
-      # The engine's own backstop is 8 waiting (vLLM --max-num-queued-reqs, the simulator --max-waiting-queue-length):
-      # it refuses past that, so its waiting gauge never exceeds 8 and `> 8` could never fire. 8 is the queue FULL, the
-      # point where the next request is turned away by the engine and TTFT has already run away. inference-service admits
-      # at most q = 2 per replica behind C = 4 slots, so a queue anywhere near 8 means admission was bypassed or
-      # the fleet is larger than the replica count it was told. Tested in rules.test.yml.
+      # The queue places inference-service admits behind the slots (carmona_engine_queue_places, WP-03) are what a full queue
+      # means: admission lets at most slots + places in flight, so waiting at the places is admission with the engine at its
+      # full stretch, and TTFT has already run away. The first version compared with the constant 8, the simulator's own
+      # --max-waiting-queue-length; on a real vLLM, whose --max-num-queued-reqs counts running + waiting, at most the places
+      # (2 with 4 slots) can wait, so `>= 8` never fired (engine-contract finding A). Fleet against fleet: the sum of the
+      # replicas' waiting (engine:requests_waiting_total) against the sum of their places (engine:queue_places), so a single
+      # replica with room keeps it quiet, as admission sends the next request there. While the places gauge is not reported
+      # (inference-service down, or a build before WP-03) there is no threshold and the alert stays quiet, not guessing;
+      # ServiceDown is what names a dead inference-service. Tested in rules.test.yml.
       - alert: EngineQueueSustained
-        expr: engine:requests_waiting{job=~"engine|vllm"} >= 8
+        expr: engine:requests_waiting_total{job=~"engine|vllm"} >= on() group_left() engine:queue_places
         for: 2m
         labels: {severity: warning}
         annotations:
-          summary: "{{ $labels.job }} queue full (8 waiting) for 2m"
+          summary: "{{ $labels.job }} has {{ $value }} requests waiting, every queue place inference-service admits, for 2m"
           description: >-
-            The engine has as many requests waiting as it is configured to hold (and refuses the next): admission
-            is letting more through than the engine can start, and the waiting requests are paying for it in TTFT. Check
-            TTFT p95 and the refusals on the SLO dashboard; if the engine is healthy, C (slots) is the
-            number to revisit.
+            The engine holds as many waiting requests as inference-service lets queue behind the slots (the
+            queue places, summed over the engine replicas): admission is running the engine at its full
+            stretch, and the next request waits in TTFT or is refused. Check TTFT p95 and the refusals on the
+            SLO dashboard; if the engine is healthy, C (slots) is the number to revisit. The engine's own cap
+            (vLLM --max-num-queued-reqs counts running + waiting) must be slots + queue places, or it refuses
+            before this fires.
 
   # The money: usage that never reaches usage-service is revenue nobody bills, and the engine/stored-usage
   # comparison is the only thing that sees it (plan §8).
