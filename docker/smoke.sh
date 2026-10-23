@@ -12,6 +12,7 @@
 # (the simulator by default, vLLM with ENGINE=vllm), drains every engine replica through inference-service's management port and
 # puts it back (503 engine_unavailable while drained; a running stream finishes), and greps every log and a database dump for a canary string.
 # Run it against another compose project with COMPOSE_PROJECT_NAME=... (compose reads it; the stack must run under it).
+# On the two-simulator stack (compose.fleet.yaml) run it with FLEET=1, which adds that file to every compose call and asserts that two replicas are listed.
 # Continue-on-fail: a failed assertion is counted (note_fail) and the run goes on, so one run lists every failure; the
 # exit status is the number of failures (capped at 1). Later assertions that depend on a failed one can fail as a
 # consequence; read the first FAIL of each chain.
@@ -35,6 +36,10 @@ ENGINE=${ENGINE:-sim}
 # MINIO_* and STORAGE_* variables must be in the environment or .env, as when the stack was started.
 DC=(docker compose -f "$(dirname "$0")/compose.yaml" -f "$(dirname "$0")/compose.minio.yaml")
 if [[ $ENGINE == vllm ]]; then DC+=(-f "$(dirname "$0")/compose.gpu.yaml"); ENGINE_HOST=vllm; else ENGINE_HOST=engine; fi
+# FLEET=1: the stack was started with compose.fleet.yaml as well (two named simulators, health gate on). Every compose call here has to carry
+# that file too: the crash step's `up -d usage inference` would otherwise recreate inference from compose.yaml alone (one replica, gate off,
+# the default `engine` started again), and the multi-replica branch of the drain section below could never run.
+[[ ${FLEET:-0} == 1 ]] && DC+=(-f "$(dirname "$0")/compose.fleet.yaml")
 # G2 of the findings: the simulator's output length is that of the prompt (echo mode), so a long stream needs a long
 # prompt: 900 words = 905 prompt tokens (the chat template adds 5), so 905 output tokens ~ 22 s at 24 ms per token, well past the
 # 10 s the idle check below allows a stream that nobody reads. The prompt must stay under max_tokens (1000): in echo mode the
@@ -300,15 +305,17 @@ sql "UPDATE organizations.organization SET tier = 'enterprise' WHERE id = '$corp
 expect 201 "${A[@]}" "${J[@]}" -X POST "$G/organizations/$corp/api-keys" -d '{"name":"corp"}'
 K4=(-H "Authorization: Bearer $(json key)")
 # Trial may fill half the engine's slots (4 -> 2). With those taken, one more trial request is refused at once,
-# while an enterprise one still runs.
+# while an enterprise one still runs. On the fleet stack (FLEET=1) the trial share is 4 of 8 slots, above the organization's own cap of 2
+# (carmona.inference.tiers.trial.max-in-flight), so the cap refuses first, as rate_limit_exceeded.
 share=2
+refusal=model_busy; [[ ${FLEET:-0} == 1 ]] && refusal=rate_limit_exceeded
 for _ in $(seq $share); do
   curl -sN --max-time 8 "${K2[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" -d "$(chat "$LONGP" 1000 ',"stream":true,"temperature":0')" >/dev/null &
 done
 sleep 2
 read -r code took < <(curl -s -o "$BODY" -w '%{http_code} %{time_total}\n' "${K2[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" -d "$(chat 'Say hi.' 8)")
-[[ $code == 429 ]] && grep -q '"model_busy"' "$BODY" && awk "BEGIN { exit !($took < 0.5) }" \
-  && echo "ok   429  trial over its share of the engine, refused in ${took}s" \
+[[ $code == 429 ]] && grep -q "\"$refusal\"" "$BODY" && awk "BEGIN { exit !($took < 0.5) }" \
+  && echo "ok   429  trial over its share of the engine ($refusal), refused in ${took}s" \
   || { echo "FAIL trial over its share got $code in ${took}s"; cat "$BODY"; note_fail; }
 expect 200 "${K4[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" -d "$(chat 'Say hi.' 8)"   # enterprise still served
 wait
@@ -349,6 +356,7 @@ drain_call GET
 replicas=$(grep -o "\"model\":\"$M\"" "$BODY" | wc -l | tr -d ' ')
 [[ $dcode == 200 && ${replicas:-0} -ge 1 ]] && grep -q '"state":"READY"' "$BODY" && echo "ok   200  GET /actuator/drain lists $replicas replica(s) of $M, all READY" \
   || { echo "FAIL GET /actuator/drain got '$dcode', $replicas replica(s)"; head -c 300 "$BODY"; echo; note_fail; replicas=1; }
+[[ ${FLEET:-0} == 1 && $replicas -lt 2 ]] && { echo "FAIL FLEET=1 but GET /actuator/drain lists $replicas replica(s) of $M"; note_fail; }
 # Several replicas (compose.fleet.yaml): draining one leaves the rest serving.
 if [[ $replicas -gt 1 ]]; then
   drained_by_smoke=1

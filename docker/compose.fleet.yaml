@@ -1,7 +1,8 @@
 # Two named simulators instead of one, for the drills that need to address a replica: draining one while the other serves,
 # stopping one under load, watching ReplicaUnhealthy and ReplicaDrainOverdue fire and clear.
 #   docker compose -f compose.yaml -f compose.fleet.yaml up -d --build --wait
-#   (add -f compose.minio.yaml before it for smoke.sh; smoke.sh itself also runs on this stack: it drains every replica it finds.
+#   (add -f compose.minio.yaml before it for smoke.sh; smoke.sh itself also runs on this stack, as `FLEET=1 bash docker/smoke.sh` (without FLEET=1 its crash step recreates inference from compose.yaml
+#   alone, with one replica and the gate off): it drains every replica it finds.
 #   One smoke check is weaker here: "engine idle after the client hung up" asks the name `engine`, which answers with either simulator.)
 # The `fleet` profile of compose.yaml is not this: it puts N identical simulators behind a stand-in (engine-lb), so inference-service sees
 # one replica. `deploy.replicas` of one service name cannot be told apart either; inference-service needs one URL per replica, and a URL
