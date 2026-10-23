@@ -248,3 +248,60 @@ tests:
       - {series: 'carmona_billing_debit_lag_seconds{job="billing", instance="10.0.0.8:8081"}', values: '300x60'}
     alert_rule_test:
       - {eval_time: 10m, alertname: DebitLagHigh, exp_alerts: []}
+
+  # Queue wait is the time from a request being understood to its engine call starting (rate buckets, a paying tier's wait
+  # for a slot, the lease script). Every request below waits between 1 s and 2 s (it is in the le="2" bucket and not in the
+  # le="1" one) for the first 12 minutes, then gets in at once. The p95 of that is 1.95 s, over the 1 s line.
+  # Series: +10 requests per 15 s scrape, the slow ones counted only from le="2" up, the quick ones in every bucket.
+  # The alert is pending from the first scrape that has a rate (15 s) and the p95 stays over 1 s until the 5 m rate window
+  # holds under 5% slow requests, about 4m45s after the switch at 12m15s.
+  - name: QueueWaitHigh fires after 10m of a p95 over 1 s, names model and tier, and resolves when requests get in at once
+    interval: 15s
+    input_series:
+      - {series: 'carmona_inference_queue_wait_seconds_bucket{le="0.5", model="m1", tier="standard"}', values: '0x48 10+10x200'}
+      - {series: 'carmona_inference_queue_wait_seconds_bucket{le="1", model="m1", tier="standard"}', values: '0x48 10+10x200'}
+      - {series: 'carmona_inference_queue_wait_seconds_bucket{le="2", model="m1", tier="standard"}', values: '0+10x250'}
+      - {series: 'carmona_inference_queue_wait_seconds_bucket{le="+Inf", model="m1", tier="standard"}', values: '0+10x250'}
+    alert_rule_test:
+      - {eval_time: 10m, alertname: QueueWaitHigh, exp_alerts: []}
+      - eval_time: 10m15s
+        alertname: QueueWaitHigh
+        exp_alerts:
+          - exp_labels: {severity: warning, model: m1, tier: standard}
+            exp_annotations:
+              summary: "m1 standard requests wait 1.95s (p95) before the engine call starts, above 1s for 10m"
+              description: >-
+                Requests are admitted and then wait over a second between being understood and the engine call
+                starting: a paying tier's wait for a free slot (at most admission-wait, 1.5 s, before it is refused),
+                the rate-bucket and lease scripts, or a slow Valkey. If the engine is busy (running at its slots,
+                waiting at its queue places) capacity is the cause: look at EngineQueueSustained and the tier's
+                refusals. If the engine is idle, look at Valkey (LeaseStoreDown, its latency) and at inference-service's
+                CPU. Refused requests are not in this number; PayingTierRefusals counts them.
+      - {eval_time: 20m, alertname: QueueWaitHigh, exp_alerts: []}
+
+  # Over the line for 7m30s (3 minutes of slow requests plus the time the 5 m window takes to forget them), under the 10m.
+  - name: QueueWaitHigh does not fire when the wait is back under the line before 10m
+    interval: 15s
+    input_series:
+      - {series: 'carmona_inference_queue_wait_seconds_bucket{le="0.5", model="m1", tier="standard"}', values: '0x12 10+10x200'}
+      - {series: 'carmona_inference_queue_wait_seconds_bucket{le="1", model="m1", tier="standard"}', values: '0x12 10+10x200'}
+      - {series: 'carmona_inference_queue_wait_seconds_bucket{le="2", model="m1", tier="standard"}', values: '0+10x250'}
+      - {series: 'carmona_inference_queue_wait_seconds_bucket{le="+Inf", model="m1", tier="standard"}', values: '0+10x250'}
+    alert_rule_test:
+      - {eval_time: 7m, alertname: QueueWaitHigh, exp_alerts: []}
+      - {eval_time: 10m15s, alertname: QueueWaitHigh, exp_alerts: []}
+      - {eval_time: 20m, alertname: QueueWaitHigh, exp_alerts: []}
+
+  # A tier that gets in at once is quiet, and so is a tier nobody sends to: no requests means a rate of 0 and a quantile of
+  # NaN, which is not over 1 (the alert does not page about traffic that is not there).
+  - name: QueueWaitHigh stays quiet for a quick tier and for a tier without traffic
+    interval: 15s
+    input_series:
+      - {series: 'carmona_inference_queue_wait_seconds_bucket{le="0.5", model="m1", tier="standard"}', values: '0+10x200'}
+      - {series: 'carmona_inference_queue_wait_seconds_bucket{le="1", model="m1", tier="standard"}', values: '0+10x200'}
+      - {series: 'carmona_inference_queue_wait_seconds_bucket{le="+Inf", model="m1", tier="standard"}', values: '0+10x200'}
+      - {series: 'carmona_inference_queue_wait_seconds_bucket{le="0.5", model="m1", tier="trial"}', values: '5x200'}
+      - {series: 'carmona_inference_queue_wait_seconds_bucket{le="1", model="m1", tier="trial"}', values: '5x200'}
+      - {series: 'carmona_inference_queue_wait_seconds_bucket{le="+Inf", model="m1", tier="trial"}', values: '9x200'}
+    alert_rule_test:
+      - {eval_time: 15m, alertname: QueueWaitHigh, exp_alerts: []}

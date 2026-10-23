@@ -186,6 +186,27 @@ groups:
             exit check demands. Trial is shed first by design, so refusals there are not this alert: here it
             is capacity (C), a tier's share, or one organization holding the slots (VTC, gap 4).
 
+      # carmona_inference_queue_wait_seconds is the time from a request being understood to its engine call starting (WP-01
+      # moved the clock to the start; before that it read about zero whatever the customer waited). A paying tier waits at
+      # most admission-wait (1.5 s) for a slot before the 429, so a p95 over 1 s means most admitted requests are at that
+      # edge: capacity, or a slow Valkey. Only requests that reached the engine are in it, so refusals do not move it. By
+      # model and tier, like the TTFT rules; a tier with no traffic has a rate of 0, a quantile of NaN, and NaN is not > 1.
+      # 10m, because a queue that drains within minutes is a burst, which the SLO panels show and nobody needs paged for.
+      - alert: QueueWaitHigh
+        expr: |
+          histogram_quantile(0.95, sum by (le, model, tier) (rate(carmona_inference_queue_wait_seconds_bucket[5m]))) > 1
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.model }} {{ $labels.tier }} requests wait {{ $value | humanizeDuration }} (p95) before the engine call starts, above 1s for 10m"
+          description: >-
+            Requests are admitted and then wait over a second between being understood and the engine call
+            starting: a paying tier's wait for a free slot (at most admission-wait, 1.5 s, before it is refused),
+            the rate-bucket and lease scripts, or a slow Valkey. If the engine is busy (running at its slots,
+            waiting at its queue places) capacity is the cause: look at EngineQueueSustained and the tier's
+            refusals. If the engine is idle, look at Valkey (LeaseStoreDown, its latency) and at inference-service's
+            CPU. Refused requests are not in this number; PayingTierRefusals counts them.
+
   # Pipelines that fail without anything going down (OPEN-15). Each reads a gauge the service already exports, so none of
   # these needs new Java; each threshold is derived from the services' own timings and is wrong if those are re-tuned.
   - name: pipeline-health
