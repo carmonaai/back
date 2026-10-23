@@ -526,3 +526,129 @@ tests:
                 GET /actuator/reconcile on inference-service (management port, internal network) for the delta,
                 and check usage-service's ingestion errors and the usage:events stream in Valkey.
       - {eval_time: 3m, alertname: ReconciliationMismatch, exp_alerts: []}
+
+  # Requests keep arriving at inference-service (+10 per scrape). usage-service receives events (+10 per scrape) for the first
+  # two minutes and then none: its 5 m rate reaches 0 at 6m45s, the alert is pending from there and fires 5m later, at 11m45s.
+  # It resolves when the events flow again (from 17m30s).
+  - name: UsageIngestionStalled fires 5m after the usage rate hits zero and resolves when events flow again
+    interval: 15s
+    input_series:
+      - {series: 'http_server_requests_seconds_count{job="inference", uri="/v1/chat/completions", status="200"}', values: '0+10x200'}
+      - {series: 'http_server_requests_seconds_count{job="usage", uri="/usage/events", status="200"}', values: '0+10x8 80x60 90+10x100'}
+    alert_rule_test:
+      - {eval_time: 11m30s, alertname: UsageIngestionStalled, exp_alerts: []}
+      - eval_time: 11m45s
+        alertname: UsageIngestionStalled
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: "requests are being served and no usage event is reaching usage-service"
+              description: >-
+                inference-service is answering /v1/chat/completions while usage-service has received nothing for
+                5 m: every one of those requests is unbilled. Check the usage container, then the usage:events
+                stream in Valkey (inference-service retries from there, so events are not lost yet -- a full
+                stream or a dead relay is what to look for).
+      - {eval_time: 18m, alertname: UsageIngestionStalled, exp_alerts: []}
+
+  # The events come back after 4 minutes of silence, one minute under the 5 m: pending, never firing.
+  - name: UsageIngestionStalled does not fire when events resume before 5m
+    interval: 15s
+    input_series:
+      - {series: 'http_server_requests_seconds_count{job="inference", uri="/v1/chat/completions", status="200"}', values: '0+10x200'}
+      - {series: 'http_server_requests_seconds_count{job="usage", uri="/usage/events", status="200"}', values: '0+10x8 80x35 90+10x100'}
+    alert_rule_test:
+      - {eval_time: 12m, alertname: UsageIngestionStalled, exp_alerts: []}
+      - {eval_time: 20m, alertname: UsageIngestionStalled, exp_alerts: []}
+
+  # No requests, no events: the service is idle, not leaking.
+  - name: UsageIngestionStalled stays quiet while nobody sends requests
+    interval: 15s
+    input_series:
+      - {series: 'http_server_requests_seconds_count{job="inference", uri="/v1/chat/completions", status="200"}', values: '50x100'}
+      - {series: 'http_server_requests_seconds_count{job="usage", uri="/usage/events", status="200"}', values: '80x100'}
+    alert_rule_test:
+      - {eval_time: 20m, alertname: UsageIngestionStalled, exp_alerts: []}
+
+  # 6% of the requests fail (6 of 100 per scrape) for the first 10 minutes, then none. Pending from the first scrape that
+  # has a rate (15 s), so it fires at 5m15s and not at 5m; the 5 m window forgets the failures by 12m.
+  - name: ErrorShareHigh fires after 5m above 5 percent and resolves when the failures stop
+    interval: 15s
+    input_series:
+      - {series: 'carmona_inference_requests_total{model="m1", tier="standard", outcome="error", code="engine_error"}', values: '0+6x40 240x100'}
+      - {series: 'carmona_inference_requests_total{model="m1", tier="standard", outcome="ok", code="none"}', values: '0+94x40 3860+100x100'}
+    alert_rule_test:
+      - {eval_time: 5m, alertname: ErrorShareHigh, exp_alerts: []}
+      - eval_time: 5m15s
+        alertname: ErrorShareHigh
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "more than 5% of inference requests have failed for 5m"
+              description: >-
+                outcome="error" over the last 5 m is above the goodput line. The code tag tells the story:
+                502/503 are the engine or the pool, 500 is a defect in inference-service. Check the engine's
+                own panels (running, waiting, cache) and the service's logs.
+      - {eval_time: 12m, alertname: ErrorShareHigh, exp_alerts: []}
+
+  # The failures last 3 minutes: over 5% for under 4 minutes, so never the 5 m.
+  - name: ErrorShareHigh does not fire when the failures stop before 5m
+    interval: 15s
+    input_series:
+      - {series: 'carmona_inference_requests_total{model="m1", tier="standard", outcome="error", code="engine_error"}', values: '0+6x12 72x100'}
+      - {series: 'carmona_inference_requests_total{model="m1", tier="standard", outcome="ok", code="none"}', values: '0+94x12 1128+100x100'}
+    alert_rule_test:
+      - {eval_time: 5m15s, alertname: ErrorShareHigh, exp_alerts: []}
+      - {eval_time: 10m, alertname: ErrorShareHigh, exp_alerts: []}
+
+  # The line is strict: exactly 5% for as long as it lasts is not an alert.
+  - name: ErrorShareHigh stays quiet at exactly 5 percent
+    interval: 15s
+    input_series:
+      - {series: 'carmona_inference_requests_total{model="m1", tier="standard", outcome="error", code="engine_error"}', values: '0+5x100'}
+      - {series: 'carmona_inference_requests_total{model="m1", tier="standard", outcome="ok", code="none"}', values: '0+95x100'}
+    alert_rule_test:
+      - {eval_time: 15m, alertname: ErrorShareHigh, exp_alerts: []}
+
+  # 10% of the standard tier's requests are answered model_busy (10 of 100 per scrape) for 10 minutes, then none. The trial tier
+  # is refused half the time by design and an enterprise tier with no refusals has no numerator: neither is named.
+  - name: PayingTierRefusals fires after 5m above 5 percent for the tier, and resolves when the refusals stop
+    interval: 15s
+    input_series:
+      - {series: 'carmona_inference_requests_total{model="m1", tier="standard", outcome="error", code="model_busy"}', values: '0+10x40 400x100'}
+      - {series: 'carmona_inference_requests_total{model="m1", tier="standard", outcome="ok", code="none"}', values: '0+90x40 3600+100x100'}
+      - {series: 'carmona_inference_requests_total{model="m1", tier="enterprise", outcome="ok", code="none"}', values: '0+100x140'}
+      - {series: 'carmona_inference_requests_total{model="m1", tier="trial", outcome="error", code="rate_limit_exceeded"}', values: '0+50x140'}
+      - {series: 'carmona_inference_requests_total{model="m1", tier="trial", outcome="ok", code="none"}', values: '0+50x140'}
+    alert_rule_test:
+      - {eval_time: 5m, alertname: PayingTierRefusals, exp_alerts: []}
+      - eval_time: 5m15s
+        alertname: PayingTierRefusals
+        exp_alerts:
+          - exp_labels: {severity: warning, tier: standard}
+            exp_annotations:
+              summary: "standard is being refused more than 5% of the time for 5m"
+              description: >-
+                A paying tier is hitting model_busy or rate_limit_exceeded beyond the 95% goodput the phase-4
+                exit check demands. Trial is shed first by design, so refusals there are not this alert: here it
+                is capacity (C), a tier's share, or one organization holding the slots (VTC, gap 4).
+      - {eval_time: 13m, alertname: PayingTierRefusals, exp_alerts: []}
+
+  # Refused for 2 minutes: over 5% until the 5 m window dilutes it, at about 4 minutes, so never the 5 m.
+  - name: PayingTierRefusals does not fire when the refusals stop before 5m
+    interval: 15s
+    input_series:
+      - {series: 'carmona_inference_requests_total{model="m1", tier="standard", outcome="error", code="model_busy"}', values: '0+10x8 80x100'}
+      - {series: 'carmona_inference_requests_total{model="m1", tier="standard", outcome="ok", code="none"}', values: '0+90x8 720+100x100'}
+    alert_rule_test:
+      - {eval_time: 5m15s, alertname: PayingTierRefusals, exp_alerts: []}
+      - {eval_time: 10m, alertname: PayingTierRefusals, exp_alerts: []}
+
+  # Engine failures are ErrorShareHigh's, and exactly 5% is not over the line.
+  - name: PayingTierRefusals ignores engine errors and stays quiet at exactly 5 percent
+    interval: 15s
+    input_series:
+      - {series: 'carmona_inference_requests_total{model="m1", tier="standard", outcome="error", code="engine_error"}', values: '0+30x100'}
+      - {series: 'carmona_inference_requests_total{model="m1", tier="standard", outcome="error", code="model_busy"}', values: '0+5x100'}
+      - {series: 'carmona_inference_requests_total{model="m1", tier="standard", outcome="ok", code="none"}', values: '0+65x100'}
+    alert_rule_test:
+      - {eval_time: 15m, alertname: PayingTierRefusals, exp_alerts: []}
