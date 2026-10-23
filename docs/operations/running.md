@@ -195,14 +195,81 @@ MODEL=carmona/qwen3-4b ENGINE=vllm bash smoke.sh
 `compose.gpu.yaml` adds a `vllm` service serving `cyankiwi/Qwen3-4B-Instruct-2507-AWQ-4bit` — the planned
 Qwen3-4B-Instruct-2507 in 4-bit AWQ, revision pinned — as `carmona/qwen3-4b`, and switches inference-service
 to the `gpu` profile so it lists both models. The flags encode everything the 6 GB card forced:
-`--max-model-len 4096 --max-num-seqs 4 --max-num-queued-reqs 8 --kv-cache-dtype fp8
+`--max-model-len 4096 --max-num-seqs 4 --max-num-queued-reqs 6 --shutdown-timeout 600 --kv-cache-dtype fp8
 --gpu-memory-utilization 0.78 --scheduling-policy priority --enable-prompt-tokens-details
---enable-auto-tool-choice --tool-call-parser hermes`.
+--enable-auto-tool-choice --tool-call-parser hermes`. The queue cap is 6, not the 8 it once was: vLLM counts running
+plus waiting against it, so it is the 4 slots plus the 2 queue places inference-service admits (a cap of 8 let 4
+requests wait where admission lets 2). `--shutdown-timeout 600` with `stop_grace_period: 660s` lets vLLM finish the
+streams it holds on a restart; by default it aborts them.
 
 `C = 4` comes from `--max-num-seqs`: four concurrent requests is where output throughput stops rising and TTFT
 p95 is still 801 ms. Eight measured 159 output tok/s against 157 at four — the same throughput with a TTFT p95
 of 4,033 ms and 10% goodput. The engine's port is not published, and `smoke.sh` asserts that: on the GPU stack
 it curls `localhost:8000` and fails if anything answers.
+
+## The daily GPU window
+
+The rented card runs for a window and is destroyed after it (business plan: a weekday-peak window). Four steps, in
+this order, each with the signal that says it is done. The commands that reach the management port (8081, never
+published) run from the `tools` container, which has curl and is on the compose network:
+`docker compose exec -T tools curl -s http://inference:8081/actuator/drain`.
+
+**1. Start the engine and wait for the contract.** Start vLLM with the flags of `compose.gpu.yaml` (or the Day A
+runbook for the rented card). `carmona_engine_contract_ok` appears once inference-service has asked the engine
+(it retries from 1 s to 30 s and says nothing for the first 120 s), and every check of every replica must read 1:
+`models`, `models_len`, `metrics`, `kv_tokens`, `capacity`, `prefix_caching`. `EngineContractMismatch` firing, or a
+0 you can read with `min by (model, replica, check) (carmona_engine_contract_ok)`, names the check; the WARN in the
+inference-service log has the numbers. Fix the engine's flags and wait for the next recheck (10 m), or restart
+inference-service to look at once. With the health gate on, `ReplicaUnhealthy` must also be quiet: an engine that is
+still loading is out of rotation, and comes back by itself after two answered scrapes.
+
+**2. Warm the shared prefix, once, before opening traffic.** The first request of the day pays the full cold
+prefill of the customer's long prefix (up to 30 s is what Day A accepts; more is a NO-GO for the card, not a timeout to
+raise). Send one request with the customer's own shared prefix and `max_tokens: 1`, through the gateway, with **a key
+of the customer's organization**: inference-service sets `cache_salt` to the organization id, so the engine's prefix
+cache is per organization, and a warm-up made from another organization warms nothing the customer can hit. It is a
+real request: it is billed and counted like any other (tell the customer, or grant the amount back). Until
+`prefill.ms-per-token` is set from the Day A cold curve, the first-token timeout is the plain 30 s (`ttft-timeout`), and
+a prefill that takes longer is cut and answers 504 `engine_timeout`: do not retry it, set the allowance first. Repeat
+the step after any engine restart; the cache does not survive one. `bench/workload/probe32k.py --prefix` measures
+the cold and warm times of the bench's synthetic prefix on Day A; it does not warm the customer's.
+Watch `carmona_inference_first_output_seconds{cache}`: the warm-up is one `cache="none"` sample and the customer's
+requests after it should be `full`. A customer whose requests stay `none` is not hitting the cache (G-07).
+
+**3. During the window.** `ReplicaUnhealthy` and `ReplicaWentUnhealthy` say the engine dropped; `EngineQueueSustained`
+and `QueueWaitHigh` say it is full. A 503 `engine_unavailable` has two sources with two messages and the same code: the
+gates answer "No engine replica is available; retry shortly." with a `retry-after` (a replica is unhealthy or drained;
+nothing was charged, the request never reached the engine), and a refused or timed-out connection to the engine
+answers "The model engine is unavailable; try again shortly." (the engine did not answer). The `ErrorShareHigh` alert
+counts both under one `code`; the message and the two replica alerts say which it was.
+
+**4. Before destroying the instance, drain it.**
+
+```bash
+docker compose exec -T tools curl -s -X POST -H 'Content-Type: application/json' \
+  -d '{"model":"carmona/qwen3-4b","replica":0,"state":"DRAINING","grace":"10m"}' http://inference:8081/actuator/drain
+docker compose exec -T tools curl -s http://inference:8081/actuator/drain      # repeat until the replica shows "drained":true
+```
+
+The replica takes no new request (the others keep serving; with a single replica every request is a 503
+`engine_unavailable`) and the requests running on it finish. `drained` is true when no request holds a lease on it.
+Destroy the card only then. `ReplicaDrainOverdue` fires if the grace passes with requests still running: Carmona
+never cuts them, so wait for the streams, or destroy the card and accept that the rest end with an error event and
+bill what they produced. Put the replica back with `{"state":"READY"}` when the replacement answers (`"OFF"` with an
+`"until"` keeps it out for longer). Two things to know when you read `drained`:
+
+- After a Valkey outage or restart, read `drained` **twice, at least 15 seconds apart**, before you destroy anything.
+  The leases that count the running requests live in Valkey; right after it comes back `drained` can be true for up to
+  one lease renewal (10 s, a third of the 30 s ttl) while the running requests have not renewed theirs yet.
+- `carmona_replica_drain_inflight` and `…_overdue` are the same fleet-wide numbers on every inference-service
+  replica: query them with `max by (model, replica)`, never `sum`.
+
+A restart of inference-service itself (`docker compose stop inference`) waits for the longest running stream, and
+returns after it ends or after 720 s, never sooner than the stream. Drain first when you can.
+
+A drill with two replicas and no GPU: `docker compose -f compose.yaml -f compose.fleet.yaml up -d --build --wait` runs two
+named simulators (`engine-a`, `engine-b`) with the health gate on. Drain one and watch the other serve;
+`docker compose stop engine-a` under load shows `ReplicaWentUnhealthy` within a scrape or two, `ReplicaUnhealthy` after about a minute and a half, and the traffic moving to `engine-b`.
 
 ## The memory reality
 
