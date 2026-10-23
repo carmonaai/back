@@ -247,14 +247,15 @@ tests:
       - eval_time: 1m
         alertname: LeaseStoreDown
         exp_alerts:
-          - exp_labels: {severity: critical, job: inference, instance: "10.0.0.2:8081"}
+          - exp_labels: {severity: warning, job: inference, instance: "10.0.0.2:8081"}
             exp_annotations:
               summary: "inference 10.0.0.2:8081 cannot reach Valkey (the lease store) for 1m"
               description: >-
                 Requests are still served: this replica admits against its own share of the slots and queue places
-                (the model's, the tier's and the organization's, divided by the number of inference replicas) and does
-                not check the lease token budget, so the caps are only approximate until Valkey answers again. Check
-                the valkey container and its health, then this replica's log for "lease store unavailable".
+                (the model's, the tier's and the organization's, each divided by the expected-replicas setting, not by the
+                number of replicas that run) and does not check the lease token budget, so the caps are only approximate
+                until Valkey answers again. Check the valkey container and its health, then this replica's log for
+                "lease store unavailable".
       - {eval_time: 4m, alertname: LeaseStoreDown, exp_alerts: []}
 
   - name: LeaseStoreDown does not fire when Valkey is back before a minute is up
@@ -782,3 +783,306 @@ tests:
       - {series: 'carmona_inference_requests_total{model="m1", tier="standard", outcome="ok", code="none"}', values: '0+65x100'}
     alert_rule_test:
       - {eval_time: 15m, alertname: PayingTierRefusals, exp_alerts: []}
+
+  # --- Alerts on the signals of the DeepInfer packages (WP-03, WP-07, WP-08, WP-09B; WP-14B) --------------------------------
+  # Every inference-service replica exports these metrics, so each case feeds two replicas ("10.0.0.2" and "10.0.0.3") and the
+  # alert must name the engine replica once, not once per reporter. YAML anchors keep one copy of each annotation text per alert.
+
+  # The health gate's opinion (WP-08) is per inference-service JVM; the alert takes the most pessimistic one (max by), so a JVM that
+  # cannot reach the engine while another can still says so. Value 1 = unhealthy. replica is the engine replica's place in the list.
+  - name: ReplicaUnhealthy fires after 1m, names model and replica once, and resolves when the replica is back
+    interval: 15s
+    input_series:
+      - {series: 'carmona_replica_health_state{job="inference", instance="10.0.0.2:8081", model="carmona/qwen3-4b", replica="0"}', values: '1x12 0x20'}
+      - {series: 'carmona_replica_health_state{job="inference", instance="10.0.0.3:8081", model="carmona/qwen3-4b", replica="0"}', values: '1x12 0x20'}
+      - {series: 'carmona_replica_health_state{job="inference", instance="10.0.0.2:8081", model="carmona/qwen3-4b", replica="1"}', values: '0x32'}
+      - {series: 'carmona_replica_health_state{job="inference", instance="10.0.0.3:8081", model="carmona/qwen3-4b", replica="1"}', values: '0x32'}
+    alert_rule_test:
+      - {eval_time: 45s, alertname: ReplicaUnhealthy, exp_alerts: []}
+      - eval_time: 1m
+        alertname: ReplicaUnhealthy
+        exp_alerts:
+          - exp_labels: {severity: warning, model: carmona/qwen3-4b, replica: "0"}
+            exp_annotations:
+              summary: "replica 0 of carmona/qwen3-4b is out of rotation (unhealthy) for 1m"
+              description: &unhealthy-text >-
+                inference-service's health gate stopped sending requests to this engine replica because nobody answered it:
+                three scrapes of its /metrics in a row, or three refused connections while no scrape answered. This takes the
+                most pessimistic opinion of the inference-service replicas. If it is the model's only replica, every request is
+                a 503 engine_unavailable right now (EngineUnreachable fires too); with more, the others take its share. Check the
+                engine container: an engine that is loading its model is unreachable for minutes and returns by itself after two
+                answered scrapes, nothing needs resetting. Then the engine's own log.
+      - {eval_time: 4m, alertname: ReplicaUnhealthy, exp_alerts: []}
+
+  # One JVM sees the replica ready (it scraped it a moment ago) while the other has it out: the alert still fires.
+  - name: ReplicaUnhealthy fires when only one inference-service replica has the engine replica out
+    interval: 15s
+    input_series:
+      - {series: 'carmona_replica_health_state{job="inference", instance="10.0.0.2:8081", model="m1", replica="0"}', values: '0x20'}
+      - {series: 'carmona_replica_health_state{job="inference", instance="10.0.0.3:8081", model="m1", replica="0"}', values: '1x20'}
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: ReplicaUnhealthy
+        exp_alerts:
+          - exp_labels: {severity: warning, model: m1, replica: "0"}
+            exp_annotations:
+              summary: "replica 0 of m1 is out of rotation (unhealthy) for 1m"
+              description: *unhealthy-text
+
+  - name: ReplicaUnhealthy does not fire when the replica is back before a minute is up
+    interval: 15s
+    input_series:
+      - {series: 'carmona_replica_health_state{job="inference", instance="10.0.0.2:8081", model="m1", replica="0"}', values: '1x3 0x20'}
+    alert_rule_test:
+      - {eval_time: 45s, alertname: ReplicaUnhealthy, exp_alerts: []}
+      - {eval_time: 1m, alertname: ReplicaUnhealthy, exp_alerts: []}
+      - {eval_time: 3m, alertname: ReplicaUnhealthy, exp_alerts: []}
+
+  # The gauge exists only while the gate is on (carmona.inference.health.enabled): with the gate off there is no series, no alert.
+  - name: ReplicaUnhealthy and ReplicaWentUnhealthy are silent when the gate is off and the series do not exist
+    interval: 15s
+    input_series:
+      - {series: 'up{job="inference", instance="10.0.0.2:8081"}', values: '1x40'}
+    alert_rule_test:
+      - {eval_time: 10m, alertname: ReplicaUnhealthy, exp_alerts: []}
+      - {eval_time: 10m, alertname: ReplicaWentUnhealthy, exp_alerts: []}
+
+  # The gauge is sampled every 15 s and the gate needs 15 s of silence to go out and two answered scrapes to come back, so a
+  # replica can be out for a moment between two scrapes. The counter of transitions keeps that moment: both inference-service
+  # replicas count it, the sum names the model once and the alert has no `for` (the event is already over by then). Counters are
+  # born at 0 (HealthMetrics), so the first outage of a JVM's life is an increase too.
+  - name: ReplicaWentUnhealthy fires at the first scrape that shows a transition, stays while the window holds it, and resolves
+    interval: 15s
+    input_series:
+      - {series: 'carmona_replica_health_transitions_total{job="inference", instance="10.0.0.2:8081", model="m1", to="unhealthy"}', values: '0x8 1x80'}
+      - {series: 'carmona_replica_health_transitions_total{job="inference", instance="10.0.0.3:8081", model="m1", to="unhealthy"}', values: '0x8 1x80'}
+      - {series: 'carmona_replica_health_transitions_total{job="inference", instance="10.0.0.2:8081", model="m1", to="ready"}', values: '0x8 1x80'}
+    alert_rule_test:
+      - {eval_time: 2m, alertname: ReplicaWentUnhealthy, exp_alerts: []}
+      - eval_time: 2m15s
+        alertname: ReplicaWentUnhealthy
+        exp_alerts:
+          - exp_labels: {severity: warning, model: m1}
+            exp_annotations:
+              summary: "a replica of m1 was taken out of rotation in the last 10m"
+              description: &went-text >-
+                inference-service marked an engine replica unhealthy at least once in the last 10 minutes. ReplicaUnhealthy
+                samples the state every 15 s, so an outage that began and ended between two scrapes (an engine restart, a
+                network blip) shows only here. Once is an incident, a repeat is a flapping engine or a flaky link: look at the
+                engine container's restarts and uptime (docker compose ps) and at the network between inference and the engine.
+      - eval_time: 10m
+        alertname: ReplicaWentUnhealthy
+        exp_alerts:
+          - exp_labels: {severity: warning, model: m1}
+            exp_annotations:
+              summary: "a replica of m1 was taken out of rotation in the last 10m"
+              description: *went-text
+      - {eval_time: 13m, alertname: ReplicaWentUnhealthy, exp_alerts: []}
+
+  # A replica coming back is not an incident: only the `to="unhealthy"` series counts.
+  - name: ReplicaWentUnhealthy ignores transitions to ready
+    interval: 15s
+    input_series:
+      - {series: 'carmona_replica_health_transitions_total{job="inference", instance="10.0.0.2:8081", model="m1", to="unhealthy"}', values: '0x80'}
+      - {series: 'carmona_replica_health_transitions_total{job="inference", instance="10.0.0.2:8081", model="m1", to="ready"}', values: '0x8 1x80'}
+    alert_rule_test:
+      - {eval_time: 5m, alertname: ReplicaWentUnhealthy, exp_alerts: []}
+
+  # WP-09B: overdue is 1 while a DRAINING replica is past its grace with requests still on it. Every inference-service replica
+  # exports the same fleet-wide number (the leases are in Valkey), so the alert takes the max: a sum of two reporters would read 2
+  # and a `== 1` on it would be silent exactly when two JVMs run.
+  - name: ReplicaDrainOverdue fires after 2m on two reporters at once, names model and replica, and resolves when the last stream ends
+    interval: 15s
+    input_series:
+      - {series: 'carmona_replica_drain_overdue{job="inference", instance="10.0.0.2:8081", model="carmona/qwen3-4b", replica="1"}', values: '1x16 0x20'}
+      - {series: 'carmona_replica_drain_overdue{job="inference", instance="10.0.0.3:8081", model="carmona/qwen3-4b", replica="1"}', values: '1x16 0x20'}
+      - {series: 'carmona_replica_drain_overdue{job="inference", instance="10.0.0.2:8081", model="carmona/qwen3-4b", replica="0"}', values: '0x36'}
+      - {series: 'carmona_replica_drain_overdue{job="inference", instance="10.0.0.3:8081", model="carmona/qwen3-4b", replica="0"}', values: '0x36'}
+    alert_rule_test:
+      - {eval_time: 1m45s, alertname: ReplicaDrainOverdue, exp_alerts: []}
+      - eval_time: 2m
+        alertname: ReplicaDrainOverdue
+        exp_alerts:
+          - exp_labels: {severity: warning, model: carmona/qwen3-4b, replica: "1"}
+            exp_annotations:
+              summary: "replica 1 of carmona/qwen3-4b is past its drain grace with requests still running for 2m"
+              description: >-
+                An operator drained this engine replica (POST /actuator/drain) and its grace has passed, but requests are still
+                running on it. Carmona never cuts them: it takes no new request and waits. GET /actuator/drain on the inference
+                management port shows inFlight and drained for the replica. Either wait for the streams, or destroy the card and
+                accept that the rest end with an error event and are billed what they had produced. The engine is working; this
+                is not a failure of it.
+      - {eval_time: 6m, alertname: ReplicaDrainOverdue, exp_alerts: []}
+
+  - name: ReplicaDrainOverdue does not fire when the last stream ends before 2m
+    interval: 15s
+    input_series:
+      - {series: 'carmona_replica_drain_overdue{job="inference", instance="10.0.0.2:8081", model="m1", replica="1"}', values: '1x6 0x20'}
+    alert_rule_test:
+      - {eval_time: 1m45s, alertname: ReplicaDrainOverdue, exp_alerts: []}
+      - {eval_time: 2m, alertname: ReplicaDrainOverdue, exp_alerts: []}
+      - {eval_time: 5m, alertname: ReplicaDrainOverdue, exp_alerts: []}
+
+  # A draining replica inside its grace (overdue 0, requests in flight) is the drain working, not an alert.
+  - name: ReplicaDrainOverdue stays quiet while the drain is inside its grace
+    interval: 15s
+    input_series:
+      - {series: 'carmona_replica_drain_overdue{job="inference", instance="10.0.0.2:8081", model="m1", replica="1"}', values: '0x40'}
+      - {series: 'carmona_replica_drain_inflight{job="inference", instance="10.0.0.2:8081", model="m1", replica="1"}', values: '3x40'}
+    alert_rule_test:
+      - {eval_time: 10m, alertname: ReplicaDrainOverdue, exp_alerts: []}
+
+  # WP-03: carmona_engine_contract_ok is 1 (the engine meets the check), 0 (it does not), and ABSENT while the check cannot be made,
+  # so a 0 is always a real mismatch. min by: one inference-service replica reading 0 is enough. The label `check` names it.
+  - name: EngineContractMismatch fires after 5m, names the check, and resolves when the engine is fixed
+    interval: 15s
+    input_series:
+      - {series: 'carmona_engine_contract_ok{job="inference", instance="10.0.0.2:8081", model="carmona/qwen3-4b", replica="0", check="models_len"}', values: '0x24 1x40'}
+      - {series: 'carmona_engine_contract_ok{job="inference", instance="10.0.0.3:8081", model="carmona/qwen3-4b", replica="0", check="models_len"}', values: '0x24 1x40'}
+      - {series: 'carmona_engine_contract_ok{job="inference", instance="10.0.0.2:8081", model="carmona/qwen3-4b", replica="0", check="metrics"}', values: '1x64'}
+      - {series: 'carmona_engine_contract_ok{job="inference", instance="10.0.0.3:8081", model="carmona/qwen3-4b", replica="0", check="metrics"}', values: '1x64'}
+    alert_rule_test:
+      - {eval_time: 4m45s, alertname: EngineContractMismatch, exp_alerts: []}
+      - eval_time: 5m
+        alertname: EngineContractMismatch
+        exp_alerts:
+          - exp_labels: {severity: warning, model: carmona/qwen3-4b, replica: "0", check: models_len}
+            exp_annotations:
+              summary: "engine replica 0 of carmona/qwen3-4b fails the contract check models_len for 5m"
+              description: &contract-text >-
+                What Carmona assumes about the engine and what the engine reports disagree; nothing is refused because of it,
+                the service keeps running. The check label says which: models (the served model id is not in /v1/models),
+                models_len (the engine's max_model_len is below the context-window), metrics (a required metric family is
+                missing), kv_tokens (no KV-cache size reported), capacity (a full-context request takes more than the capacity
+                ratio of the KV cache), prefix_caching (prefix caching is off, and the shared-prefix workload depends on it).
+                inference-service logs one WARN with the numbers when a check starts to fail, and looks again every
+                recheck-every (10 m), so this clears by itself some minutes after the engine's flags are fixed.
+      - {eval_time: 10m, alertname: EngineContractMismatch, exp_alerts: []}
+
+  - name: EngineContractMismatch fires when only one inference-service replica reads 0
+    interval: 15s
+    input_series:
+      - {series: 'carmona_engine_contract_ok{job="inference", instance="10.0.0.2:8081", model="m1", replica="0", check="capacity"}', values: '1x40'}
+      - {series: 'carmona_engine_contract_ok{job="inference", instance="10.0.0.3:8081", model="m1", replica="0", check="capacity"}', values: '0x40'}
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: EngineContractMismatch
+        exp_alerts:
+          - exp_labels: {severity: warning, model: m1, replica: "0", check: capacity}
+            exp_annotations:
+              summary: "engine replica 0 of m1 fails the contract check capacity for 5m"
+              description: *contract-text
+
+  - name: EngineContractMismatch does not fire when the check passes again before 5m, or when no check has run
+    interval: 15s
+    input_series:
+      - {series: 'carmona_engine_contract_ok{job="inference", instance="10.0.0.2:8081", model="m1", replica="0", check="models"}', values: '0x18 1x40'}
+      - {series: 'up{job="inference", instance="10.0.0.3:8081"}', values: '1x60'}
+    alert_rule_test:
+      - {eval_time: 4m45s, alertname: EngineContractMismatch, exp_alerts: []}
+      - {eval_time: 5m, alertname: EngineContractMismatch, exp_alerts: []}
+      - {eval_time: 10m, alertname: EngineContractMismatch, exp_alerts: []}
+
+  # WP-07: the guard's two counters. Hard-class control strings (the chat template's role markers) in client text are neutralized by
+  # default, so this is a signal and not a failure; the soft class (think and tool tags) is what a client replaying the model's own
+  # reasoning sends on every turn and never alerts. One minute per sample here: the window is an hour.
+  - name: ControlTokensInContent fires on a hard-class string within the hour and resolves after it, for both actions
+    interval: 1m
+    input_series:
+      - {series: 'carmona_inference_control_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", class="hard", action="neutralized"}', values: '0x10 3x200'}
+      - {series: 'carmona_inference_control_tokens_total{job="inference", instance="10.0.0.3:8081", model="m1", class="hard", action="neutralized"}', values: '0x200'}
+      - {series: 'carmona_inference_control_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", class="hard", action="rejected"}', values: '0x200'}
+    alert_rule_test:
+      - {eval_time: 10m, alertname: ControlTokensInContent, exp_alerts: []}
+      - eval_time: 11m
+        alertname: ControlTokensInContent
+        exp_alerts:
+          - exp_labels: {severity: info, model: m1}
+            exp_annotations:
+              summary: "client text for m1 held a hard control-token string in the last hour"
+              description: &control-text >-
+                A message or tool definition held a string that looks like the chat template's role markers (the hard class:
+                an angle bracket and a pipe, a short name, a pipe and an angle bracket). By default the guard neutralizes it
+                (a zero-width character goes after the first character, the visible text is unchanged, nothing is refused), so
+                this is a signal and not a failure: a document that quotes a template, or an injection attempt. No organization
+                is on the metric on purpose; ask the customer or look for the time in the access log. Whether a model should
+                reject instead is decided after the GPU day check G-05, not by this alert.
+      - eval_time: 50m
+        alertname: ControlTokensInContent
+        exp_alerts:
+          - exp_labels: {severity: info, model: m1}
+            exp_annotations:
+              summary: "client text for m1 held a hard control-token string in the last hour"
+              description: *control-text
+      - {eval_time: 70m, alertname: ControlTokensInContent, exp_alerts: []}
+
+  - name: ControlTokensInContent ignores the soft class
+    interval: 1m
+    input_series:
+      - {series: 'carmona_inference_control_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", class="soft", action="neutralized"}', values: '0x10 500x100'}
+    alert_rule_test:
+      - {eval_time: 30m, alertname: ControlTokensInContent, exp_alerts: []}
+
+  # Rejections reach the client as a 400 each. One stray request is not a stuck client: ten in ten minutes is. `increase` extrapolates
+  # to the window, so the line is read with a margin (12 fires, 5 does not) and not at the boundary.
+  - name: GuardRejections fires on ten or more refusals in ten minutes, names model and code, and resolves
+    interval: 15s
+    input_series:
+      - {series: 'carmona_inference_guard_rejected_total{job="inference", instance="10.0.0.2:8081", model="m1", guard="control_tokens", code="invalid_role"}', values: '0x8 6x100'}
+      - {series: 'carmona_inference_guard_rejected_total{job="inference", instance="10.0.0.3:8081", model="m1", guard="control_tokens", code="invalid_role"}', values: '0x8 6x100'}
+      - {series: 'carmona_inference_guard_rejected_total{job="inference", instance="10.0.0.2:8081", model="m1", guard="control_tokens", code="nesting_too_deep"}', values: '0x8 5x100'}
+    alert_rule_test:
+      - {eval_time: 2m, alertname: GuardRejections, exp_alerts: []}
+      - eval_time: 2m15s
+        alertname: GuardRejections
+        exp_alerts:
+          - exp_labels: {severity: warning, model: m1, code: invalid_role}
+            exp_annotations:
+              summary: "the request guard answered 400 invalid_role on m1 at least ten times in 10m"
+              description: &guard-text >-
+                A client keeps sending requests the guard refuses: invalid_role (a message role outside the accepted list, for
+                example developer, which stays out until G-05), nesting_too_deep, or control_token_in_content (only for a model
+                whose hard-mode or soft-mode is reject). The customer gets a 400 for each, so a new SDK or a changed template is
+                the first thing to look for. The 400 text names the problem and never repeats the content; no organization is
+                on any metric, so the client is found from the customer's side or from the access log by time.
+      - {eval_time: 20m, alertname: GuardRejections, exp_alerts: []}
+
+  # Two refusals a minute is a client that is stuck, though no single minute looks like much: the window is the ten minutes.
+  - name: GuardRejections counts refusals spread over the whole window
+    interval: 1m
+    input_series:
+      - {series: 'carmona_inference_guard_rejected_total{job="inference", instance="10.0.0.2:8081", model="m1", guard="control_tokens", code="invalid_role"}', values: '0+2x40'}
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: GuardRejections
+        exp_alerts:
+          - exp_labels: {severity: warning, model: m1, code: invalid_role}
+            exp_annotations:
+              summary: "the request guard answered 400 invalid_role on m1 at least ten times in 10m"
+              description: *guard-text
+
+  - name: GuardRejections stays quiet on a few refusals
+    interval: 15s
+    input_series:
+      - {series: 'carmona_inference_guard_rejected_total{job="inference", instance="10.0.0.2:8081", model="m1", guard="control_tokens", code="invalid_role"}', values: '0x8 5x100'}
+    alert_rule_test:
+      - {eval_time: 8m, alertname: GuardRejections, exp_alerts: []}
+
+  # The GPU stack's engine is the `vllm` job: losing one of two replicas leaves the other answering, so EngineUnreachable is quiet
+  # and `up == 0` may not exist (discovery drops the name). ReplicaMissing has to watch this job too.
+  - name: ReplicaMissing watches the vllm job and fires after 1m when one of two replicas leaves discovery
+    interval: 15s
+    input_series:
+      - {series: 'up{job="vllm", instance="10.0.0.5:8000"}', values: '1x120'}
+      - {series: 'up{job="vllm", instance="10.0.0.6:8000"}', values: '1x20 stale'}
+    alert_rule_test:
+      - {eval_time: 6m, alertname: ReplicaMissing, exp_alerts: []}
+      - eval_time: 6m15s
+        alertname: ReplicaMissing
+        exp_alerts:
+          - exp_labels: {severity: warning, job: vllm}
+            exp_annotations:
+              summary: "vllm has fewer scrape targets than it had in the last 30m"
+              description: >-
+                A replica of vllm no longer resolves or no longer exists, and the rest still answer, so no `up == 0`
+                exists to alert on. Compare `docker compose ps vllm` with the replicas you asked for.

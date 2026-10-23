@@ -106,12 +106,14 @@ groups:
       # review fixes): a replica whose name still resolves but does not answer reads `up == 0` (ServiceDown names it), while
       # one that Docker's DNS stops returning is simply dropped from discovery on the next refresh and leaves NO series, so
       # `up == 0` is silent. The second shape is what this catches: fewer targets than the job had in the last 30 m.
+      # `vllm` is the GPU stack's engine job (`engine` is the simulator's): with two cards, losing one leaves the other answering,
+      # EngineUnreachable stays quiet and Docker's DNS may drop the name without any `up == 0`, so this is the only alert that sees it.
       # ponytail: the baseline is "the most targets in 30 m", so it clears itself after 30 m and treats an intended scale-down
       # as an incident for that long; H4 replaces it with a gauge of the replicas the stack was asked for.
       - alert: ReplicaMissing
         expr: |
-          count by (job) (up{job=~"inference|gateway|engine"})
-            < max_over_time(count by (job) (up{job=~"inference|gateway|engine"})[30m:15s])
+          count by (job) (up{job=~"inference|gateway|engine|vllm"})
+            < max_over_time(count by (job) (up{job=~"inference|gateway|engine|vllm"})[30m:15s])
         for: 1m
         labels: {severity: warning}
         annotations:
@@ -232,18 +234,20 @@ groups:
     rules:
       # carmona_inference_lease_store_unavailable is 1 while a replica's call to Valkey fails (Leases.unavailable); the
       # replica keeps answering, admitting against its own share of the slots, so nothing else notices. Valkey is
-      # restarted by Docker in seconds, so a minute is an outage and not a restart. One series per replica.
+      # restarted by Docker in seconds, so a minute is an outage and not a restart. One series per replica. A warning, not a
+      # page: ADR 0001 calls this state degraded (every request is still served, only the caps are approximate).
       - alert: LeaseStoreDown
         expr: carmona_inference_lease_store_unavailable == 1
         for: 1m
-        labels: {severity: critical}
+        labels: {severity: warning}
         annotations:
           summary: "{{ $labels.job }} {{ $labels.instance }} cannot reach Valkey (the lease store) for 1m"
           description: >-
             Requests are still served: this replica admits against its own share of the slots and queue places
-            (the model's, the tier's and the organization's, divided by the number of inference replicas) and does
-            not check the lease token budget, so the caps are only approximate until Valkey answers again. Check
-            the valkey container and its health, then this replica's log for "lease store unavailable".
+            (the model's, the tier's and the organization's, each divided by the expected-replicas setting, not by the
+            number of replicas that run) and does not check the lease token budget, so the caps are only approximate
+            until Valkey answers again. Check the valkey container and its health, then this replica's log for
+            "lease store unavailable".
 
       # carmona_usage_seal_lag_seconds (UsageGauges) is how long the oldest window that is due has waited to be sealed. A
       # healthy usage-service reads 0, or between grace and grace + seal-every while the next run is pending: 60 s to 120 s,
@@ -305,3 +309,115 @@ groups:
             does not): the gauge is absent, not 0, so SealLagHigh and DebitLagHigh read nothing and a stuck
             pipeline would pass unnoticed. Check the service's log and the database it reads; a service that does
             not answer its scrape at all is ServiceDown.
+
+  # The replica gates and the engine contract (DeepInfer packages WP-03, WP-08 and WP-09B). Every inference-service replica exports
+  # these metrics, and the drain numbers are the same fleet-wide values on each of them (the leases are in Valkey), so every
+  # expression aggregates the reporters away with max or min and never with sum: two reporters of overdue == 1 sum to 2, and a
+  # `== 1` on that is silent exactly when two JVMs run. The gauges of a feature that is off do not exist (the health gate is off by
+  # default; the contract gauge is absent until the check has run), so these alerts are silent then and say nothing about it.
+  - name: engine-replicas
+    rules:
+      # carmona_replica_health_state is 1 while this inference-service replica has the engine replica out of rotation (WP-08: nobody
+      # answered three scrapes, or three connections were refused; a timeout or a 5xx never counts, R-12). The state is each JVM's own
+      # opinion, so max by: one JVM that cannot reach the engine is enough. A warning: with one replica the engine is gone for
+      # everybody and EngineUnreachable (critical) fires as well; with more, the rest carry the traffic.
+      - alert: ReplicaUnhealthy
+        expr: max by (model, replica) (carmona_replica_health_state) == 1
+        for: 1m
+        labels: {severity: warning}
+        annotations:
+          summary: "replica {{ $labels.replica }} of {{ $labels.model }} is out of rotation (unhealthy) for 1m"
+          description: >-
+            inference-service's health gate stopped sending requests to this engine replica because nobody answered it:
+            three scrapes of its /metrics in a row, or three refused connections while no scrape answered. This takes the
+            most pessimistic opinion of the inference-service replicas. If it is the model's only replica, every request is
+            a 503 engine_unavailable right now (EngineUnreachable fires too); with more, the others take its share. Check the
+            engine container: an engine that is loading its model is unreachable for minutes and returns by itself after two
+            answered scrapes, nothing needs resetting. Then the engine's own log.
+
+      # The gauge above is read every 15 s; the gate goes out after 15 s of silence and back after two answered scrapes, so an outage
+      # can begin and end between two scrapes. The counter keeps it. No `for`: by the time a `for` elapsed the event would be over.
+      # HealthMetrics creates both directions at 0, so the first outage of a JVM's life is an increase. Sum over the reporters is right
+      # here (each JVM counts its own transitions) and the alert names the model, not the replica (the counter has no replica tag).
+      - alert: ReplicaWentUnhealthy
+        expr: sum by (model) (increase(carmona_replica_health_transitions_total{to="unhealthy"}[10m])) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: "a replica of {{ $labels.model }} was taken out of rotation in the last 10m"
+          description: >-
+            inference-service marked an engine replica unhealthy at least once in the last 10 minutes. ReplicaUnhealthy
+            samples the state every 15 s, so an outage that began and ended between two scrapes (an engine restart, a
+            network blip) shows only here. Once is an incident, a repeat is a flapping engine or a flaky link: look at the
+            engine container's restarts and uptime (docker compose ps) and at the network between inference and the engine.
+
+      # carmona_replica_drain_overdue is 1 while a DRAINING replica is past its grace with live leases (WP-09B); NaN, never 0, while
+      # Valkey cannot say, and NaN is not 1. The leases are fleet-wide, so every inference-service replica exports the same value:
+      # max by, never sum. A warning, 2m: Carmona waits and never cuts, the operator decides, so nothing is failing.
+      - alert: ReplicaDrainOverdue
+        expr: max by (model, replica) (carmona_replica_drain_overdue) == 1
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: "replica {{ $labels.replica }} of {{ $labels.model }} is past its drain grace with requests still running for 2m"
+          description: >-
+            An operator drained this engine replica (POST /actuator/drain) and its grace has passed, but requests are still
+            running on it. Carmona never cuts them: it takes no new request and waits. GET /actuator/drain on the inference
+            management port shows inFlight and drained for the replica. Either wait for the streams, or destroy the card and
+            accept that the rest end with an error event and are billed what they had produced. The engine is working; this
+            is not a failure of it.
+
+      # carmona_engine_contract_ok (WP-03) is 1 or 0 per check, and ABSENT while the check cannot be made (engine not up yet), so a 0
+      # is a real mismatch and the alert needs no guard against start-up. It is rechecked every 10m by default, so `for: 5m` only
+      # skips a reading that the next one would correct. min by: any inference-service replica reading 0 counts. A warning: the
+      # check refuses nothing (fail-fast is off by default); it finds a deployment error before the first customer does.
+      - alert: EngineContractMismatch
+        expr: min by (model, replica, check) (carmona_engine_contract_ok) == 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "engine replica {{ $labels.replica }} of {{ $labels.model }} fails the contract check {{ $labels.check }} for 5m"
+          description: >-
+            What Carmona assumes about the engine and what the engine reports disagree; nothing is refused because of it,
+            the service keeps running. The check label says which: models (the served model id is not in /v1/models),
+            models_len (the engine's max_model_len is below the context-window), metrics (a required metric family is
+            missing), kv_tokens (no KV-cache size reported), capacity (a full-context request takes more than the capacity
+            ratio of the KV cache), prefix_caching (prefix caching is off, and the shared-prefix workload depends on it).
+            inference-service logs one WARN with the numbers when a check starts to fail, and looks again every
+            recheck-every (10 m), so this clears by itself some minutes after the engine's flags are fixed.
+
+  # The request guard (WP-07). Signals about client behaviour, not about the service: nothing here is a page.
+  - name: request-guards
+    rules:
+      # Hard-class strings (the chat template's role markers) in client text. The default is to neutralize them, so the request is
+      # served and this is information: a document that quotes a template, or an injection attempt. The soft class (think and tool
+      # tags) is left out on purpose: a client that sends the model's own reasoning back on every turn would keep it firing for ever,
+      # and an alert that always fires is one nobody reads. No organization is on the metric (and must not be); the window is an hour
+      # because a few such strings a day is a quiet system.
+      - alert: ControlTokensInContent
+        expr: sum by (model) (increase(carmona_inference_control_tokens_total{class="hard"}[1h])) > 0
+        labels: {severity: info}
+        annotations:
+          summary: "client text for {{ $labels.model }} held a hard control-token string in the last hour"
+          description: >-
+            A message or tool definition held a string that looks like the chat template's role markers (the hard class:
+            an angle bracket and a pipe, a short name, a pipe and an angle bracket). By default the guard neutralizes it
+            (a zero-width character goes after the first character, the visible text is unchanged, nothing is refused), so
+            this is a signal and not a failure: a document that quotes a template, or an injection attempt. No organization
+            is on the metric on purpose; ask the customer or look for the time in the access log. Whether a model should
+            reject instead is decided after the GPU day check G-05, not by this alert.
+
+      # Each refusal is a 400 the customer sees. A stray request is not a stuck client; ten in ten minutes is. `increase` extrapolates
+      # to the window, so the line is only good to a request or two.
+      # ponytail: 10 in 10m is typed, without a baseline (no customer yet); upgrade path: a share of the model's requests, once there
+      # is traffic to take the share of.
+      - alert: GuardRejections
+        expr: sum by (model, code) (increase(carmona_inference_guard_rejected_total[10m])) >= 10
+        labels: {severity: warning}
+        annotations:
+          summary: "the request guard answered 400 {{ $labels.code }} on {{ $labels.model }} at least ten times in 10m"
+          description: >-
+            A client keeps sending requests the guard refuses: invalid_role (a message role outside the accepted list, for
+            example developer, which stays out until G-05), nesting_too_deep, or control_token_in_content (only for a model
+            whose hard-mode or soft-mode is reject). The customer gets a 400 for each, so a new SDK or a changed template is
+            the first thing to look for. The 400 text names the problem and never repeats the content; no organization is
+            on any metric, so the client is found from the customer's side or from the access log by time.
