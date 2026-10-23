@@ -341,6 +341,105 @@ tests:
     alert_rule_test:
       - {eval_time: 10m, alertname: DebitLagHigh, exp_alerts: []}
 
+  # The two lag gauges are ABSENT, never 0, while their service cannot compute them (the database does not answer, billing
+  # cannot reach usage-service): SealLagHigh and DebitLagHigh read nothing then, which is exactly when the pipeline is stuck.
+  # The gauge is there at 0 for 2m, goes stale, and the service still answers its scrape: fires 5m after it left.
+  - name: LagGaugeMissing fires 5m after a live usage-service stops reporting the seal lag, and names the replica
+    interval: 15s
+    input_series:
+      - {series: 'up{job="usage", instance="10.0.0.7:8081"}', values: '1x80'}
+      - {series: 'carmona_usage_seal_lag_seconds{job="usage", instance="10.0.0.7:8081"}', values: '0x8 stale _x80'}
+      - {series: 'up{job="billing", instance="10.0.0.8:8081"}', values: '1x80'}
+      - {series: 'carmona_billing_debit_lag_seconds{job="billing", instance="10.0.0.8:8081"}', values: '0x80'}
+    alert_rule_test:
+      - {eval_time: 7m, alertname: LagGaugeMissing, exp_alerts: []}
+      - eval_time: 7m15s
+        alertname: LagGaugeMissing
+        exp_alerts:
+          - exp_labels: {severity: warning, job: usage, instance: "10.0.0.7:8081"}
+            exp_annotations:
+              summary: "usage 10.0.0.7:8081 answers its scrape but reports no lag gauge for 5m"
+              description: >-
+                The service is up and cannot compute its lag (the database does not answer, or for billing usage-service
+                does not): the gauge is absent, not 0, so SealLagHigh and DebitLagHigh read nothing and a stuck
+                pipeline would pass unnoticed. Check the service's log and the database it reads; a service that does
+                not answer its scrape at all is ServiceDown.
+      - eval_time: 15m
+        alertname: LagGaugeMissing
+        exp_alerts:
+          - exp_labels: {severity: warning, job: usage, instance: "10.0.0.7:8081"}
+            exp_annotations:
+              summary: "usage 10.0.0.7:8081 answers its scrape but reports no lag gauge for 5m"
+              description: >-
+                The service is up and cannot compute its lag (the database does not answer, or for billing usage-service
+                does not): the gauge is absent, not 0, so SealLagHigh and DebitLagHigh read nothing and a stuck
+                pipeline would pass unnoticed. Check the service's log and the database it reads; a service that does
+                not answer its scrape at all is ServiceDown.
+
+  - name: LagGaugeMissing covers billing's debit lag gauge too
+    interval: 15s
+    input_series:
+      - {series: 'up{job="usage", instance="10.0.0.7:8081"}', values: '1x80'}
+      - {series: 'carmona_usage_seal_lag_seconds{job="usage", instance="10.0.0.7:8081"}', values: '0x80'}
+      - {series: 'up{job="billing", instance="10.0.0.8:8081"}', values: '1x80'}
+    alert_rule_test:
+      - {eval_time: 4m45s, alertname: LagGaugeMissing, exp_alerts: []}
+      - eval_time: 5m
+        alertname: LagGaugeMissing
+        exp_alerts:
+          - exp_labels: {severity: warning, job: billing, instance: "10.0.0.8:8081"}
+            exp_annotations:
+              summary: "billing 10.0.0.8:8081 answers its scrape but reports no lag gauge for 5m"
+              description: >-
+                The service is up and cannot compute its lag (the database does not answer, or for billing usage-service
+                does not): the gauge is absent, not 0, so SealLagHigh and DebitLagHigh read nothing and a stuck
+                pipeline would pass unnoticed. Check the service's log and the database it reads; a service that does
+                not answer its scrape at all is ServiceDown.
+
+  # A service that does not answer its scrape has no gauge for a plainer reason (ServiceDown names it): not this alert, for
+  # either service.
+  - name: LagGaugeMissing stays quiet while the service itself is down
+    interval: 15s
+    input_series:
+      - {series: 'up{job="usage", instance="10.0.0.7:8081"}', values: '0x80'}
+      - {series: 'up{job="billing", instance="10.0.0.8:8081"}', values: '0x80'}
+    alert_rule_test:
+      - {eval_time: 15m, alertname: LagGaugeMissing, exp_alerts: []}
+
+  # One replica reports and the other does not: the one that does not is named, the other is not hidden by it (the match is by
+  # instance, not by job alone).
+  - name: LagGaugeMissing names the replica that has no gauge when another replica of the job has
+    interval: 15s
+    input_series:
+      - {series: 'up{job="usage", instance="10.0.0.7:8081"}', values: '1x80'}
+      - {series: 'carmona_usage_seal_lag_seconds{job="usage", instance="10.0.0.7:8081"}', values: '0x80'}
+      - {series: 'up{job="usage", instance="10.0.0.9:8081"}', values: '1x80'}
+      - {series: 'up{job="billing", instance="10.0.0.8:8081"}', values: '1x80'}
+      - {series: 'carmona_billing_debit_lag_seconds{job="billing", instance="10.0.0.8:8081"}', values: '0x80'}
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: LagGaugeMissing
+        exp_alerts:
+          - exp_labels: {severity: warning, job: usage, instance: "10.0.0.9:8081"}
+            exp_annotations:
+              summary: "usage 10.0.0.9:8081 answers its scrape but reports no lag gauge for 5m"
+              description: >-
+                The service is up and cannot compute its lag (the database does not answer, or for billing usage-service
+                does not): the gauge is absent, not 0, so SealLagHigh and DebitLagHigh read nothing and a stuck
+                pipeline would pass unnoticed. Check the service's log and the database it reads; a service that does
+                not answer its scrape at all is ServiceDown.
+
+  - name: LagGaugeMissing does not fire when the gauge is back before 5m
+    interval: 15s
+    input_series:
+      - {series: 'up{job="usage", instance="10.0.0.7:8081"}', values: '1x80'}
+      - {series: 'carmona_usage_seal_lag_seconds{job="usage", instance="10.0.0.7:8081"}', values: '_x19 0x60'}
+      - {series: 'up{job="billing", instance="10.0.0.8:8081"}', values: '1x80'}
+      - {series: 'carmona_billing_debit_lag_seconds{job="billing", instance="10.0.0.8:8081"}', values: '0x80'}
+    alert_rule_test:
+      - {eval_time: 5m, alertname: LagGaugeMissing, exp_alerts: []}
+      - {eval_time: 15m, alertname: LagGaugeMissing, exp_alerts: []}
+
   # Queue wait is the time from a request being understood to its engine call starting (rate buckets, a paying tier's wait
   # for a slot, the lease script). Every request below waits between 1 s and 2 s (it is in the le="2" bucket and not in the
   # le="1" one) for the first 12 minutes, then gets in at once. The p95 of that is 1.95 s, over the 1 s line.

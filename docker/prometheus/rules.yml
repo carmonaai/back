@@ -285,3 +285,23 @@ groups:
             minute overshoot bound the terms quote. A healthy debit reads 0 to about 190 s. Check the billing
             container's log for debit errors, whether usage-service answers it (the debit reads the sealed
             windows from there), and the database; a backlog drains 100 windows per run.
+
+      # The two lag gauges above are ABSENT, never 0, while their service cannot compute them: usage-service when its database
+      # does not answer, billing-service when it cannot read its cursor or the clock or usage-service does not answer. That is
+      # exactly a stuck pipeline, and SealLagHigh and DebitLagHigh read nothing then. So: a service whose scrape answers
+      # (`up == 1`) and whose gauge is not there. Down services are ServiceDown's (no `up == 1`); the first gauge-every after
+      # a start has no gauge either, which 5m covers. Warning: it says the lag cannot be seen, not that it is high.
+      - alert: LagGaugeMissing
+        expr: |
+          (up{job="usage"} == 1 unless on (job, instance) carmona_usage_seal_lag_seconds)
+            or
+          (up{job="billing"} == 1 unless on (job, instance) carmona_billing_debit_lag_seconds)
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.job }} {{ $labels.instance }} answers its scrape but reports no lag gauge for 5m"
+          description: >-
+            The service is up and cannot compute its lag (the database does not answer, or for billing usage-service
+            does not): the gauge is absent, not 0, so SealLagHigh and DebitLagHigh read nothing and a stuck
+            pipeline would pass unnoticed. Check the service's log and the database it reads; a service that does
+            not answer its scrape at all is ServiceDown.
