@@ -377,7 +377,7 @@ rm -f "$longout"
 drained=0
 for _ in $(seq 20); do
   drain_call GET
-  drained=$(grep -o "\"model\":\"$M\"[^}]*\"drained\":true" "$BODY" | wc -l | tr -d ' ')
+  drained=$(grep -o '{[^{}]*}' "$BODY" | grep "\"model\":\"$M\"" | grep -c '"drained":true')   # one object per replica, whatever the field order
   [[ $drained == "$replicas" ]] && break
   sleep 0.5
 done
