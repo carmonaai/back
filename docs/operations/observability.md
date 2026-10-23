@@ -11,7 +11,7 @@ measured, what the numbers mean, and — with the same weight — what is not me
   <title id="dobs-title">A metric's path from the service to an alert nobody is sent</title>
   <desc id="dobs-desc">inference-service publishes its indicators on the management port; the engine exposes
   its own counters. Prometheus scrapes both every fifteen seconds and evaluates its rule file every sixty
-  seconds, producing recording rules and seven alerts. Grafana draws provisioned dashboards and lists those
+  seconds, producing recording rules and twenty alerts. Grafana draws provisioned dashboards and lists those
   alert rules and their firing state. There is no Alertmanager, so a firing rule reaches no destination.</desc>
 
   <defs>
@@ -112,7 +112,7 @@ Step 5 is where it stops: a firing rule reaches no destination, because none has
    same port that was never published and never routed before metrics existed.
 2. **Prometheus scrapes every service every 15 s**, one job per service so the `job` label carries the service
    name, plus the engine's own `/metrics` with a bearer token read from a file written at container start.
-3. **`rules.yml` is evaluated every 60 s**: six recording rules (three latency, three engine) and seven alerts.
+3. **`rules.yml` is evaluated every 60 s**: eight recording rules (three latency, five engine) and twenty alerts.
 4. **Grafana draws three provisioned dashboards** and lists the alert rules and their state, with
    `allowUiUpdates: false`, so a change made in the browser does not survive the next restart.
 5. **Nothing leaves the machine.** There is no Alertmanager and no destination, so a firing rule is a colour on

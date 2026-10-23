@@ -13,7 +13,7 @@ is already running.
   containers and waits for their health checks. The smoke test drives the whole stack through the gateway.
   Two further checks run against the same stack: a load bench on the GPU and a check of the books. Prometheus
   scrapes every service's management port and the engine's own metrics endpoint every fifteen seconds, Grafana
-  draws the provisioned dashboards, and seven alert rules are evaluated with nowhere to send them.</desc>
+  draws the provisioned dashboards, and twenty alert rules are evaluated with nowhere to send them.</desc>
 
   <defs>
     <marker id="dops-arrow-flow" viewBox="0 0 10 10" refX="9" refY="5"
@@ -126,7 +126,7 @@ images, starts the fourteen containers and waits for their health checks before 
 driving the running stack through the gateway. Steps 4 and 5 are the two checks that need a running stack and
 a reason to run them — the GPU load bench and the books. Step 6 is the metrics flow, which is asynchronous and
 independent of every check: Prometheus scrapes each service's management port and the engine's own `/metrics`
-every 15 s. Step 7 is Grafana drawing the provisioned dashboards, and `rules.yml` evaluating seven alert rules
+every 15 s. Step 7 is Grafana drawing the provisioned dashboards, and `rules.yml` evaluating twenty alert rules
 with nowhere to send them.</figcaption>
 </figure>
 
@@ -149,7 +149,7 @@ with nowhere to send them.</figcaption>
    any balance differs from the sum of its ledger.
 6. **Prometheus scrapes** every service's `:8081/actuator/prometheus` and the engine's `/metrics` every 15 s.
    Nothing is published: the metrics stay on the internal network, like the port they come from.
-7. **Grafana draws three provisioned dashboards and lists the seven alert rules** Prometheus evaluates. No
+7. **Grafana draws three provisioned dashboards and lists the twenty alert rules** Prometheus evaluates. No
    notification leaves the machine, because no destination has been chosen.
 
 ## What it is
