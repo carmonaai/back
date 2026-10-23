@@ -224,3 +224,24 @@ groups:
             piling up unbilled and the credit check runs on old balances. A healthy seal reads 0 to about 130 s
             (grace 60 s, seal-every 60 s, gauge-every 10 s). Check the usage container's log for seal errors, the
             database it seals in, and whether the seal job is held up behind another scheduled job.
+
+      # carmona_billing_debit_lag_seconds (BillingGauges) is how long the oldest sealed window has waited to be billed. A
+      # healthy billing-service reads 0, or up to grace + seal-every + debit-every (180 s, 190 s with gauge-every): the bound
+      # the customer terms quote is that plus the 5 m window, 8 minutes (Overshoot), and this alert is that bound made
+      # observable. 300 s is more than one missed debit run on top of the healthy ceiling. Critical, because a late debit
+      # is credit enforced late, which is money served for free. Absent while billing cannot read its cursor, the clock or
+      # usage-service, so quiet then (ServiceDown covers a dead billing-service).
+      # ponytail: the 300 assumes the service defaults (the compose prototype runs a 16 s bound, far under it, so it is only
+      # looser there); typed here and not derived, upgrade path: export the three settings as a gauge and compare against it.
+      - alert: DebitLagHigh
+        expr: carmona_billing_debit_lag_seconds > 300
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "billing is {{ $value | humanizeDuration }} behind on debiting sealed usage (above 5m for 5m)"
+          description: >-
+            billing-service has not debited windows that usage-service already sealed, so credit balances and the
+            no_credit flags run late: a customer whose credit ran out keeps being served for longer than the 8
+            minute overshoot bound the terms quote. A healthy debit reads 0 to about 190 s. Check the billing
+            container's log for debit errors, whether usage-service answers it (the debit reads the sealed
+            windows from there), and the database; a backlog drains 100 windows per run.
