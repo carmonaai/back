@@ -179,8 +179,8 @@
     {
       "id": 9,
       "type": "timeseries",
-      "title": "Queue wait p95 (admitted → engine start)",
-      "description": "No SLO of its own: it is what the bounded wait buys (task A, about 1.5 s for paying tiers) and it shows up in TTFT. Needs carmona_inference_queue_wait_seconds — NOT PUBLISHED YET (task A).",
+      "title": "Queue wait p95 (request understood → engine start)",
+      "description": "The time from a request being understood to its engine call starting: the rate-bucket script, a paying tier's wait for a free slot (at most 1.5 s, then the 429) and the lease script. Only requests that reached the engine are in it. The QueueWaitHigh alert fires when a model and tier stay above the red line, 1 s, for 10 minutes: capacity if the engine is busy, Valkey if it is idle. Before the pipeline change it started when the lease was taken and read about zero.",
       "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"h": 7, "w": 8, "x": 8, "y": 16},
       "fieldConfig": {
@@ -189,13 +189,13 @@
           "min": 0,
           "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 8, "showPoints": "never"},
           "color": {"mode": "palette-classic"},
-          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}
         },
         "overrides": []
       },
       "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
       "targets": [
-        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "histogram_quantile(0.95, sum by (le, tier) (rate(carmona_inference_queue_wait_seconds_bucket[5m])))", "legendFormat": "{{tier}}", "editorMode": "code", "range": true}
+        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "histogram_quantile(0.95, sum by (le, model, tier) (rate(carmona_inference_queue_wait_seconds_bucket[5m])))", "legendFormat": "{{model}} {{tier}}", "editorMode": "code", "range": true}
       ]
     },
     {
@@ -256,7 +256,7 @@
       "id": 13,
       "type": "timeseries",
       "title": "Engine requests running / waiting",
-      "description": "The engine's own view, scraped directly every 15 s (recording rules engine:requests_running / engine:requests_waiting, from vllm:num_requests_running / vllm:num_requests_waiting, which the simulator and vLLM both report; the maximum over a fleet's replicas). SLO: waiting stays below the engine's backstop of 8, the queue-full point where the engine refuses the next request (red from 8; EngineQueueSustained alert).",
+      "description": "The engine's own view, scraped directly every 15 s (vllm:num_requests_running / vllm:num_requests_waiting, which the simulator and vLLM both report). Running is the busiest replica (engine:requests_running); waiting is all replicas added up (engine:requests_waiting_total), drawn against the queue places inference-service admits behind the slots (engine:queue_places, from carmona_engine_queue_places). The EngineQueueSustained alert fires when waiting stays at the queue-places line for 2 minutes; without that line (inference-service down) the alert is quiet.",
       "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"h": 7, "w": 8, "x": 8, "y": 24},
       "fieldConfig": {
@@ -265,14 +265,15 @@
           "min": 0,
           "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 8, "showPoints": "never"},
           "color": {"mode": "palette-classic"},
-          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 8}]}
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}
         },
         "overrides": []
       },
       "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
       "targets": [
         {"refId": "running", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "engine:requests_running", "legendFormat": "running {{job}}", "editorMode": "code", "range": true},
-        {"refId": "waiting", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "engine:requests_waiting", "legendFormat": "waiting {{job}}", "editorMode": "code", "range": true}
+        {"refId": "waiting", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "engine:requests_waiting_total", "legendFormat": "waiting {{job}} (all replicas)", "editorMode": "code", "range": true},
+        {"refId": "places", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "engine:queue_places", "legendFormat": "queue places (alert line)", "editorMode": "code", "range": true}
       ]
     },
     {
@@ -319,6 +320,28 @@
       "targets": [
         {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum by (mode, kind) (rate(carmona_inference_tokens_total[$__rate_interval]))", "legendFormat": "{{mode}} {{kind}} tok/s", "editorMode": "code", "range": true},
         {"refId": "B", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum by (outcome) (rate(carmona_inference_requests_total[$__rate_interval]))", "legendFormat": "requests/s {{outcome}}", "editorMode": "code", "range": true}
+      ]
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Engine preemptions (5m)",
+      "description": "Requests the engine evicted from its KV cache for lack of room; each is recomputed from the start. Straight from the engine's own vllm:num_preemptions_total (the simulator does not report it, so the panel is empty there). Nothing above 0 is the healthy reading; a sustained count means the KV cache is too small for the load (fewer slots, or more of the card's memory for the cache). A panel and not an alert until the first GPU day shows what normal is.",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 31},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 8, "showPoints": "never"},
+          "color": {"mode": "palette-classic"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}
+        },
+        "overrides": []
+      },
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum by (job) (increase(vllm:num_preemptions_total{job=~\"engine|vllm\"}[5m]))", "legendFormat": "preemptions {{job}}", "editorMode": "code", "range": true}
       ]
     }
   ]
