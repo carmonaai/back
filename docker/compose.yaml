@@ -264,6 +264,9 @@ services:
       # start after the stand-in answers. Without the profile this service does not exist and `required: false` skips it.
       engine-lb: { condition: service_healthy, required: false }
       usage: { condition: service_healthy }
+    # A restart finishes the streams it holds: spring.lifecycle.timeout-per-shutdown-phase is 660 s (application.yaml), and the
+    # runtime must wait longer than that or it kills the JVM mid-stream. Compose's default is 10 s.
+    stop_grace_period: 720s
     healthcheck: *readiness
     networks: [internal]
 
@@ -300,6 +303,9 @@ services:
       organization: { condition: service_healthy }
       inference: { condition: service_healthy }
       batch: { condition: service_healthy }
+    # Rolling restart (ShutdownDrain): carmona.gateway.drain-delay (10 s) + timeout-per-shutdown-phase (660 s) must fit inside this,
+    # or the runtime kills the JVM mid-stream. Compose's default is 10 s.
+    stop_grace_period: 720s
     healthcheck: *readiness
     networks: [internal]
 
