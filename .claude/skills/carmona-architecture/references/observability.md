@@ -5,7 +5,7 @@ Built 2026-10-05 (task B). Prometheus scrapes every service's management port an
 `docker/`. Nothing is clicked into a container, and nothing that matters is published: metrics stay on the
 internal compose network, like the management port they come from (override 6).
 
-**Updated 2026-10-15 for pass 2 and the MVP backend.** The engine is the simulated engine (job `engine`) or vLLM (job `vllm`); there is no llama.cpp job, panel or rule any more (ADR 0002). `inference` and `gateway` are scraped replica by replica through DNS service discovery. The `carmona_*` contract below is published (the three money gauges came with pass 2). The alert list is the nine rules of `docker/prometheus/rules.yml`. What this page does not claim: a scrape of a running stack after 2026-10-05; the checks since then are `docker/check-prometheus.sh` (config valid, 15 rules, `promtool test rules`, the four DNS-discovered jobs) and `docker/check-fleet-targets.sh` (the live replica count), both run by the harness chain on 2026-10-09.
+**Updated 2026-10-15 for pass 2 and the MVP backend.** The engine is the simulated engine (job `engine`) or vLLM (job `vllm`); there is no llama.cpp job, panel or rule any more (ADR 0002). `inference` and `gateway` are scraped replica by replica through DNS service discovery. The `carmona_*` contract below is published (the three money gauges came with pass 2). The alert list is the twenty alerts of `docker/prometheus/rules.yml` (28 rules with the eight recording rules; 2026-10-23: the OPEN-15 alerts, the queue-wait and queue-places fixes, and one alert for each new signal of the DeepInfer packages WP-03, WP-07, WP-08 and WP-09B). What this page does not claim: a scrape of a running stack after 2026-10-05; the checks since then are `docker/check-prometheus.sh` (config valid, 28 rules, `promtool test rules` with 67 cases, the four DNS-discovered jobs) and `docker/check-fleet-targets.sh` (the live replica count). None of the alerts or metrics added since 2026-10-15 has been seen on a running stack or a real engine: the rules are tested against hand-made series, the metric names were read from the Java.
 
 The gaps are in §Gaps, named rather than papered over. An empty panel on a dashboard that says so is a
 finding; a substitute metric that animates is a lie.
@@ -40,13 +40,13 @@ finding; a substitute metric that animates is a lie.
 | TTFT p95, streamed | ≤ 2 s | Phase-3 bench goodput definition (TTFT ≤ 2 s and TPOT ≤ 100 ms); plan §8 |
 | TTFT goodput (share within 2 s) | ≥ 95% | Phase-4/5 exit check ("enterprise goodput ≥ 95%") |
 | Inter-token latency (TPOT) p95 | ≤ 100 ms | Phase-3 bench (measured 24 ms at C = 4) |
-| Engine queue depth | full at 8 waiting (the engine refuses past it) | vLLM `--max-num-queued-reqs 8` in `compose.gpu.yaml`; the simulator's `--max-waiting-queue-length=8`; admission lets 2 wait per replica behind 4 slots |
+| Engine queue depth | full when the waiting requests reach the queue places inference-service admits (`carmona_engine_queue_places`, 2 per replica behind 4 slots) | `EngineQueueSustained`. vLLM's `--max-num-queued-reqs` counts running + waiting, so it is slots + places (6 in `compose.gpu.yaml`); the simulator's own `--max-waiting-queue-length=8` counts waiting only and never fills behind admission |
 | Error share (inference) | ≤ 5% over 5 m | Same 5% as the goodput target above |
 | Refusals on paying tiers (429) | ≤ 5% over 5 m | Phase-4/5 exit check, enterprise goodput ≥ 95% |
 | Service reachability | every target UP; `up == 0` for 2 m alerts | This stack. No numeric availability SLO exists yet (plan §8 leaves it per model class) |
 | Reconciliation (engine counters vs stored usage) | any disagreement | `Reconciler`: more than max(0.5%, (slots + queue) × context) |
 | Usage ingestion | ≥ 1 stored event per served `/v1` request | Every answered request is billable |
-| Metering lag (seal and debit) | seal lag ≤ grace + seal-every (120 s at the defaults), debit lag ≤ grace + seal-every + debit-every (180 s) | `Overshoot` in the `billing` library: the 8-minute overshoot bound minus the 5-minute window. Gauges only; no alert on them yet |
+| Metering lag (seal and debit) | seal lag ≤ grace + seal-every (120 s at the defaults), debit lag ≤ grace + seal-every + debit-every (180 s) | `Overshoot` in the `billing` library: the 8-minute overshoot bound minus the 5-minute window. `SealLagHigh` (180 s) and `DebitLagHigh` (300 s) alert above them; `LagGaugeMissing` when a live service reports no gauge |
 | Per-service RED latency | no SLO | Plan §8 sets SLOs per model class on the inference path, not per internal service |
 
 No number above was invented for this stack: each is the one the code, the compose file or a recorded bench
@@ -77,6 +77,15 @@ stack.
 | `carmona_usage_seal_lag_seconds` | none | yes, usage-service (pass 2) |
 | `carmona_billing_debit_lag_seconds` | none | yes, billing-service (pass 2) |
 | `carmona_billing_no_credit_organizations` | none | yes, billing-service (pass 2) |
+| `carmona_inference_finish_total` (how a request ended by the engine's finish_reason: stop, length, tool_calls, content_filter, other, none) | `model`, `reason` | yes (WP-01) |
+| `carmona_inference_first_output_seconds` (from the request to the first thing the engine produced; a long prompt's cold and warm prefill are separate series) | `model`, `cache` (`none`, `partial`, `full`) | yes (WP-01); a panel after Day A, not an alert |
+| `carmona_engine_contract_ok` (1 the engine meets the check, 0 it does not; absent until the check has run and while it cannot be made) | `model`, `replica`, `check` (`models`, `models_len`, `metrics`, `kv_tokens`, `capacity`, `prefix_caching`) | yes (WP-03) |
+| `carmona_engine_slots`, `carmona_engine_queue_places` (the model's sums over its replicas; every inference replica reports the same number, aggregate with `max by (model)`) | `model` | yes (WP-03) |
+| `carmona_replica_health_state` (0 ready, 1 unhealthy; **absent** while `carmona.inference.health.enabled` is false) | `model`, `replica` | yes (WP-08) |
+| `carmona_replica_health_transitions_total` (absent when the gate is off; both directions start at 0) | `model`, `to` (`ready`, `unhealthy`) | yes (WP-08) |
+| `carmona_replica_drain_state` (0 ready, 1 draining, 2 off), `carmona_replica_drain_inflight` (live leases on the replica), `carmona_replica_drain_overdue` (1 past the grace with requests still running; NaN while Valkey cannot say). The last two are fleet-wide numbers that every inference replica exports: aggregate with `max by (model, replica)`, **never `sum`** | `model`, `replica` | yes (WP-09B) |
+| `carmona_inference_control_tokens_total` (a request held a control string; once per request and class) | `model`, `class` (`hard`, `soft`), `action` (`neutralized`, `rejected`) | yes (WP-07) |
+| `carmona_inference_guard_rejected_total` | `model`, `guard` (`control_tokens`), `code` (`control_token_in_content`, `invalid_role`, `nesting_too_deep`) | yes (WP-07) |
 
 A value the code cannot compute is absent, never 0 (the lag gauges, the engine gauges and the reconcile gauge remove
 their series instead of exporting NaN or a false "healthy"). The engine panels and the queue alert read the engine's
@@ -101,17 +110,33 @@ its own alerting (`manageAlerts: true`) and never copies them. **There is no Ale
 has been chosen, so firing state in Grafana and Prometheus is the deliverable, and a notification channel is
 a decision for the user, not a default we pick for them.
 
+Severities are labels only (nothing routes them until Alertmanager exists, HOST-12): `critical` is a stopped or unbilled service, `warning` is something
+degraded or to look at, `info` is a signal. Every alert has the same text in its `description` in `rules.yml`; a change to the wording is a change in both places.
+Alerts on replica-level signals (`ReplicaUnhealthy`, `ReplicaDrainOverdue`, `EngineContractMismatch`) take the max or min over the inference-service replicas that
+report the same thing, so they name an engine replica once. A metric of a feature that is off does not exist, so its alert is silent and says nothing about it.
+
 | Alert | Fires when | What the operator does |
 |---|---|---|
-| `ServiceDown` | a service's scrape fails for 2 m (one series per replica for `inference` and `gateway`, so it names the replica) | Container down, restarting, or its management port not listening. Check the container's health and logs. Metrics gone means every other SLI for that service is gone too |
-| `ReplicatedServiceAbsent` | `inference` or `gateway` has no scrape target at all for 2 m | Every replica is gone from DNS discovery, so there is no `up` series for `ServiceDown` to test. Check `docker compose ps` for that service |
-| `ReplicaMissing` | `inference`, `gateway` or `engine` has fewer targets than its maximum over the last 30 m, for 1 m | One replica left discovery while the rest still answer, so no `up == 0` exists. Compare `docker compose ps` with the replicas you asked for. A `ponytail:` in the rule: an intended scale-down alerts for 30 m |
-| `EngineUnreachable` | every target of the `engine` or `vllm` job fails its scrape, or neither job has any target, for 1 m | Inference answers 503 after one retry. Check the engine container (the real one downloads the model on first start: slow is not broken) and that `.env`'s key is the one the engine started with |
-| `EngineQueueSustained` | `engine:requests_waiting` is 8 or more (the engine's queue is full and it refuses the next request) for 2 m | Admission is letting more through than the engine can start; TTFT is paying for it. Check TTFT p95 and refusals; if the engine is healthy, revisit C (slots) |
-| `ReconciliationMismatch` | the hourly reconcile disagrees (any occurrence) | Tokens the engine processed are not in usage-service: revenue that will never be billed. `GET /actuator/reconcile` on inference-service (management port, internal) gives the delta; check usage-service ingestion and the `usage:events` stream in Valkey |
-| `UsageIngestionStalled` | `/v1` requests are being served and usage-service has received nothing for 5 m | Every one of those requests is unbilled right now. Events wait in the Valkey stream, so nothing is lost yet: look for a dead relay or a full stream, and at the usage container |
-| `ErrorShareHigh` | more than 5% of inference requests fail for 5 m | Read the `code` tag: 502/503 are the engine or the connection pool; 500 is a defect in inference-service |
-| `PayingTierRefusals` | more than 5% of standard/enterprise requests are refused (429) for 5 m | Capacity (C), a tier's share, or one organization holding the slots (gap 4, VTC). Trial being refused is by design and is not this alert |
+| `ServiceDown` (critical) | a service's scrape fails for 2 m (one series per replica for `inference` and `gateway`, so it names the replica) | Container down, restarting, or its management port not listening. Check the container's health and logs. Metrics gone means every other SLI for that service is gone too |
+| `ReplicatedServiceAbsent` (critical) | `inference` or `gateway` has no scrape target at all for 2 m | Every replica is gone from DNS discovery, so there is no `up` series for `ServiceDown` to test. Check `docker compose ps` for that service |
+| `ReplicaMissing` (warning) | `inference`, `gateway`, `engine` or `vllm` has fewer targets than its maximum over the last 30 m, for 1 m | One replica left discovery while the rest still answer, so no `up == 0` exists (with two vLLM cards, the only alert that sees one gone). Compare `docker compose ps` with the replicas you asked for. A `ponytail:` in the rule: an intended scale-down alerts for 30 m |
+| `EngineUnreachable` (critical) | every target of the `engine` or `vllm` job fails its scrape, or neither job has any target, for 1 m | Inference answers 503 after one retry. Check the engine container (the real one downloads the model on first start: slow is not broken) and that `.env`'s key is the one the engine started with |
+| `EngineQueueSustained` (warning) | the engine job's waiting requests, summed over its replicas (`engine:requests_waiting_total`), reach the queue places inference-service admits (`engine:queue_places`, from `carmona_engine_queue_places`), for 2 m | Admission is running the engine at its full stretch; TTFT is paying for it. Check TTFT p95 and refusals; if the engine is healthy, revisit C (slots). The engine's own cap `--max-num-queued-reqs` must be slots + places or it refuses first. Quiet while the places gauge is absent or 0 |
+| `QueueWaitHigh` (warning) | p95 of `carmona_inference_queue_wait_seconds` by model and tier is above 1 s for 10 m (meaningful since WP-01 moved the clock to "request understood") | Admitted requests wait over a second for a slot, the buckets or a slow Valkey. Engine busy: capacity, see `EngineQueueSustained` and `PayingTierRefusals`. Engine idle: look at Valkey (`LeaseStoreDown`, its latency) and inference-service CPU. Refused requests are not in this number |
+| `ReconciliationMismatch` (critical) | the hourly reconcile disagrees (any occurrence) | Tokens the engine processed are not in usage-service: revenue that will never be billed. `GET /actuator/reconcile` on inference-service (management port, internal) gives the delta; check usage-service ingestion and the `usage:events` stream in Valkey |
+| `UsageIngestionStalled` (critical) | `/v1` requests are being served and usage-service has received nothing for 5 m | Every one of those requests is unbilled right now. Events wait in the Valkey stream, so nothing is lost yet: look for a dead relay or a full stream, and at the usage container |
+| `ErrorShareHigh` (warning) | more than 5% of inference requests fail for 5 m | Read the `code` tag: 502/503 are the engine or the connection pool; 500 is a defect in inference-service. `engine_unavailable` has two sources with two messages (the gate: "No engine replica is available; retry shortly.", with `retry-after`; the engine connection: "The model engine is unavailable; try again shortly."): see the runbook in `docs/operations/running.md` |
+| `PayingTierRefusals` (warning) | more than 5% of standard/enterprise requests are refused (429) for 5 m | Capacity (C), a tier's share, or one organization holding the slots (gap 4, VTC). Trial being refused is by design and is not this alert |
+| `LeaseStoreDown` (warning) | `carmona_inference_lease_store_unavailable` is 1 on a replica for 1 m | Valkey does not answer that replica. Requests are still served (ADR 0001: degraded): the replica admits against its share of the slots and queue places, each divided by the `expected-replicas` setting (not by the replicas that run) and without the token budget, so the caps are only approximate. Check the valkey container and its health, then the replica's log for "lease store unavailable" |
+| `SealLagHigh` (warning) | `carmona_usage_seal_lag_seconds` is above 180 for 5 m (healthy: at most about 130) | usage-service is not sealing the windows that are due, so billing waits and the credit check runs on old balances. Nothing is lost. Check the usage log for seal errors, the database, and whether the seal job is held up behind another scheduled job |
+| `DebitLagHigh` (critical) | `carmona_billing_debit_lag_seconds` is above 300 for 5 m (healthy: at most about 190) | Sealed windows are not being debited, so a customer whose credit ran out is served longer than the 8-minute overshoot bound. Check the billing log for debit errors, whether usage-service answers it, and the database; a backlog drains 100 windows per run |
+| `LagGaugeMissing` (warning) | usage or billing answers its scrape but exports no lag gauge for 5 m | The service cannot compute its lag (the database, or for billing usage-service, does not answer), so `SealLagHigh` and `DebitLagHigh` read nothing and a stuck pipeline would pass unnoticed. Check the service's log and the database. A service that does not answer its scrape is `ServiceDown` |
+| `ReplicaUnhealthy` (warning) | `carmona_replica_health_state` is 1 for an engine replica, on any inference replica, for 1 m (only when `health.enabled`) | The health gate stopped sending requests to the replica because nobody answered it (three scrapes in a row, or three refused connections). With one replica every request is a 503 `engine_unavailable` and `EngineUnreachable` fires too. A loading engine is unreachable for minutes and returns after two answered scrapes: nothing to reset. Check the engine container and its log |
+| `ReplicaWentUnhealthy` (warning) | `increase(carmona_replica_health_transitions_total{to="unhealthy"}[10m]) > 0`, summed over the inference replicas, no `for` | An outage began and may have ended between two 15 s samples of the gauge. Once is an incident, a repeat is a flapping engine or a flaky link: look at the engine's restarts and uptime and at the network between inference and the engine |
+| `ReplicaDrainOverdue` (warning) | `carmona_replica_drain_overdue` is 1 (max over the inference replicas, never sum) for 2 m | A drained replica passed its grace with requests still running. Carmona never cuts them; the operator decides: wait (`GET /actuator/drain` shows `inFlight` and `drained`), or destroy the card and accept that the rest end with an error event and bill what they produced. The engine works; this is not a failure |
+| `EngineContractMismatch` (warning) | `carmona_engine_contract_ok` is 0 for a check of an engine replica (min over the inference replicas) for 5 m | The engine and Carmona's assumptions disagree; nothing is refused. The `check` label names it: `models` (served id not listed), `models_len` (`max_model_len` below the context window), `metrics` (a required family missing), `kv_tokens` (no KV-cache size), `capacity` (a full-context request takes more than `capacity-ratio` of the KV cache), `prefix_caching` (off, and the shared-prefix workload needs it). The WARN in the log has the numbers; it clears after the next recheck (10 m) once fixed |
+| `ControlTokensInContent` (info) | `increase(carmona_inference_control_tokens_total{class="hard"}[1h]) > 0` | Client text held a role-marker-like string (hard class). By default it is neutralized and served, so this is a signal: a document quoting a template, or an injection attempt. No organization is on the metric; ask the customer or look at the access log by time. Switching a model to `reject` waits for the GPU check G-05. The soft class (think and tool tags) never alerts: a client replaying reasoning sends it every turn |
+| `GuardRejections` (warning) | ten or more guard refusals (400) in 10 m for a model and code | A client keeps sending what the guard refuses: `invalid_role` (for example `developer`), `nesting_too_deep`, or `control_token_in_content` (only where a mode is `reject`). Each is a 400 for the customer: a new SDK or a changed template is the first suspect. The 400 text names the problem and never repeats the content |
 
 ## Gaps
 
@@ -123,11 +148,10 @@ Named, with the owner. None of these is worked around in a dashboard.
    `carmona_inference_reconcile_mismatch{model}` (1 = the check disagrees, 0 = it agrees; the tolerance
    stays in Java, not duplicated in PromQL) feeds `ReconciliationMismatch`, and the on-demand
    `GET /actuator/reconcile` carries the token delta.
-3. **Closed for the series, open for the alerts (pass 2).** The three revenue panels had no source; the code now
+3. **Closed (pass 2, alerts 2026-10-23).** The three revenue panels had no source; the code now
    publishes `carmona_usage_seal_lag_seconds`, `carmona_billing_debit_lag_seconds` and
-   `carmona_billing_no_credit_organizations`. No rule uses them yet: the ceilings (seal lag above grace +
-   seal-every, debit lag above grace + seal-every + debit-every) are in `Overshoot`, and an alert above them is the
-   bound made observable. See gap 8.
+   `carmona_billing_no_credit_organizations`. `SealLagHigh` and `DebitLagHigh` alert above the ceilings in
+   `Overshoot`, `LagGaugeMissing` covers a service that is up and reports neither. See gap 8.
 4. **No percentiles for the built-in HTTP metrics.** Micrometer publishes `http_server_requests_seconds`
    with `_count`, `_sum` and `_max` but no `_bucket` — so per-service p95/p99 is not computable until each
    service sets `management.metrics.distribution.percentiles-histogram.http.server.requests: true`. That is
@@ -146,15 +170,27 @@ Named, with the owner. None of these is worked around in a dashboard.
    percent usage" — a 0-1 ratio, not a percentage, so it must not be divided by 100. Checked directly
    against the running GPU container on 2026-10-05. `vllm:num_requests_running` and
    `vllm:num_requests_waiting` are correct as written in the brief.
-8. **No alert on the pass-2 gauges.** ADR 0001 says an alert fires when the cache store is down: the gauge
-   `carmona_inference_lease_store_unavailable` exists and no rule reads it (nor the two lag gauges). Rules to add, with
-   `rules.test.yml` cases: the lease gauge at 1 for 1 m; seal lag above grace + seal-every; debit lag above
-   grace + seal-every + debit-every. Nothing pages anybody until Alertmanager exists (HOST-12).
+8. **Closed (2026-10-23).** ADR 0001 says an alert fires when the cache store is down: `LeaseStoreDown` reads
+   `carmona_inference_lease_store_unavailable`, `SealLagHigh` and `DebitLagHigh` read the two lag gauges, each with
+   `rules.test.yml` cases at the three edges of its `for`. Still true: nothing pages anybody until Alertmanager
+   exists (HOST-12).
 9. **vLLM's abort counter is not a signal.** The simulated engine counts an aborted request
    (`finish_reason="abort"`); vLLM v0.30.0 leaves that series at 0. No rule or check that must also hold on vLLM reads it.
 10. **The GPU host is invisible until it exists.** The rented GPU adds a static `vllm` target, a node exporter and a GPU
    exporter (design: [inference-plan.md](inference-plan.md) §6); today there is no GPU, memory, temperature or
    throttling telemetry and `check-prometheus.sh` expects the DNS-discovered `vllm` job.
+
+11. **The first-output cold share has no panel yet.** `carmona_inference_first_output_seconds{cache}` separates a long
+   prompt's cold prefill (`none`) from a warm one (`full`). No alert reads it until Day A shows a baseline; the query to
+   look at on a GPU day is `histogram_quantile(0.95, sum by (le, cache) (rate(carmona_inference_first_output_seconds_bucket[15m])))`.
+   A panel belongs on the SLO board once there is a baseline to draw the line from.
+12. **The health gate, the drain and the control-token guard are unseen on a real engine.** Their metrics and the
+   alerts above were written from the Java and tested on hand-made series; GPU checks G-05, G-08 and G-13 are what
+   confirm the thresholds. `carmona_replica_health_*` does not exist while `health.enabled` is false, which is the default.
+13. **`engine_unavailable` is one code with two messages.** The health and drain gates answer it with "No engine replica is
+   available; retry shortly." and a `retry-after`; a refused or timed-out connection to the engine answers it with "The model
+   engine is unavailable; try again shortly.". Both are 503 and one series of `carmona_inference_requests_total`. The log line
+   or the message tells them apart; `ReplicaUnhealthy` and the drain state say which gate it is.
 
 ## Deliberately not built
 
