@@ -317,20 +317,14 @@ wait
 ## honest 503 engine_unavailable with retry-after (nothing is charged), and READY puts the engine back. No GPU needed: the gate
 ## sits in front of the lease, so the simulator shows it as well as vLLM does. The health gate (WP-08) is off by default and is not
 ## asserted here: it needs an engine to be killed, which compose.fleet.yaml and a drill do, not a smoke run.
-# inference-service has no curl (JRE image) and its management port is never published: the call is made from inside the container
-# with bash's /dev/tcp, as the compose healthcheck does. HTTP/1.0, so the server closes the connection when it has answered.
-# Prints the status line, the headers and the body; the status goes to $dcode and the body to $BODY.
-actuator() {   # actuator METHOD PATH [JSON]
-  "${DC[@]}" exec -T inference bash -c '
-    exec 3<>/dev/tcp/127.0.0.1/8081
-    printf "%s %s HTTP/1.0\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s" "$1" "$2" "${#3}" "$3" >&3
-    cat <&3' bash "$1" "$2" "${3:-}" | tr -d '\r'
-}
+# The management port (8081) is never published and the JRE image has no curl, so the call is made from the tools container, which is on the
+# compose network and has curl, as the reconcile call below is. Any inference-service replica will do: the states live in Valkey and every
+# replica reads them once a second. The status goes to $dcode and the body to $BODY.
 drain_call() {   # drain_call METHOD [JSON]
   local out
-  out=$(actuator "$1" /actuator/drain "${2:-}")
-  dcode=$(sed -nE '1s#^HTTP/[0-9.]+ ([0-9]{3}).*#\1#p' <<<"$out")
-  sed '1,/^$/d' <<<"$out" > "$BODY"
+  out=$("${DC[@]}" exec -T tools curl -s -w '\n%{http_code}' -X "$1" -H 'Content-Type: application/json' ${2:+-d "$2"} http://inference:8081/actuator/drain)
+  dcode=${out##*$'\n'}
+  printf '%s' "${out%$'\n'*}" > "$BODY"
 }
 # drain_set REPLICA STATE [EXTRA JSON FIELDS]: POSTs the state for that replica of $M; expects 200 and the state in the answer.
 drain_set() {
