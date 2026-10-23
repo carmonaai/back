@@ -906,7 +906,7 @@ tests:
           - exp_labels: {severity: warning, model: carmona/qwen3-4b, replica: "1"}
             exp_annotations:
               summary: "replica 1 of carmona/qwen3-4b is past its drain grace with requests still running for 2m"
-              description: >-
+              description: &drain-text >-
                 An operator drained this engine replica (POST /actuator/drain) and its grace has passed, but requests are still
                 running on it. Carmona never cuts them: it takes no new request and waits. GET /actuator/drain on the inference
                 management port shows inFlight and drained for the replica. Either wait for the streams, or destroy the card and
@@ -929,6 +929,31 @@ tests:
     input_series:
       - {series: 'carmona_replica_drain_overdue{job="inference", instance="10.0.0.2:8081", model="m1", replica="1"}', values: '0x40'}
       - {series: 'carmona_replica_drain_inflight{job="inference", instance="10.0.0.2:8081", model="m1", replica="1"}', values: '3x40'}
+    alert_rule_test:
+      - {eval_time: 10m, alertname: ReplicaDrainOverdue, exp_alerts: []}
+
+  # The reporters sample at their own moments (every 5 s) and one of them can be a JVM that has not sampled yet, or whose call to Valkey
+  # failed (NaN, never 0). One reporter that sees the overdue drain is enough, so the alert is max and not min or avg: a 0 from a
+  # reporter that has not caught up must not hide it, and a NaN is not an answer at all.
+  - name: ReplicaDrainOverdue fires when only one inference-service replica reports it, whatever the others say
+    interval: 15s
+    input_series:
+      - {series: 'carmona_replica_drain_overdue{job="inference", instance="10.0.0.2:8081", model="m1", replica="1"}', values: '1x20'}
+      - {series: 'carmona_replica_drain_overdue{job="inference", instance="10.0.0.3:8081", model="m1", replica="1"}', values: '0x20'}
+      - {series: 'carmona_replica_drain_overdue{job="inference", instance="10.0.0.4:8081", model="m1", replica="1"}', values: 'NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN'}
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: ReplicaDrainOverdue
+        exp_alerts:
+          - exp_labels: {severity: warning, model: m1, replica: "1"}
+            exp_annotations:
+              summary: "replica 1 of m1 is past its drain grace with requests still running for 2m"
+              description: *drain-text
+
+  - name: ReplicaDrainOverdue is silent when no reporter can say (NaN, Valkey does not answer)
+    interval: 15s
+    input_series:
+      - {series: 'carmona_replica_drain_overdue{job="inference", instance="10.0.0.2:8081", model="m1", replica="1"}', values: 'NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN'}
     alert_rule_test:
       - {eval_time: 10m, alertname: ReplicaDrainOverdue, exp_alerts: []}
 
@@ -1022,6 +1047,21 @@ tests:
       - {series: 'carmona_inference_control_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", class="soft", action="neutralized"}', values: '0x10 500x100'}
     alert_rule_test:
       - {eval_time: 30m, alertname: ControlTokensInContent, exp_alerts: []}
+
+  # One string is the signal: a client that quotes a chat template once, or one injection attempt, is already worth a look.
+  - name: ControlTokensInContent fires on a single hard-class string
+    interval: 1m
+    input_series:
+      - {series: 'carmona_inference_control_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", class="hard", action="neutralized"}', values: '0x10 1x100'}
+    alert_rule_test:
+      - {eval_time: 10m, alertname: ControlTokensInContent, exp_alerts: []}
+      - eval_time: 11m
+        alertname: ControlTokensInContent
+        exp_alerts:
+          - exp_labels: {severity: info, model: m1}
+            exp_annotations:
+              summary: "client text for m1 held a hard control-token string in the last hour"
+              description: *control-text
 
   # Rejections reach the client as a 400 each. One stray request is not a stuck client: ten in ten minutes is. `increase` extrapolates
   # to the window, so the line is read with a margin (12 fires, 5 does not) and not at the boundary.
