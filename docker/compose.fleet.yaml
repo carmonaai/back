@@ -1,0 +1,67 @@
+# Two named simulators instead of one, for the drills that need to address a replica: draining one while the other serves,
+# stopping one under load, watching ReplicaUnhealthy and ReplicaDrainOverdue fire and clear.
+#   docker compose -f compose.yaml -f compose.fleet.yaml up -d --build --wait
+#   (add -f compose.minio.yaml before it for smoke.sh; smoke.sh itself also runs on this stack: it drains every replica it finds)
+# The `fleet` profile of compose.yaml is not this: it puts N identical simulators behind a stand-in (engine-lb), so inference-service sees
+# one replica. `deploy.replicas` of one service name cannot be told apart either; inference-service needs one URL per replica, and a URL
+# is a name, so each simulator here is a service of its own. It is a drill stack, not a product component.
+#
+# Not for production, and not combined with compose.gpu.yaml (both turn the default `engine` off and replace inference's depends_on).
+x-sim: &sim
+  image: ${ENGINE_IMAGE:-carmona/llm-d-inference-sim:v0.11.4-disconnect.1}
+  pull_policy: never
+  # The same flags as `engine` in compose.yaml, kept in step by hand: change both. Each replica is the 4 running + 8 waiting simulator
+  # whose own queue never fills, because inference-service admits 4 slots + 2 queue places per replica (the model's slots and queue).
+  command:
+    - --model=carmona/qwen3-4b
+    - --port=8000
+    - --mode=echo
+    - --max-num-seqs=4
+    - --max-waiting-queue-length=8
+    - --max-model-len=4096
+    - --latency-calculator=constant
+    - --time-to-first-token=600ms
+    - --time-to-first-token-std-dev=100ms
+    - --inter-token-latency=24ms
+    - --inter-token-latency-std-dev=4ms
+    - --seed=42
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  mem_limit: 256m
+  stop_grace_period: 35s              # it drains in-flight streams on SIGTERM
+
+services:
+  # The default simulator is not started; nothing may wait for it.
+  engine:
+    profiles: ["simulator-off"]
+
+  # Both carry the network alias `engine`: Prometheus finds its `engine` job by DNS name (dns_sd_configs, one target per address), so the
+  # engine panels and EngineQueueSustained see two replicas, and the job is not empty because the default `engine` is off. inference-service
+  # reaches them by their own names, below.
+  engine-a:
+    <<: *sim
+    networks:
+      internal:
+        aliases: [engine]
+
+  engine-b:
+    <<: *sim
+    networks:
+      internal:
+        aliases: [engine]
+
+  inference:
+    environment:
+      # Two replicas of the model, each with the model's slots and queue (4 and 2). `replicas` supersedes `url`, so the single URL that
+      # compose.yaml sets stays and is ignored. As Spring binds a list from the environment: one variable per element.
+      CARMONA_INFERENCE_MODELS_0_REPLICAS_0_URL: http://engine-a:8000
+      CARMONA_INFERENCE_MODELS_0_REPLICAS_1_URL: http://engine-b:8000
+      # The health gate (WP-08) is off by default and costs nothing here: with it on, stopping one simulator takes its replica out of
+      # rotation within about 15 s and the other carries the traffic (ReplicaUnhealthy, ReplicaWentUnhealthy). A drill is where it is tried.
+      CARMONA_INFERENCE_HEALTH_ENABLED: "true"
+    depends_on: !override
+      valkey: { condition: service_healthy }
+      usage: { condition: service_healthy }
+      engine-a: { condition: service_started }
+      engine-b: { condition: service_started }
