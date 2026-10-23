@@ -139,6 +139,13 @@ nothing: the engine's own counters are real series today.
 | `carmona_inference_capacity` | gauge | `model`, `tier` | — |
 | `carmona_engine_requests_running`, `…_waiting`, `…_cache_usage` | gauge | `model` | — |
 | `carmona_inference_reconcile_mismatch` | gauge | `model` | — |
+| `carmona_inference_first_output_seconds` | timer | `model`, `cache` (`none`, `partial`, `full`) | the request-duration buckets |
+| `carmona_inference_finish_total` | counter | `model`, `reason` | — |
+| `carmona_engine_contract_ok` | gauge | `model`, `replica`, `check` | — |
+| `carmona_engine_slots`, `carmona_engine_queue_places` | gauge | `model` | — |
+| `carmona_replica_health_state`, `carmona_replica_health_transitions_total` | gauge, counter | `model`, `replica` / `model`, `to` | — |
+| `carmona_replica_drain_state`, `…_inflight`, `…_overdue` | gauge | `model`, `replica` | — |
+| `carmona_inference_control_tokens_total`, `carmona_inference_guard_rejected_total` | counter | `model` and a closed set of fixed words | — |
 
 The buckets are not Micrometer's defaults: a default timer stops at 30 seconds, and a TTFT past the last bucket
 is a p99 that reads as the bucket edge — the one number an operator most needs during an incident. `2` is
@@ -204,10 +211,20 @@ mean — plus a gateway row by `routeId`. **Carmona — revenue integrity** has 
 against `/v1` requests served, events rejected in the last hour, and a collapsed row for the four signals no
 service publishes yet.
 
-Seven alert rules, each with what an operator should do about it: `ServiceDown` (2 m), `EngineUnreachable`
-(1 m), `EngineQueueSustained` (2 m above the configured depth), `ReconciliationMismatch` (any occurrence),
-`UsageIngestionStalled` (5 m), `ErrorShareHigh` (5 % over 5 m) and `PayingTierRefusals` (5 % over 5 m on
-standard and enterprise — trial being refused is by design and is not this alert).
+Twenty alert rules, each with its own what-to-do text in `rules.yml`, repeated one row per alert in the
+[observability reference](https://github.com/carmonaai/back/blob/main/.claude/skills/carmona-architecture/references/observability.md).
+They fall in five groups. *Is it up:* `ServiceDown` (2 m), `ReplicatedServiceAbsent` (2 m), `ReplicaMissing`
+(1 m; the `inference`, `gateway`, `engine` and `vllm` jobs) and `EngineUnreachable` (1 m). *Is it fast enough:*
+`EngineQueueSustained` (2 m with the engine's waiting requests at the queue places inference-service admits — not a
+constant), `QueueWaitHigh` (p95 above 1 s for 10 m), `ErrorShareHigh` (5 % over 5 m) and `PayingTierRefusals` (5 %
+over 5 m on standard and enterprise — trial being refused is by design and is not this alert). *Is the money
+right:* `ReconciliationMismatch` (any occurrence), `UsageIngestionStalled` (5 m), `SealLagHigh` (180 s for 5 m),
+`DebitLagHigh` (300 s for 5 m) and `LagGaugeMissing` (a live service with no lag gauge for 5 m). *Is the cache store
+there:* `LeaseStoreDown` (1 m; a warning, because requests are still served on each replica's share). *The engine
+replicas and the request guard:* `ReplicaUnhealthy` (1 m), `ReplicaWentUnhealthy` (any transition in 10 m),
+`ReplicaDrainOverdue` (2 m), `EngineContractMismatch` (5 m), `ControlTokensInContent` (a signal, not a page) and
+`GuardRejections` (ten refusals in ten minutes). The metrics of the last group come from features that are off or
+neutral by default (the health gate is off), and an alert on a metric that does not exist stays silent.
 
 The engine's `/metrics` takes the engine key on llama.cpp, and Prometheus expands no environment variable in a
 scrape config. The container's entrypoint therefore writes the key from the environment to `/tmp/engine-key`
@@ -283,7 +300,7 @@ which is the goodput definition the benches already use.
 - [Reconciler.java](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Reconciler.java)
   — the tolerance, the engine counter mappings and the mismatch gauge.
 - [rules.yml](https://github.com/carmonaai/back/blob/main/docker/prometheus/rules.yml) — the recording rules and
-  all seven alerts, each with what an operator should do about it.
+  all twenty alerts, each with what an operator should do about it.
 - [prometheus.yml](https://github.com/carmonaai/back/blob/main/docker/prometheus/prometheus.yml) — the scrape
   jobs, the 15 s interval and the engine's token file.
 - [observability.md](https://github.com/carmonaai/back/blob/main/.claude/skills/carmona-architecture/references/observability.md)
