@@ -221,7 +221,11 @@ runbook for the rented card). `carmona_engine_contract_ok` appears once inferenc
 0 you can read with `min by (model, replica, check) (carmona_engine_contract_ok)`, names the check; the WARN in the
 inference-service log has the numbers. Fix the engine's flags and wait for the next recheck (10 m), or restart
 inference-service to look at once. With the health gate on, `ReplicaUnhealthy` must also be quiet: an engine that is
-still loading is out of rotation, and comes back by itself after two answered scrapes.
+still loading is out of rotation, and comes back by itself after two answered scrapes. One thing to expect on a real
+engine and not yet seen [INFER, G-01]: vLLM may create its token and prefix-cache counters only with the first request,
+and then `metrics` reads 0 on a fresh engine until a request exists and the next recheck has run (up to 10 m), which
+makes `EngineContractMismatch` fire after 5 m for a reason that is not a deployment error. If `metrics` is the only 0
+and the families it names in the WARN are those counters, go on to step 2 and look again after the warm-up.
 
 **2. Warm the shared prefix, once, before opening traffic.** The first request of the day pays the full cold
 prefill of the customer's long prefix (up to 30 s is what Day A accepts; more is a NO-GO for the card, not a timeout to
@@ -230,7 +234,7 @@ of the customer's organization**: inference-service sets `cache_salt` to the org
 cache is per organization, and a warm-up made from another organization warms nothing the customer can hit. It is a
 real request: it is billed and counted like any other (tell the customer, or grant the amount back). Until
 `prefill.ms-per-token` is set from the Day A cold curve, the first-token timeout is the plain 30 s (`ttft-timeout`), and
-a prefill that takes longer is cut and answers 504 `engine_timeout`: do not retry it, set the allowance first. Repeat
+a prefill that takes longer is cut and answers 503 `engine_timeout`: do not retry it, set the allowance first. Repeat
 the step after any engine restart; the cache does not survive one. `bench/workload/probe32k.py --prefix` measures
 the cold and warm times of the bench's synthetic prefix on Day A; it does not warm the customer's.
 Watch `carmona_inference_first_output_seconds{cache}`: the warm-up is one `cache="none"` sample and the customer's
@@ -269,7 +273,11 @@ returns after it ends or after 720 s, never sooner than the stream. Drain first 
 
 A drill with two replicas and no GPU: `docker compose -f compose.yaml -f compose.fleet.yaml up -d --build --wait` runs two
 named simulators (`engine-a`, `engine-b`) with the health gate on. Drain one and watch the other serve;
-`docker compose stop engine-a` under load shows `ReplicaWentUnhealthy` within a scrape or two, `ReplicaUnhealthy` after about a minute and a half, and the traffic moving to `engine-b`.
+`docker compose stop engine-a` under load moves the traffic to `engine-b` within about 15 seconds (the gate needs three
+unanswered scrapes of 5 s). Prometheus evaluates the rules once a minute, so `ReplicaWentUnhealthy` shows within about a
+minute and `ReplicaUnhealthy` (a `for` of 1 m, two evaluations) in two to three. `smoke.sh` runs on this stack too; its
+check that the engine goes idle after a client hangs up asks the name `engine`, which here answers with either
+simulator, so on the drill stack that one check can read the idle one and pass without having looked at the busy one.
 
 ## The memory reality
 

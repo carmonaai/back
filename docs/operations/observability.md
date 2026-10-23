@@ -139,7 +139,7 @@ nothing: the engine's own counters are real series today.
 | `carmona_inference_capacity` | gauge | `model`, `tier` | — |
 | `carmona_engine_requests_running`, `…_waiting`, `…_cache_usage` | gauge | `model` | — |
 | `carmona_inference_reconcile_mismatch` | gauge | `model` | — |
-| `carmona_inference_first_output_seconds` | timer | `model`, `cache` (`none`, `partial`, `full`) | the request-duration buckets |
+| `carmona_inference_first_output_seconds` | timer | `model`, `cache` (`none`, `partial`, `full`) | 0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 30, 45, 60, 90 (wider than TTFT: a cold 32k prefill takes tens of seconds) |
 | `carmona_inference_finish_total` | counter | `model`, `reason` | — |
 | `carmona_engine_contract_ok` | gauge | `model`, `replica`, `check` | — |
 | `carmona_engine_slots`, `carmona_engine_queue_places` | gauge | `model` | — |
