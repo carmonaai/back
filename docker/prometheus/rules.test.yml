@@ -366,3 +366,163 @@ tests:
       - {series: 'carmona_inference_queue_wait_seconds_bucket{le="+Inf", model="m1", tier="trial"}', values: '9x200'}
     alert_rule_test:
       - {eval_time: 15m, alertname: QueueWaitHigh, exp_alerts: []}
+
+  # --- Edge review of the alerts that were already here --------------------------------------------------------------
+  # Each alert gets the same three edges as the new ones: true for one scrape less than `for` never fires, true for `for`
+  # exactly fires, and a series that goes back to normal resolves. (The cases above only checked a time well past `for`.)
+
+  - name: ServiceDown fires after 2m exactly, not a scrape earlier, and resolves when the scrape answers
+    interval: 15s
+    input_series:
+      - {series: 'up{job="usage", instance="10.0.0.9:8081"}', values: '0x8 1x30'}
+    alert_rule_test:
+      - {eval_time: 1m45s, alertname: ServiceDown, exp_alerts: []}
+      - eval_time: 2m
+        alertname: ServiceDown
+        exp_alerts:
+          - exp_labels: {severity: critical, job: usage, instance: "10.0.0.9:8081"}
+            exp_annotations:
+              summary: "usage 10.0.0.9:8081 has not answered a scrape for 2m"
+              description: >-
+                Prometheus cannot reach 10.0.0.9:8081/actuator/prometheus (usage; one series per
+                replica for inference and gateway, so this names the replica). The container may be down,
+                still starting, or its management port not listening. Check the container's own health status
+                and its logs. No metrics for this service means no SLI either.
+      - {eval_time: 3m, alertname: ServiceDown, exp_alerts: []}
+
+  - name: ServiceDown does not fire when the scrape answers again before 2m
+    interval: 15s
+    input_series:
+      - {series: 'up{job="usage", instance="10.0.0.9:8081"}', values: '0x7 1x30'}
+    alert_rule_test:
+      - {eval_time: 2m, alertname: ServiceDown, exp_alerts: []}
+      - {eval_time: 5m, alertname: ServiceDown, exp_alerts: []}
+
+  # gateway is the one that never appeared; inference is present throughout.
+  - name: ReplicatedServiceAbsent fires after 2m exactly and resolves when the service has a target again
+    interval: 15s
+    input_series:
+      - {series: 'up{job="inference", instance="10.0.0.2:8081"}', values: '1x40'}
+      - {series: 'up{job="gateway", instance="10.0.0.4:8081"}', values: '_x10 1x30'}
+    alert_rule_test:
+      - {eval_time: 1m45s, alertname: ReplicatedServiceAbsent, exp_alerts: []}
+      - eval_time: 2m
+        alertname: ReplicatedServiceAbsent
+        exp_alerts:
+          - exp_labels: {severity: critical, job: gateway}
+            exp_annotations:
+              summary: "gateway has no scrape target at all for 2m"
+              description: >-
+                No replica of gateway resolves any more (removed, or never started), so Prometheus has no target
+                and no `up` series to alert on. Check `docker compose ps gateway`.
+      - {eval_time: 4m, alertname: ReplicatedServiceAbsent, exp_alerts: []}
+
+  - name: ReplicatedServiceAbsent does not fire when the target returns before 2m
+    interval: 15s
+    input_series:
+      - {series: 'up{job="inference", instance="10.0.0.2:8081"}', values: '1x40'}
+      - {series: 'up{job="gateway", instance="10.0.0.4:8081"}', values: '_x6 1x30'}
+    alert_rule_test:
+      - {eval_time: 2m, alertname: ReplicatedServiceAbsent, exp_alerts: []}
+      - {eval_time: 5m, alertname: ReplicatedServiceAbsent, exp_alerts: []}
+
+  # A stale marker ends a series at once (a container that went away), which is what makes the count drop at a known scrape.
+  # The 30 m maximum still holds the two replicas until the drop is 30 m old: that clearing, after an intended scale-down
+  # or a replacement, is the ponytail on the rule.
+  - name: ReplicaMissing fires after 1m exactly and clears 30m after the replica left
+    interval: 15s
+    input_series:
+      - {series: 'up{job="inference", instance="10.0.0.2:8081"}', values: '1x300'}
+      - {series: 'up{job="inference", instance="10.0.0.3:8081"}', values: '1x40 stale'}
+    alert_rule_test:
+      - {eval_time: 10m, alertname: ReplicaMissing, exp_alerts: []}
+      - {eval_time: 11m, alertname: ReplicaMissing, exp_alerts: []}
+      - eval_time: 11m15s
+        alertname: ReplicaMissing
+        exp_alerts:
+          - exp_labels: {severity: warning, job: inference}
+            exp_annotations:
+              summary: "inference has fewer scrape targets than it had in the last 30m"
+              description: >-
+                A replica of inference no longer resolves or no longer exists, and the rest still answer, so no `up == 0`
+                exists to alert on. Compare `docker compose ps inference` with the replicas you asked for.
+      - {eval_time: 41m, alertname: ReplicaMissing, exp_alerts: []}
+
+  - name: ReplicaMissing does not fire when the replica is back within a minute
+    interval: 15s
+    input_series:
+      - {series: 'up{job="inference", instance="10.0.0.2:8081"}', values: '1x300'}
+      - {series: 'up{job="inference", instance="10.0.0.3:8081"}', values: '1x40 stale _ _ 1x100'}
+    alert_rule_test:
+      - {eval_time: 12m, alertname: ReplicaMissing, exp_alerts: []}
+      - {eval_time: 20m, alertname: ReplicaMissing, exp_alerts: []}
+
+  # The GPU stack's engine is the `vllm` job: one target failing its scrape, and nothing else answering, is the outage.
+  - name: EngineUnreachable fires after 1m exactly on the vllm job and resolves when it answers
+    interval: 15s
+    input_series:
+      - {series: 'up{job="vllm", instance="10.0.0.5:8000"}', values: '0x4 1x40'}
+    alert_rule_test:
+      - {eval_time: 45s, alertname: EngineUnreachable, exp_alerts: []}
+      - eval_time: 1m
+        alertname: EngineUnreachable
+        exp_alerts:
+          - exp_labels: {severity: critical, job: vllm}
+            exp_annotations:
+              summary: "no model engine is reachable (vllm target down)"
+              description: >-
+                Every engine scrape is failing: inference-service will answer 503 once its one retry is spent.
+                Check the engine container (the real one downloads the model on first start, which is slow but
+                the container reports starting, not failing) and confirm the key in .env still matches the one
+                the engine was started with.
+      - {eval_time: 2m, alertname: EngineUnreachable, exp_alerts: []}
+
+  - name: EngineUnreachable does not fire when the vllm scrape answers again before 1m
+    interval: 15s
+    input_series:
+      - {series: 'up{job="vllm", instance="10.0.0.5:8000"}', values: '0x3 1x40'}
+    alert_rule_test:
+      - {eval_time: 1m, alertname: EngineUnreachable, exp_alerts: []}
+      - {eval_time: 5m, alertname: EngineUnreachable, exp_alerts: []}
+
+  # No engine target at all, then the vllm job appears (the card was rented and started): the absent branch resolves.
+  - name: EngineUnreachable with no engine target resolves when a vllm target appears
+    interval: 15s
+    input_series:
+      - {series: 'up{job="prometheus"}', values: '1x40'}
+      - {series: 'up{job="vllm", instance="10.0.0.5:8000"}', values: '_x10 1x30'}
+    alert_rule_test:
+      - {eval_time: 45s, alertname: EngineUnreachable, exp_alerts: []}
+      - eval_time: 1m
+        alertname: EngineUnreachable
+        exp_alerts:
+          - exp_labels: {severity: critical, job: engine}
+            exp_annotations:
+              summary: "no model engine is reachable (engine target down)"
+              description: >-
+                Every engine scrape is failing: inference-service will answer 503 once its one retry is spent.
+                Check the engine container (the real one downloads the model on first start, which is slow but
+                the container reports starting, not failing) and confirm the key in .env still matches the one
+                the engine was started with.
+      - {eval_time: 3m, alertname: EngineUnreachable, exp_alerts: []}
+
+  # ReconciliationMismatch has no `for`: the hourly reconcile is the only evidence and it is already a measurement over an
+  # hour, so a 1 fires at the first scrape that shows it. Any replica reporting it is enough (max by model).
+  - name: ReconciliationMismatch fires at the first scrape showing 1 and resolves when it reads 0
+    interval: 15s
+    input_series:
+      - {series: 'carmona_inference_reconcile_mismatch{job="inference", instance="10.0.0.2:8081", model="m1"}', values: '0x20'}
+      - {series: 'carmona_inference_reconcile_mismatch{job="inference", instance="10.0.0.3:8081", model="m1"}', values: '0x4 1x4 0x20'}
+    alert_rule_test:
+      - {eval_time: 1m, alertname: ReconciliationMismatch, exp_alerts: []}
+      - eval_time: 1m15s
+        alertname: ReconciliationMismatch
+        exp_alerts:
+          - exp_labels: {severity: critical, model: m1}
+            exp_annotations:
+              summary: "engine counters and stored usage disagree for m1"
+              description: >-
+                Tokens the engine processed are not in usage-service: they will never be billed. Call
+                GET /actuator/reconcile on inference-service (management port, internal network) for the delta,
+                and check usage-service's ingestion errors and the usage:events stream in Valkey.
+      - {eval_time: 3m, alertname: ReconciliationMismatch, exp_alerts: []}
