@@ -432,16 +432,28 @@ groups:
       - record: prompt_cache:tokens_rate_15m
         expr: sum by (model, mode) (rate(carmona_inference_prompt_cache_tokens_total[15m]))
 
+      # The hit ratio. Counters are created by their first increment, so a cache that never hits has a miss series and no hit series, and
+      # `hit / total` over a vector with no hit would be empty: silent exactly when the cache is dead. `or 0 * total` puts a zero hit rate
+      # on every model and mode that has traffic and no hit series, so the ratio reads 0. A model and mode with no traffic in the window
+      # has a total of 0 and the ratio is NaN, which no comparison passes.
       - record: prompt_cache:hit_ratio_15m
         expr: |
-          sum by (model, mode) (rate(carmona_inference_prompt_cache_tokens_total{result="hit"}[15m]))
+          (
+            sum by (model, mode) (rate(carmona_inference_prompt_cache_tokens_total{result="hit"}[15m]))
+              or
+            0 * sum by (model, mode) (rate(carmona_inference_prompt_cache_tokens_total[15m]))
+          )
             / sum by (model, mode) (rate(carmona_inference_prompt_cache_tokens_total[15m]))
 
       # The 30 minute reading, which is what the alert and the dashboard line compare with 0.30: a window long enough that one
       # long prompt does not move it, and the same number in both places.
       - record: prompt_cache:hit_ratio_30m
         expr: |
-          sum by (model, mode) (rate(carmona_inference_prompt_cache_tokens_total{result="hit"}[30m]))
+          (
+            sum by (model, mode) (rate(carmona_inference_prompt_cache_tokens_total{result="hit"}[30m]))
+              or
+            0 * sum by (model, mode) (rate(carmona_inference_prompt_cache_tokens_total[30m]))
+          )
             / sum by (model, mode) (rate(carmona_inference_prompt_cache_tokens_total[30m]))
 
       # The prompt tokens measured in the 30 m window, hit and miss together: the volume behind the 30 m ratio. increase() only counts

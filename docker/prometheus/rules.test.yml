@@ -1385,3 +1385,29 @@ tests:
       - {eval_time: 59m, alertname: PromptCacheHitRatioLow, exp_alerts: []}
       - {eval_time: 61m, alertname: PromptCacheHitRatioLow, exp_alerts: []}
       - {eval_time: 90m, alertname: PromptCacheHitRatioLow, exp_alerts: []}
+
+  # A cache that never hits: only the miss series exists, because a counter is created by its first increment and nothing was ever added
+  # to the hit one (or the engine reports no cached_tokens at all). `hit / total` over a vector with no hit series is an empty vector,
+  # which would make the alert silent exactly when the cache is dead. The ratio is 0, so the alert fires.
+  - name: PromptCacheHitRatioLow fires and the ratio reads 0 when the hit series does not exist
+    interval: 15s
+    input_series:
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="miss"}', values: '0+600000x400'}
+    promql_expr_test:
+      - expr: prompt_cache:hit_ratio_15m
+        eval_time: 31m
+        exp_samples:
+          - {labels: 'prompt_cache:hit_ratio_15m{model="m1", mode="sync"}', value: 0}
+      - expr: prompt_cache:hit_ratio_30m
+        eval_time: 31m
+        exp_samples:
+          - {labels: 'prompt_cache:hit_ratio_30m{model="m1", mode="sync"}', value: 0}
+    alert_rule_test:
+      - {eval_time: 15m, alertname: PromptCacheHitRatioLow, exp_alerts: []}
+      - eval_time: 15m15s
+        alertname: PromptCacheHitRatioLow
+        exp_alerts:
+          - exp_labels: {severity: info, model: m1, mode: sync}
+            exp_annotations:
+              summary: "m1 sync prompt cache hit ratio is 0% over 30m, below 30%, for 15m"
+              description: *cache-text
