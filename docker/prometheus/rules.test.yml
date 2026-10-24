@@ -1566,13 +1566,21 @@ tests:
 
   # The floor counts the tokens through a restart of inference-service: 312000 miss tokens in every 30 m, and the counter starts again from
   # 0 at 50m15s. increase() adds what was counted before the reset to what came after; a plain difference of the first and last value
-  # would read the drop as negative tokens and put the volume under the floor.
+  # would read the drop as negative tokens and put the volume under the floor. The recency reads through the reset too: a `delta` over the
+  # 5 m that holds the reset would be negative and lapse the alert until 54m45s, while it keeps firing at 52m.
   - name: PromptCacheHitRatioLow counts the floor through a counter reset
     interval: 15s
     input_series:
       - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="hit"}', values: '0x500'}
       - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="miss"}', values: '0+2600x200 0+2600x300'}
     alert_rule_test:
+      - eval_time: 52m
+        alertname: PromptCacheHitRatioLow
+        exp_alerts:
+          - exp_labels: {severity: info, model: m1, mode: sync}
+            exp_annotations:
+              summary: "m1 sync prompt cache hit ratio is 0% over 30m, below 30%, for 15m"
+              description: *cache-text
       - eval_time: 70m
         alertname: PromptCacheHitRatioLow
         exp_alerts:
@@ -1581,16 +1589,16 @@ tests:
               summary: "m1 sync prompt cache hit ratio is 0% over 30m, below 30%, for 15m"
               description: *cache-text
 
-  # The floor belongs to the model and the mode: m1 sync carries plenty of traffic at a healthy ratio, m1 batch is two cold requests of
-  # 32000 tokens (a ratio of 0 on 64000 tokens, far under the floor). A floor read per model would let the batch lane's two requests
-  # through on the strength of the sync lane's volume.
+  # The floor belongs to the model and the mode: m1 sync carries plenty of traffic at a healthy ratio, m1 batch is a cold trickle of 1000
+  # tokens per scrape (a ratio of 0 on 120000 tokens in 30 m, under the floor, and recent, so the recency does not silence it). A floor
+  # read per model would let the batch lane through on the strength of the sync lane's volume.
   - name: PromptCacheHitRatioLow applies the token floor to each mode on its own
     interval: 15s
     input_series:
       - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="hit"}', values: '0+480000x400'}
       - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="miss"}', values: '0+120000x400'}
       - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="batch", result="hit"}', values: '0x400'}
-      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="batch", result="miss"}', values: '0x20 32000x10 64000x400'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="batch", result="miss"}', values: '0+1000x400'}
     alert_rule_test:
       - {eval_time: 30m, alertname: PromptCacheHitRatioLow, exp_alerts: []}
       - {eval_time: 45m, alertname: PromptCacheHitRatioLow, exp_alerts: []}
