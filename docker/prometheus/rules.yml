@@ -462,10 +462,13 @@ groups:
         expr: sum by (model, mode) (increase(carmona_inference_prompt_cache_tokens_total[30m]))
 
       # Info: a signal about capacity and about how a customer builds prompts, not an outage. Fires when the 30 m hit ratio is under
-      # 0.30 for 15 m, on real traffic, unless the engine is known to have prefix caching off. Three things keep it quiet:
+      # 0.30 for 15 m, on real traffic that is going on, unless the engine is known to have prefix caching off. Four things keep it quiet:
       #  - the floor: 300000 prompt tokens measured in the window (ten requests of the 32000-token shape the card is sized for, or three
       #    hundred of 1000). A ratio of nothing is NaN and NaN is not under 0.30, but the ratio of one cold request is a clean 0, and the
-      #    first request of every daily window is cold by design;
+      #    first request of every daily window is cold by design. The floor alone does not cover a cold wave of ten prompts or more;
+      #  - the recency: some prompt tokens measured in the last 5 m. The 30 m ratio and the 30 m volume both stay true for up to 30
+      #    minutes after the last request, so without this the `for` is met by the window's memory alone and a cold burst that reaches the
+      #    floor, then silence, fires on an idle card. Here the alert is about traffic that is going on, and resolves 5 m after it stops;
       #  - the `for`: the window opens on an empty cache and the runbook warms it. If the window held only misses and every request hit
       #    from then on, the 30 m ratio would pass 0.30 after nine minutes (0.30 x 30 m); a slower warm-up takes longer, and the cold
       #    start case in rules.test.yml (8000 hit tokens a minute behind 256000 cold ones) is under 15 m too;
@@ -474,16 +477,20 @@ groups:
       #    it. Only a 0 silences, by model (min over the engine replicas and the inference-service replicas that report it: one replica
       #    without caching pollutes the model's ratio). Absent is not a 0: the gauge is absent while the check cannot be made, and on
       #    the simulator, which has no such label; there the ratio is the only signal there is.
-      # The floor is per model and mode (`and on (model, mode)`), the guard per model (`unless on (model)`). No series, no alert: until
-      # the first measured request creates the counter every record is empty.
+      # The floor and the recency are per model and mode (`and on (model, mode)`), the guard per model (`unless on (model)`). No series,
+      # no alert: until the first measured request creates the counter every record is empty.
       # ponytail: 0.30, the 300000 and the 15m are placeholders, tuned on Day A when the first measured hit ratio of this model exists;
-      # the rule is typed here, not derived from the capacity model.
+      # the rule is typed here, not derived from the capacity model. The 5m of the recency is a ceiling too: a gap of more than 5 m
+      # between two requests of one model and mode lapses it and restarts the `for`; at the traffic the card is sized for (a request
+      # every few seconds) it does not, and a stream that thin is not what this alert is about.
       - alert: PromptCacheHitRatioLow
         expr: |
           (
             (prompt_cache:hit_ratio_30m < 0.30)
               and on (model, mode)
             (prompt_cache:tokens_30m >= 300000)
+              and on (model, mode)
+            (sum by (model, mode) (increase(carmona_inference_prompt_cache_tokens_total[5m])) > 0)
           )
             unless on (model)
           (min by (model) (carmona_engine_contract_ok{check="prefix_caching"}) == 0)
@@ -496,8 +503,9 @@ groups:
             least 300000 prompt tokens behind that ratio. Capacity per card goes with 1 / (1 - hit ratio), so every point
             lost is customers the card no longer carries. The 0.30 line and the 300000-token floor are placeholders that
             the GPU day (Day A) tunes. It stays quiet while the series does not exist, while the traffic is under the floor,
-            and while the engine contract says prefix caching is off (carmona_engine_contract_ok{check="prefix_caching"}
-            reads 0: EngineContractMismatch names that case). What to do: confirm the engine flags first, prefix caching (the gauge above) and
+            when no prompt token was measured in the last 5 minutes (the 30 minute window remembers a burst long after it
+            ended; this alert is about traffic that is going on), and while the engine contract says prefix caching is off
+            (carmona_engine_contract_ok{check="prefix_caching"} reads 0: EngineContractMismatch names that case). What to do: confirm the engine flags first, prefix caching (the gauge above) and
             --enable-prompt-tokens-details (without it the engine reports no cached_tokens and every request reads as a miss).
             Then look at engine restarts (a restart empties the cache, and the first request of each prefix after it is cold) and at memory
             pressure (engine:cache_usage near 1, vllm:num_preemptions_total rising: old blocks are evicted to make room).
