@@ -6,10 +6,10 @@ platform measures, prices and does not promise about that.
 ## What it is
 
 When a request starts with the same tokens as an earlier one, the engine reuses the work it already did on
-them instead of computing them again. That is the prompt cache. For a customer who sends 30,000 tokens of which
-most never change, it decides what a request costs and how long its first token takes. The **prompt layout
-contract** is the six rules below that keep a prompt in a shape the cache can use. It is a rule for the
-customer's prompt, because only the customer knows which parts of it change.
+them instead of computing them again. That is the prompt cache, and for a customer who sends 30,000 tokens of
+which most never change it decides what a request costs and how long its first token takes. The **prompt layout
+contract** is the six rules below that keep a prompt in a shape the cache can use; only the customer knows
+which parts of its prompt change, so it is a rule for the customer.
 
 <figure class="cmn-figure">
 <div class="cmn-flow" markdown="0">
@@ -111,9 +111,9 @@ tokens were read back.</figcaption>
    id. A client cannot set it.
 3. **The engine cuts the prompt into blocks and hashes each one together with the hash of the block before
    it.** A block can only match if every block before it matched ([vLLM design page][vllm]).
-4. **Blocks that match are read back from memory.** Matching stops at the first block that differs.
-5. **Everything after that block is computed in prefill** and paid at the full input price.
-6. **The final usage chunk says how many prompt tokens were read back** (`cached_tokens`). A streaming client
+4. **Blocks that match are read back from memory, and matching stops at the first block that differs.**
+   Everything after it is computed in prefill and paid at the full input price.
+5. **The final usage chunk says how many prompt tokens were read back** (`cached_tokens`). A streaming client
    receives that chunk only if it sends `stream_options.include_usage`. Billing prices those tokens apart, and
    the check in rule 5 reads the same number.
 
@@ -130,13 +130,13 @@ tokens were read back.</figcaption>
    organization, so every API key of one organization shares one cache, and two organizations do not share one,
    even for an identical prompt. A model name is one engine, and a second name is a second, cold cache. The
    same happens when the alias `carmona/chat-standard` moves to another backing model, which is announced in
-   advance, and a model with several replicas has one cache per replica.
+   advance.
 5. **Check it.** Send the same request twice and read `usage.prompt_tokens_details.cached_tokens` on the
    second; a streaming request must send `stream_options.include_usage` to receive it. Then change one line at
    the start of the prompt and one at the end and compare. On a standard prefix cache the start loses almost
    everything and the end almost nothing; whether this engine does the same on a hybrid model is not yet
    measured `[UNVERIFIED]`, and [What Day A settles](#what-day-a-settles) says what each outcome would mean. The
-   cache is best effort. It is empty after an engine restart, old blocks are evicted under memory pressure,
+   cache is best effort: it is empty after an engine restart, old blocks are evicted under memory pressure,
    and the first request after the daily GPU window opens is cold by design (the
    [runbook](../operations/running.md) warms it with the customer's own prefix).
 6. **A change anywhere in the prompt invalidates the cache from the first changed block to the end.** Only full
@@ -145,18 +145,20 @@ tokens were read back.</figcaption>
    vLLM's source, and a Day A probe reads the real figure.
 
 [vllm]: https://docs.vllm.ai/en/latest/design/prefix_caching/
+[recipe]: https://recipes.vllm.ai/Qwen/Qwen3.6-35B-A3B
 
 That page describes vLLM's standard KV cache manager (read 2026-10-24). Qwen3.6 is a hybrid: 30 of its 40
 layers keep a fixed-size recurrent state instead of per-token keys and values, and prefix caching on such a
-model is off by default and called experimental by vLLM's own recipe. So **whether the cache works on this
-model at all, and how it behaves for a change in the middle of a prompt, are not yet measured**
-`[UNVERIFIED]`. The six rules hold either way: they are what any prefix cache needs. See
-[What Day A settles](#what-day-a-settles).
+model is off by default and called experimental by [vLLM's own recipe for this model][recipe] `[DOC]` (read
+2026-10-24: "currently experimental in "align" mode"). So **whether the cache works on this model at all, and
+how it behaves for a change in the middle of a prompt, are not yet measured** `[UNVERIFIED]`. The six rules
+hold either way: they are what any prefix cache needs. See [What Day A settles](#what-day-a-settles).
 
 ## A worked example
 
-The same clinic prompt twice, abbreviated. In the first, everything that repeats is on top and everything that
-varies is in the last turn. The history carries its old timestamps, stored as they were sent.
+The same clinic prompt twice, abbreviated, with the same tools and the same history. In both, the history keeps
+its old timestamps, stored as they were sent. In the first, everything that repeats is on top and everything
+that varies is in the last turn.
 
 ```json
 {
@@ -166,7 +168,7 @@ varies is in the last turn. The history carries its old timestamps, stored as th
     { "role": "system", "content": "You answer for a dental clinic. Rules: ... Opening hours: ... Price list: ..." },
     { "role": "user", "content": "[14:02] Hi, do you open on Saturdays?" },
     { "role": "assistant", "content": "We open on Saturdays from 8 to 12." },
-    { "role": "user", "content": "[14:09] Can I book Saturday at 9?\n(session 7f3a, patient: Ana)" }
+    { "role": "user", "content": "[14:09] Can I book Saturday at 9?\n(session 7f3a, patient: P1)" }
   ]
 }
 ```
@@ -178,11 +180,12 @@ computed again.
 ```json
 {
   "model": "carmona/chat-standard",
+  "tools": [ { "type": "function", "function": { "name": "list_free_slots", "...": "same schema, same order" } } ],
   "messages": [
-    { "role": "system", "content": "Now: 2026-10-24 14:09:31. Session 7f3a. Patient: Ana.\nYou answer for a dental clinic. Rules: ..." },
-    { "role": "user", "content": "Hi, do you open on Saturdays?" },
+    { "role": "system", "content": "Now: 2026-10-21 14:09:31. Session 7f3a. Patient: P1.\nYou answer for a dental clinic. Rules: ..." },
+    { "role": "user", "content": "[14:02] Hi, do you open on Saturdays?" },
     { "role": "assistant", "content": "We open on Saturdays from 8 to 12." },
-    { "role": "user", "content": "Can I book Saturday at 9?" }
+    { "role": "user", "content": "[14:09] Can I book Saturday at 9?" }
   ]
 }
 ```
@@ -191,30 +194,25 @@ computed again.
 
 | What changes | Why the match ends there | Do this instead |
 |---|---|---|
-| A date or time in the system prompt | the first block differs on every request | put it in the last turn |
-| A request, session or trace id, or a random value, near the top | same | keep ids in your own logs; the `user` field is accepted and ignored, so it is safe |
+| A date, time, request, session or trace id, or random value near the top | the first block differs on every request | put it in the last turn, or keep ids in your own logs; the `user` field is accepted and ignored, so it is safe |
 | The patient's or user's name in the system prompt | one prompt per person: the shared part is no longer shared | put it after the history |
 | History edited in place: summarised, a typo fixed, another whitespace or template | everything after the edit is a new prompt | append only; if you must summarise, do it rarely and in one step, and the next request pays once |
 | The oldest turns dropped to stay under a limit | the start of the history moves, so every history block changes (on a standard prefix cache the stable part above it still hits) | cut in large, rare steps, not one turn per request |
 | Tools reordered, or the keys of a tool schema reordered | the chat template renders tool definitions into the prompt text, so another order is other tokens (not yet checked for this model's template) `[UNVERIFIED]` | build the list once and keep it in one order |
 | `tools` or `tool_choice` toggled between requests | whether vLLM renders tools when `tool_choice` is `none` is `[UNVERIFIED]` | keep both fixed |
-| Retrieved snippets that differ per turn, placed before the history | per-request text above the shared part | place them in the new turn |
-| The model's reasoning replayed inside the history | the platform neutralises think tags in client text, so the engine reads other text than the model wrote | send back only `content` |
-| Another model name, or an API key of another organization | another engine, or another `cache_salt` | one model name and one organization per prompt family |
 
 What does not break it: sampling parameters (`temperature`, `seed`, `max_tokens`), `stream`, `service_tier`,
 `user` and `metadata`, how the request body is spaced or ordered outside `messages` and `tools`, and using
-several API keys of the same organization. None of them is part of the
-prompt, and vLLM's block hash covers the tokens plus extras such as LoRA ids, multimodal hashes and the cache
-salt ([vLLM design page][vllm]).
+several API keys of the same organization. None of them is part of the prompt, and vLLM's block hash covers
+the tokens plus extras such as LoRA ids, multimodal hashes and the cache salt ([vLLM design page][vllm]).
 
 ## What it costs and what it saves
 
 **Money.** Cached input is priced apart. `Price.cost` charges `(input − cached) × input price + cached × cached
 input price + output × output price`, where cached tokens are a subset of the input, and rounds once per window
-([Money](../data/money.md)). The only prices seeded today are placeholders for the two prototype models, where a
-cached token costs half of an input token (0.25 against 0.50 BRL per million for `carmona/qwen3-4b`). They say
-nothing about the commercial price card, which is set separately and which this page does not quote.
+([Money](../data/money.md)). The only prices seeded today are placeholders for the two prototype models (0.25
+against 0.50 BRL per million for a cached against an input token of `carmona/qwen3-4b`). They say nothing about
+the commercial price card, which is set separately and which this page does not quote.
 
 **Time.** A cold 32,000-token prompt takes seconds of prefill on the target card, at a prefill speed that is
 **not yet measured** `[UNVERIFIED]`. A request that hits the cache computes only the tokens after the match.
@@ -244,11 +242,10 @@ stays the billing count, estimates included. The hit ratio is `sum(rate(...{resu
 sum(rate(...))`. The series appears with the first measured request, and the rules and the alert stay silent
 while it does not exist, when traffic is below a floor, and when the engine contract check says prefix caching
 is off. The 0.30 threshold and the floor are placeholders that Day A tunes. The rules are in
-[`rules.yml`](https://github.com/carmonaai/back/blob/main/docker/prometheus/rules.yml).
-
-Metrics carry `model` and `mode` only, never an organization, so this is a fleet number. One customer's ratio
-is read from its usage events. If the engine's own ratio is high and the request-level one is near zero, check
-that the engine runs with `--enable-prompt-tokens-details` `[INFER]`.
+[`rules.yml`](https://github.com/carmonaai/back/blob/main/docker/prometheus/rules.yml). Metrics carry `model`
+and `mode` only, never an organization, so this is a fleet number; one customer's ratio is read from its usage
+events. If the engine's own ratio is high and the request-level one is near zero, check that the engine runs
+with `--enable-prompt-tokens-details` `[INFER]`.
 
 ## What the platform does and does not promise
 
@@ -256,8 +253,7 @@ that the engine runs with `--enable-prompt-tokens-details` `[INFER]`.
 
 - **Pass your prompt on as it is.** `ChatRequest` passes `messages` and `tools` through in the order sent and
   adds no text. The one change we make is `ControlTokenGuard` neutralising role markers and control tokens in
-  client text. It is a pure function of the text, so the same prompt gives the same bytes every time and the
-  cache is not affected.
+  client text. It is a pure function of the text, so it does not disturb the cache.
 - **Keep organizations apart.** That is the purpose of `cache_salt` ([Tenancy](../data/tenancy.md)), and by
   design the salt is part of the first block's hash ([vLLM design page][vllm]), so two organizations sending
   the same prompt cannot match each other. The check is that pair of requests, with the second organization
@@ -306,11 +302,12 @@ else.
 | 0.97 | 3% | 33x |
 
 **This is an upper bound from prefill alone, pending Day A.** The hit ratios are unmeasured on this engine, and
-if the cache does not work on this model the ratio is 0 and the first row applies. The table also leaves out the limits that bite first in
-the top rows: peak simultaneity, cold-start bursts, the time decode takes, and above all the cache's own
-memory, which holds only a limited number of long prefixes at once. Past that number old prefixes are evicted,
-the hit ratio falls, and the top rows are out of reach. The layout on this page decides which row a customer is
-on; it does not lift those limits. Figures for a particular card are not published here.
+if the cache does not work on this model the ratio is 0 and the first row applies. The table also leaves out
+the limits that bite first in the top rows: peak simultaneity, cold-start bursts, the time decode takes, and
+above all the cache's own memory, which holds only a limited number of long prefixes at once. Past that number
+old prefixes are evicted, the hit ratio falls, and the top rows are out of reach. The layout on this page
+decides which row a customer is on; it does not lift those limits. Figures for a particular card are not
+published here.
 
 ## Why it is like this
 
@@ -326,9 +323,6 @@ and the tests to pin, for no gain.
 **The salt is the organization, not the key.** A salt per key would give each application of one customer its
 own cold cache for the same prompt `[INFER]`. A salt shared across organizations is the timing side channel
 that [Tenancy](../data/tenancy.md) closes.
-
-**The hit counter counts tokens, once, from the final usage chunk.** Counting every request would treat "the
-engine did not say" as "no hit", and the ratio would read low exactly when a client hangs up early.
 
 ## What would change it
 
