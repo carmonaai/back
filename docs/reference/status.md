@@ -35,7 +35,7 @@ and all three were wrong:
 - *"The gateway's flood brake is per-replica, in memory."* It is not. The bucket is one Lua round trip in
   Valkey, shared by every replica; the in-memory bucket survives only on the fail-open path taken when Valkey
   itself is unreachable. See [the gateway](../services/gateway.md).
-- *"There is no observability."* There is: recording rules, seven alert rules and three provisioned
+- *"There is no observability."* There is: recording rules, twenty-one alert rules and three provisioned
   dashboards. What is missing is the alerting *destination*. See
   [observability](../operations/observability.md) and [known gaps](gaps.md).
 - *"The customer money endpoints still need gateway routes."* They have them. See

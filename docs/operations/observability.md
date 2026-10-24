@@ -11,7 +11,7 @@ measured, what the numbers mean, and — with the same weight — what is not me
   <title id="dobs-title">A metric's path from the service to an alert nobody is sent</title>
   <desc id="dobs-desc">inference-service publishes its indicators on the management port; the engine exposes
   its own counters. Prometheus scrapes both every fifteen seconds and evaluates its rule file every sixty
-  seconds, producing recording rules and twenty alerts. Grafana draws provisioned dashboards and lists those
+  seconds, producing recording rules and twenty-one alerts. Grafana draws provisioned dashboards and lists those
   alert rules and their firing state. There is no Alertmanager, so a firing rule reaches no destination.</desc>
 
   <defs>
@@ -51,7 +51,7 @@ measured, what the numbers mean, and — with the same weight — what is not me
   <g class="cmn-node cmn-node--accent" id="dobs-rules" aria-labelledby="dobs-rules-label">
     <rect x="350" y="80" width="120" height="58" rx="10"/>
     <text id="dobs-rules-label" x="410" y="100">rules.yml</text>
-    <text class="cmn-sub" x="410" y="118">7 alerts</text>
+    <text class="cmn-sub" x="410" y="118">21 alerts</text>
   </g>
 
   <g class="cmn-node cmn-node--accent" id="dobs-grafana" aria-labelledby="dobs-grafana-label">
@@ -112,7 +112,7 @@ Step 5 is where it stops: a firing rule reaches no destination, because none has
    same port that was never published and never routed before metrics existed.
 2. **Prometheus scrapes every service every 15 s**, one job per service so the `job` label carries the service
    name, plus the engine's own `/metrics` with a bearer token read from a file written at container start.
-3. **`rules.yml` is evaluated every 60 s**: eight recording rules (three latency, five engine) and twenty alerts.
+3. **`rules.yml` is evaluated every 60 s**: twelve recording rules (three latency, five engine, four prompt cache) and twenty-one alerts.
 4. **Grafana draws three provisioned dashboards** and lists the alert rules and their state, with
    `allowUiUpdates: false`, so a change made in the browser does not survive the next restart.
 5. **Nothing leaves the machine.** There is no Alertmanager and no destination, so a firing rule is a colour on
@@ -146,6 +146,7 @@ nothing: the engine's own counters are real series today.
 | `carmona_replica_health_state`, `carmona_replica_health_transitions_total` | gauge, counter | `model`, `replica` / `model`, `to` | — |
 | `carmona_replica_drain_state`, `…_inflight`, `…_overdue` | gauge | `model`, `replica` | — |
 | `carmona_inference_control_tokens_total`, `carmona_inference_guard_rejected_total` | counter | `model` and a closed set of fixed words | — |
+| `carmona_inference_prompt_cache_tokens_total` | counter | `model`, `mode`, `result` (`hit`, `miss`) | — |
 
 The buckets are not Micrometer's defaults: a default timer stops at 30 seconds, and a TTFT past the last bucket
 is a p99 that reads as the bucket edge — the one number an operator most needs during an incident. `2` is
@@ -153,6 +154,14 @@ present explicitly because the SLO is "TTFT ≤ 2 s". The timers publish buckets
 quantiles because Micrometer's Prometheus registry stops publishing `publishPercentiles` as soon as a timer
 carries histogram boundaries, and client-side quantiles do not aggregate across replicas anyway;
 `histogram_quantile()` over the buckets is what the dashboards and rules compute.
+
+`carmona_inference_prompt_cache_tokens_total` is the request-level measure of the prefix cache: for each request whose final engine usage
+chunk was seen, the prompt tokens the engine served from its cache (`hit`) and the rest (`miss`). It is counted once per request and only
+when that chunk came, because the engine reports cached tokens only there: a request cut before it would read as a miss for lack of
+news and pull the ratio down. It is not the billed input, which stays `carmona_inference_tokens_total{kind="input"}`, estimates
+included. A series appears with the first measured request. The hit ratio is the share of `hit` in the sum, by model and mode, and
+capacity per card goes with 1 / (1 − ratio): the number that decides whether one card carries 3 customers or 30 for long-prefix
+traffic, and the one a customer can break without knowing (a timestamp near the top of a prompt invalidates every block after it).
 
 `code` carries the refusal or failure reason — `model_busy`, `rate_limit_exceeded`, `resource_unavailable`,
 `context_length_exceeded` — and `none` for a request that ran and ended. `outcome` is `ok`, `error` or
@@ -205,15 +214,17 @@ dashboards and the Prometheus alert list from files, capped at 384m/0.5 cpu.
 
 **Carmona — SLO & golden signals** has availability, request rate and error share; TTFT p50/p95/p99 against
 the 2 s line and TTFT goodput; ITL p95 against 100 ms; queue wait; whole-request p95/p99; in-flight against
-capacity; engine running/waiting and KV cache; and tokens per second by mode and kind. **Carmona — service
+capacity; engine running/waiting and KV cache; tokens per second by mode and kind; engine preemptions; and, in a row of its own, the
+prompt cache hit ratio (30 m and 15 m, against the 0.30 line of the alert) and the prompt tokens per second split into hit and miss.
+**Carmona — service
 RED** has one repeated row per service — rate by route, error share against the 5 % line, duration max and
 mean — plus a gateway row by `routeId`. **Carmona — revenue integrity** has 402s served, usage events received
 against `/v1` requests served, events rejected in the last hour, and a collapsed row for the four signals no
 service publishes yet.
 
-Twenty alert rules, each with its own what-to-do text in `rules.yml`, repeated one row per alert in the
+Twenty-one alert rules, each with its own what-to-do text in `rules.yml`, repeated one row per alert in the
 [observability reference](https://github.com/carmonaai/back/blob/main/.claude/skills/carmona-architecture/references/observability.md).
-They fall in five groups. *Is it up:* `ServiceDown` (2 m), `ReplicatedServiceAbsent` (2 m), `ReplicaMissing`
+They fall in six groups. *Is it up:* `ServiceDown` (2 m), `ReplicatedServiceAbsent` (2 m), `ReplicaMissing`
 (1 m; the `inference`, `gateway`, `engine` and `vllm` jobs) and `EngineUnreachable` (1 m). *Is it fast enough:*
 `EngineQueueSustained` (2 m with the engine's waiting requests at the queue places inference-service admits — not a
 constant), `QueueWaitHigh` (p95 above 1 s for 10 m), `ErrorShareHigh` (5 % over 5 m) and `PayingTierRefusals` (5 %
@@ -223,8 +234,16 @@ right:* `ReconciliationMismatch` (any occurrence), `UsageIngestionStalled` (5 m)
 there:* `LeaseStoreDown` (1 m; a warning, because requests are still served on each replica's share). *The engine
 replicas and the request guard:* `ReplicaUnhealthy` (1 m), `ReplicaWentUnhealthy` (any transition in 10 m),
 `ReplicaDrainOverdue` (2 m), `EngineContractMismatch` (5 m), `ControlTokensInContent` (a signal, not a page) and
-`GuardRejections` (ten refusals in ten minutes). The metrics of the last group come from features that are off or
-neutral by default (the health gate is off), and an alert on a metric that does not exist stays silent.
+`GuardRejections` (ten refusals in ten minutes). The metrics of those come from features that are off or
+neutral by default (the health gate is off), and an alert on a metric that does not exist stays silent. *Is the cache doing its job:*
+`PromptCacheHitRatioLow` (a signal, not a page): under 30 % of the measured prompt tokens served from the prefix cache over 30 m,
+for 15 m, with at least 300000 tokens behind the ratio. It stays quiet while the counter does not exist, while the traffic is under
+that floor, and while the engine contract says prefix caching is off (`EngineContractMismatch` names that case). The 0.30 line, the
+floor and the 15 m are placeholders that the GPU day (Day A) tunes. What to do, in order: confirm the engine flags
+(`carmona_engine_contract_ok{check="prefix_caching"}`, and `--enable-prompt-tokens-details`, without which the engine reports no
+cached tokens and every request reads as a miss), look at engine restarts and at memory pressure (`engine:cache_usage` near 1,
+preemptions), check the customer's prompt layout against `docs/inference/prompt-caching.md`, and read the split of
+`carmona_inference_first_output_seconds` by `cache` (`none`, `partial`, `full`). The playbook in full is the alert's row in the reference.
 
 The engine's `/metrics` takes the engine key on llama.cpp, and Prometheus expands no environment variable in a
 scrape config. The container's entrypoint therefore writes the key from the environment to `/tmp/engine-key`
@@ -300,7 +319,7 @@ which is the goodput definition the benches already use.
 - [Reconciler.java](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Reconciler.java)
   — the tolerance, the engine counter mappings and the mismatch gauge.
 - [rules.yml](https://github.com/carmonaai/back/blob/main/docker/prometheus/rules.yml) — the recording rules and
-  all twenty alerts, each with what an operator should do about it.
+  all twenty-one alerts, each with what an operator should do about it.
 - [prometheus.yml](https://github.com/carmonaai/back/blob/main/docker/prometheus/prometheus.yml) — the scrape
   jobs, the 15 s interval and the engine's token file.
 - [observability.md](https://github.com/carmonaai/back/blob/main/.claude/skills/carmona-architecture/references/observability.md)

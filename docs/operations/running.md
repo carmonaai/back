@@ -245,7 +245,11 @@ and `QueueWaitHigh` say it is full. A 503 `engine_unavailable` has two sources w
 gates answer "No engine replica is available; retry shortly." with a `retry-after` (a replica is unhealthy or drained;
 nothing was charged, the request never reached the engine), and a refused or timed-out connection to the engine
 answers "The model engine is unavailable; try again shortly." (the engine did not answer). The `ErrorShareHigh` alert
-counts both under one `code`; the message and the two replica alerts say which it was.
+counts both under one `code`; the message and the two replica alerts say which it was. `PromptCacheHitRatioLow` (a signal,
+not a page) says the prefix cache is not carrying the load: under 30 % of the measured prompt tokens served from it over 30
+minutes, for 15, on at least 300000 tokens. It is quiet for the cold start of the window (the warm-up of step 2, the first
+requests of each prefix) and while the engine contract reports prefix caching off. Its playbook is the alert's row in the
+observability reference; the 0.30 line and the floor are placeholders until Day A.
 
 **4. Before destroying the instance, drain it.**
 
