@@ -240,8 +240,8 @@ not empty: that chunk is the only one that carries `cached_tokens`, so a request
 a miss for lack of news and bias the ratio down. It does not replace `carmona_inference_tokens_total`, which
 stays the billing count, estimates included. The hit ratio is `sum(rate(...{result="hit"})) /
 sum(rate(...))`. The series appears with the first measured request, and the rules and the alert stay silent
-while it does not exist, when traffic is below a floor, and when the engine contract check says prefix caching
-is off. The 0.30 threshold and the floor are placeholders that Day A tunes. The rules are in
+while it does not exist, when traffic is below a floor, when no prompt token was measured in the last 5 minutes,
+and when the engine contract check says prefix caching is off. The 0.30 threshold and the floor are placeholders that Day A tunes. The rules are in
 [`rules.yml`](https://github.com/carmonaai/back/blob/main/docker/prometheus/rules.yml). Metrics carry `model`
 and `mode` only, never an organization, so this is a fleet number; one customer's ratio is read from its usage
 events. If the engine's own ratio is high and the request-level one is near zero, check that the engine runs
