@@ -235,8 +235,8 @@ right:* `ReconciliationMismatch` (any occurrence), `UsageIngestionStalled` (5 m)
 there:* `LeaseStoreDown` (1 m; a warning, because requests are still served on each replica's share). *The engine
 replicas and the request guard:* `ReplicaUnhealthy` (1 m), `ReplicaWentUnhealthy` (any transition in 10 m),
 `ReplicaDrainOverdue` (2 m), `EngineContractMismatch` (5 m), `ControlTokensInContent` (a signal, not a page) and
-`GuardRejections` (ten refusals in ten minutes). The metrics of those come from features that are off or
-neutral by default (the health gate is off), and an alert on a metric that does not exist stays silent. *Is the cache doing its job:*
+`GuardRejections` (ten refusals in ten minutes). The metrics of the replica and guard alerts come from features
+that are off or neutral by default (the health gate is off), and an alert on a metric that does not exist stays silent. *Is the cache doing its job:*
 `PromptCacheHitRatioLow` (a signal, not a page): under 30 % of the measured prompt tokens served from the prefix cache over 30 m,
 for 15 m, with at least 300000 tokens behind the ratio. It stays quiet while the counter does not exist, while the traffic is under
 that floor, when no prompt token was measured in the last 5 minutes (the 30 m window remembers a burst for 30 minutes, the alert is about

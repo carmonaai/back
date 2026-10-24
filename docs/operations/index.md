@@ -170,7 +170,7 @@ in [Running it locally](running.md), which is written to be followed top to bott
 | Command | Environment | Passes when | Typical duration |
 |---|---|---|---|
 | `mvn -B clean verify` | any | every module builds, unit tests and Testcontainers ITs pass | a few minutes |
-| `bash smoke.sh` | CPU stack (CI) or GPU stack | every assertion in 443 lines holds, including the canary sweep | 2–4 minutes |
+| `bash smoke.sh` | CPU stack (CI) or GPU stack | every assertion in about 600 lines holds, including the canary sweep | 2–4 minutes |
 | `bash bench.sh` | GPU stack only | enterprise goodput ≥ 95%, every trial 429 under 100 ms, no TTFT timeouts | ~90 s |
 | `bash batch-bench.sh` | GPU stack only | a 10,000-line batch completes with one usage event per line, killed mid-call | ~20 minutes |
 | `bash revenue-check.sh` | either | every balance equals the sum of its ledger | seconds |

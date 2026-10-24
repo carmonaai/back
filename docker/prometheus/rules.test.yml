@@ -1299,7 +1299,9 @@ tests:
               summary: "m1 sync prompt cache hit ratio is 0% over 30m, below 30%, for 15m"
               description: *cache-text
 
-  # The line is inclusive: 2500 tokens per scrape is exactly 300000 in a full window, and 2499 is 299880.
+  # The line is inclusive: 2500 tokens per scrape is exactly 300000 in a full window, and 2499 is 299880. 2500 x 119 intervals extrapolated
+  # by 1800/1785 is 300000 exactly only by the float arithmetic of the pinned prom/prometheus image: after a bump of that image, check the
+  # rounding first if this case fails (gap 14 of the observability reference).
   - name: PromptCacheHitRatioLow counts exactly the floor and not a scrape's worth under it
     interval: 15s
     input_series:
@@ -1434,7 +1436,9 @@ tests:
 
   # The line is 0.30 and strict. Three models on 9000 tokens per scrape (1.08 million in 30 m): 29% hits fires, exactly 30% does not (the
   # alert says "under"), 31% does not. 2700 of 9000 comes out as exactly 0.3 at every evaluation, which 180000 of 600000 does not (a
-  # float, divided twice), so a `<=` in the rule fails here.
+  # float, divided twice), so a `<=` in the rule fails here. Exact by the float arithmetic of the pinned prom/prometheus image: after a
+  # bump of that image, if this case fails or starts to pass for a `<=`, check the rounding before the rule (the mutants of the group
+  # are the check; the mutation script is outside this repo, see gap 14 of the observability reference).
   - name: PromptCacheHitRatioLow fires at 29 percent and stays quiet at exactly 30 and at 31
     interval: 15s
     input_series:
