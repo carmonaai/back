@@ -235,7 +235,7 @@ which is the number that shows the operator what the layout is worth. A customer
 | Recording rules `prompt_cache:hit_ratio_15m`, `prompt_cache:hit_ratio_30m`, `prompt_cache:tokens_rate_15m`, `prompt_cache:tokens_30m` | the hit ratio over 15 and 30 minutes, and the measured-token rate and count behind it, per `model` and `mode` | exists |
 | Alert `PromptCacheHitRatioLow` | the 30-minute hit ratio is under 0.30 with real traffic behind it; informational | exists |
 
-The counter is added once per request, and only when the engine's final usage chunk was seen and the prompt was
+The counter is added once per engine run, and only when the engine's final usage chunk was seen and the prompt was
 not empty: that chunk is the only one that carries `cached_tokens`, so a request cut before it would count as
 a miss for lack of news and bias the ratio down. It does not replace `carmona_inference_tokens_total`, which
 stays the billing count, estimates included. The hit ratio is `sum(rate(...{result="hit"})) /
