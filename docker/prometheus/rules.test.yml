@@ -1163,6 +1163,12 @@ tests:
           - {labels: 'prompt_cache:hit_ratio_30m{model="m1", mode="sync"}', value: 0.25}
           - {labels: 'prompt_cache:hit_ratio_30m{model="m1", mode="batch"}', value: 0.75}
           - {labels: 'prompt_cache:hit_ratio_30m{model="m2", mode="sync"}', value: 0.3}
+      - expr: prompt_cache:tokens_30m
+        eval_time: 31m
+        exp_samples:
+          - {labels: 'prompt_cache:tokens_30m{model="m1", mode="sync"}', value: 360000}
+          - {labels: 'prompt_cache:tokens_30m{model="m1", mode="batch"}', value: 180000}
+          - {labels: 'prompt_cache:tokens_30m{model="m2", mode="sync"}', value: 180000}
 
   # The two windows are different windows. Counters start at 10 million so no rate is cut at zero. For the first 15 minutes every scrape
   # adds 59000 miss tokens, then every scrape adds 60000 hit tokens. At 30 m the last 15 m is all hits (ratio 1) and the 30 m window
@@ -1182,14 +1188,14 @@ tests:
         exp_samples:
           - {labels: 'prompt_cache:hit_ratio_30m{model="m1", mode="sync"}', value: 0.5}
 
-  # 4000 tokens/s measured (60000 per scrape, far over any floor), 20% of them hits for the first 20 minutes, then 80%. Pending from the
-  # first scrape that has a rate (15 s), so it fires at 15m15s and not at 15m. The 30 m window forgets the low ratio after the switch:
+  # 40000 tokens/s measured (600000 per scrape: over the floor from the first scrape that has a rate), 20% of them hits for the first
+  # 20 minutes, then 80%. Pending from that scrape (15 s), so it fires at 15m15s and not at 15m. The 30 m window forgets the low ratio after the switch:
   # the share of hits in it passes 30% five minutes later, so it is resolved long before 30 m.
   - name: PromptCacheHitRatioLow fires after 15m below 30 percent, names model and mode, and resolves when the hit ratio recovers
     interval: 15s
     input_series:
-      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="hit"}', values: '0+12000x80 1008000+48000x200'}
-      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="miss"}', values: '0+48000x80 3852000+12000x200'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="hit"}', values: '0+120000x80 10080000+480000x200'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="miss"}', values: '0+480000x80 38520000+120000x200'}
     alert_rule_test:
       - {eval_time: 15m, alertname: PromptCacheHitRatioLow, exp_alerts: []}
       - eval_time: 15m15s
@@ -1231,3 +1237,63 @@ tests:
     alert_rule_test:
       - {eval_time: 30m, alertname: PromptCacheHitRatioLow, exp_alerts: []}
       - {eval_time: 60m, alertname: PromptCacheHitRatioLow, exp_alerts: []}
+
+  # --- the traffic floor: a ratio of nothing, or of a handful of requests, is not a finding -------------------------------------------
+  # The floor is 300000 prompt tokens measured in the 30 m window: ten requests of the 32000-token shape the card is sized for, or three
+  # hundred of 1000 tokens. Every case below has a hit ratio of 0, which fires without the floor.
+
+  # 2400 tokens per scrape is 288000 in 30 m: under the floor for as long as it lasts.
+  - name: PromptCacheHitRatioLow stays quiet under the token floor even at a hit ratio of 0
+    interval: 15s
+    input_series:
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="hit"}', values: '0x400'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="miss"}', values: '0+2400x400'}
+    alert_rule_test:
+      - {eval_time: 45m, alertname: PromptCacheHitRatioLow, exp_alerts: []}
+      - {eval_time: 90m, alertname: PromptCacheHitRatioLow, exp_alerts: []}
+
+  # One cold prefill (32000 tokens) after the window opens and nothing else: the first request of the day, warm-up included, is cold by
+  # design. The counters then stay flat. The request is in the 30 m window until 32m15s, at a ratio of 0 and a tenth of the floor, so
+  # without the floor the alert would fire from 17m to 32m.
+  - name: PromptCacheHitRatioLow stays quiet on the one cold request of a new window
+    interval: 15s
+    input_series:
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="hit"}', values: '0x400'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="miss"}', values: '0x8 32000x400'}
+    alert_rule_test:
+      - {eval_time: 25m, alertname: PromptCacheHitRatioLow, exp_alerts: []}
+      - {eval_time: 45m, alertname: PromptCacheHitRatioLow, exp_alerts: []}
+
+  # 2600 tokens per scrape is 312000 in 30 m, just over the floor: it holds from about the 29th minute, so the alert is still pending at
+  # 40 m and firing at 60 m.
+  - name: PromptCacheHitRatioLow fires just over the token floor
+    interval: 15s
+    input_series:
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="hit"}', values: '0x400'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="miss"}', values: '0+2600x400'}
+    alert_rule_test:
+      - {eval_time: 40m, alertname: PromptCacheHitRatioLow, exp_alerts: []}
+      - eval_time: 60m
+        alertname: PromptCacheHitRatioLow
+        exp_alerts:
+          - exp_labels: {severity: info, model: m1, mode: sync}
+            exp_annotations:
+              summary: "m1 sync prompt cache hit ratio is 0% over 30m, below 30%, for 15m"
+              description: *cache-text
+
+  # The line is inclusive: 2500 tokens per scrape is exactly 300000 in a full window, and 2499 is 299880.
+  - name: PromptCacheHitRatioLow counts exactly the floor and not a scrape's worth under it
+    interval: 15s
+    input_series:
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="hit"}', values: '0x400'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="miss"}', values: '0+2500x400'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m2", mode="sync", result="hit"}', values: '0x400'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m2", mode="sync", result="miss"}', values: '0+2499x400'}
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: PromptCacheHitRatioLow
+        exp_alerts:
+          - exp_labels: {severity: info, model: m1, mode: sync}
+            exp_annotations:
+              summary: "m1 sync prompt cache hit ratio is 0% over 30m, below 30%, for 15m"
+              description: *cache-text

@@ -444,12 +444,23 @@ groups:
           sum by (model, mode) (rate(carmona_inference_prompt_cache_tokens_total{result="hit"}[30m]))
             / sum by (model, mode) (rate(carmona_inference_prompt_cache_tokens_total[30m]))
 
+      # The prompt tokens measured in the 30 m window, hit and miss together: the volume behind the 30 m ratio. increase() only counts
+      # what was scraped, so in the first minutes of a series it is what has been seen so far, not a full window.
+      - record: prompt_cache:tokens_30m
+        expr: sum by (model, mode) (increase(carmona_inference_prompt_cache_tokens_total[30m]))
+
       # Info: a signal about capacity and about how a customer builds prompts, not an outage. for 15m, because the daily window starts
       # with an empty cache: the first requests of each prefix are cold by design and the runbook warms it, and once hits resume the
       # 30 m ratio crosses 0.30 within about nine minutes (0.30 x 30 m), so a cold start never holds the condition for 15.
-      # ponytail: 0.30 and the 15m are placeholders, tuned on Day A when the first measured hit ratio of this model exists.
+      # The floor: 300000 prompt tokens in the window (ten requests of the 32000-token shape the card is sized for, or three hundred of
+      # 1000) before a ratio means anything. A ratio of nothing is NaN and NaN is not under 0.30, but the ratio of one cold request
+      # is a clean 0, and the first request of every window is cold.
+      # ponytail: 0.30, the 300000 and the 15m are placeholders, tuned on Day A when the first measured hit ratio of this model exists.
       - alert: PromptCacheHitRatioLow
-        expr: prompt_cache:hit_ratio_30m < 0.30
+        expr: |
+          (prompt_cache:hit_ratio_30m < 0.30)
+            and on (model, mode)
+          (prompt_cache:tokens_30m >= 300000)
         for: 15m
         labels: {severity: info}
         annotations:
