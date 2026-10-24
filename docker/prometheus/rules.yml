@@ -507,6 +507,9 @@ groups:
             ended; this alert is about traffic that is going on), and while the engine contract says prefix caching is off
             (carmona_engine_contract_ok{check="prefix_caching"} reads 0: EngineContractMismatch names that case). What to do: confirm the engine flags first, prefix caching (the gauge above) and
             --enable-prompt-tokens-details (without it the engine reports no cached_tokens and every request reads as a miss).
+            No gauge flags that missing flag on its own, but the engine's own hit ratio does tell it from a cold cache:
+            carmona_engine_prefix_cache_hit_ratio{model} clearly above 0 while this ratio is near 0 means the flag is missing,
+            both near 0 means a cold or dead cache (the engine ratio is since the last scrape and absent when no query came in).
             Then look at engine restarts (a restart empties the cache, and the first request of each prefix after it is cold) and at memory
             pressure (engine:cache_usage near 1, vllm:num_preemptions_total rising: old blocks are evicted to make room).
             Then the customer's prompt layout against docs/inference/prompt-caching.md: anything that changes per request

@@ -138,6 +138,7 @@ nothing: the engine's own counters are real series today.
 | `carmona_inference_inflight` | gauge | `model` | — |
 | `carmona_inference_capacity` | gauge | `model`, `tier` | — |
 | `carmona_engine_requests_running`, `…_waiting`, `…_cache_usage` | gauge | `model` | — |
+| `carmona_engine_prefix_cache_hit_ratio` | gauge | `model` | — |
 | `carmona_inference_reconcile_mismatch` | gauge | `model` | — |
 | `carmona_inference_first_output_seconds` | timer | `model`, `cache` (`none`, `partial`, `full`) | 0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 30, 45, 60, 90 (wider than TTFT: a cold 32k prefill takes tens of seconds) |
 | `carmona_inference_finish_total` | counter | `model`, `reason` | — |
@@ -241,7 +242,9 @@ for 15 m, with at least 300000 tokens behind the ratio. It stays quiet while the
 that floor, and while the engine contract says prefix caching is off (`EngineContractMismatch` names that case). The 0.30 line, the
 floor and the 15 m are placeholders that the GPU day (Day A) tunes. What to do, in order: confirm the engine flags
 (`carmona_engine_contract_ok{check="prefix_caching"}`, and `--enable-prompt-tokens-details`, without which the engine reports no
-cached tokens and every request reads as a miss), look at engine restarts and at memory pressure (`engine:cache_usage` near 1,
+cached tokens and every request reads as a miss; no gauge flags that flag, but `carmona_engine_prefix_cache_hit_ratio{model}`, the
+engine's own hit ratio, clearly above 0 while this alert's ratio is near 0 means the flag is missing, and both near 0 means a cold or
+dead cache), look at engine restarts and at memory pressure (`engine:cache_usage` near 1,
 preemptions), check the customer's prompt layout against `docs/inference/prompt-caching.md`, and read the split of
 `carmona_inference_first_output_seconds` by `cache` (`none`, `partial`, `full`). The playbook in full is the alert's row in the reference.
 
