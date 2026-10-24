@@ -1215,8 +1215,9 @@ tests:
                 lost is customers the card no longer carries. The 0.30 line and the 300000-token floor are placeholders that
                 the GPU day (Day A) tunes. It stays quiet while the series does not exist, while the traffic is under the floor,
                 and while the engine contract says prefix caching is off (carmona_engine_contract_ok{check="prefix_caching"}
-                reads 0: EngineContractMismatch names that case). What to do: confirm that flag first. Then look at engine
-                restarts (a restart empties the cache, and the first request of each prefix after it is cold) and at memory
+                reads 0: EngineContractMismatch names that case). What to do: confirm the engine flags first, prefix caching (the gauge above) and
+                --enable-prompt-tokens-details (without it the engine reports no cached_tokens and every request reads as a miss).
+                Then look at engine restarts (a restart empties the cache, and the first request of each prefix after it is cold) and at memory
                 pressure (engine:cache_usage near 1, vllm:num_preemptions_total rising: old blocks are evicted to make room).
                 Then the customer's prompt layout against docs/inference/prompt-caching.md: anything that changes per request
                 above the shared part (a timestamp, an id, a name) breaks the cache from that point on.
