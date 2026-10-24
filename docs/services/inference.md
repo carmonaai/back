@@ -115,6 +115,7 @@ Two settings are always the platform's, whatever the client asked:
   `include_usage` flag decides only whether *the client* sees the usage block; billing's copy is not optional.
 - **`cache_salt` is the organization id.** Each tenant gets its own prefix cache, so one organization cannot
   time another's cached prompts — and since the field is not in the allowlist, a client cannot set it either.
+  How a customer lays out a prompt to hit its own cache is on [Prompt caching](../inference/prompt-caching.md).
 
 `priority` follows the tier: `enterprise` 0, `standard` 10, `trial` 20, and 30 for a batch line or a flex
 request. vLLM runs lower values first and preempts them last, so this is the whole of the tier's scheduling
