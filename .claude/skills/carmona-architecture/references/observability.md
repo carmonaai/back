@@ -47,7 +47,7 @@ finding; a substitute metric that animates is a lie.
 | Reconciliation (engine counters vs stored usage) | any disagreement | `Reconciler`: more than max(0.5%, (slots + queue) × context) |
 | Usage ingestion | ≥ 1 stored event per served `/v1` request | Every answered request is billable |
 | Metering lag (seal and debit) | seal lag ≤ grace + seal-every (120 s at the defaults), debit lag ≤ grace + seal-every + debit-every (180 s) | `Overshoot` in the `billing` library: the 8-minute overshoot bound minus the 5-minute window. `SealLagHigh` (180 s) and `DebitLagHigh` (300 s) alert above them; `LagGaugeMissing` when a live service reports no gauge |
-| Prompt cache hit ratio | no SLO yet; `PromptCacheHitRatioLow` alerts under 0.30 over 30 m with at least 300000 measured prompt tokens (placeholders until Day A) | Capacity per card goes with 1 / (1 − hit ratio): for 32000-token requests, 75 an hour per customer, on one RTX 8000, about 3 customers at 0, 7 at 0.6 and 30 at 0.9 [CALC, pending Day A]. The only request-level measure of it is `carmona_inference_prompt_cache_tokens_total` |
+| Prompt cache hit ratio | no SLO yet; `PromptCacheHitRatioLow` alerts under 0.30 over 30 m with at least 300000 measured prompt tokens (placeholders until Day A) | Capacity per card goes with 1 / (1 − hit ratio): for 32000-token requests, 75 an hour per customer, on one RTX 8000, about 3 customers at 0, 6 to 9 at 0.6 and 22 to 38 at 0.9 [CALC, pending Day A]. The only request-level measure of it is `carmona_inference_prompt_cache_tokens_total` |
 | Per-service RED latency | no SLO | Plan §8 sets SLOs per model class on the inference path, not per internal service |
 
 No number above was invented for this stack: each is the one the code, the compose file or a recorded bench

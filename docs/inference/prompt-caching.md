@@ -231,9 +231,9 @@ which is the number that shows the operator what the layout is worth. A customer
 | `cachedInputTokens` in the usage event | the same number per request, summed per organization and window for billing | exists |
 | `carmona_inference_first_output_seconds{cache}` | how long the first output took, by share cached | exists |
 | `carmona_engine_prefix_cache_hit_ratio` | the engine's own hit ratio per scrape, from its counters | exists in `Metrics` |
-| `carmona_inference_prompt_cache_tokens_total{model,mode,result}` | prompt tokens served from the cache (`hit`) and the rest (`miss`) | exists |
-| Recording rules `prompt_cache:hit_ratio_15m`, `prompt_cache:hit_ratio_30m`, `prompt_cache:tokens_rate_15m`, `prompt_cache:tokens_30m` | the hit ratio over 15 and 30 minutes, and the measured-token rate and count behind it, per `model` and `mode` | exists |
-| Alert `PromptCacheHitRatioLow` | the 30-minute hit ratio is under 0.30 with real traffic behind it; informational; what to do when it fires is in [Metering what runs](../operations/observability.md#the-prometheus-and-grafana-stack) | exists |
+| `carmona_inference_prompt_cache_tokens_total{model,mode,result}` | prompt tokens served from the cache (`hit`) and the rest (`miss`) | exists once the inference-service change is deployed |
+| Recording rules `prompt_cache:hit_ratio_15m`, `prompt_cache:hit_ratio_30m`, `prompt_cache:tokens_rate_15m`, `prompt_cache:tokens_30m` | the hit ratio over 15 and 30 minutes, and the measured-token rate and count behind it, per `model` and `mode` | exists; empty until the counter above is deployed |
+| Alert `PromptCacheHitRatioLow` | the 30-minute hit ratio is under 0.30 with real traffic behind it; informational; what to do when it fires is in [Metering what runs](../operations/observability.md#the-prometheus-and-grafana-stack) | exists; quiet until the counter is deployed |
 
 The counter is added once per engine run, and only when the engine's final usage chunk was seen and the prompt was
 not empty: that chunk is the only one that carries `cached_tokens`, so a request cut before it would count as
