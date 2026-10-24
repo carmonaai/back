@@ -455,12 +455,21 @@ groups:
       # The floor: 300000 prompt tokens in the window (ten requests of the 32000-token shape the card is sized for, or three hundred of
       # 1000) before a ratio means anything. A ratio of nothing is NaN and NaN is not under 0.30, but the ratio of one cold request
       # is a clean 0, and the first request of every window is cold.
+      # The guard: carmona_engine_contract_ok{check="prefix_caching"} (WP-03) is 0 when the engine reports enable_prefix_caching=False.
+      # Then the ratio is 0 by construction, the cause is a flag and EngineContractMismatch (check prefix_caching) is the alert for it.
+      # Only a 0 silences, by model (min over the engine replicas and the inference-service replicas that report it: one replica
+      # without caching pollutes the model's ratio). Absent is not a 0: the gauge is absent while the check cannot be made, and on the
+      # simulator, which has no such label; there the ratio is the only signal there is.
       # ponytail: 0.30, the 300000 and the 15m are placeholders, tuned on Day A when the first measured hit ratio of this model exists.
       - alert: PromptCacheHitRatioLow
         expr: |
-          (prompt_cache:hit_ratio_30m < 0.30)
-            and on (model, mode)
-          (prompt_cache:tokens_30m >= 300000)
+          (
+            (prompt_cache:hit_ratio_30m < 0.30)
+              and on (model, mode)
+            (prompt_cache:tokens_30m >= 300000)
+          )
+            unless on (model)
+          (min by (model) (carmona_engine_contract_ok{check="prefix_caching"}) == 0)
         for: 15m
         labels: {severity: info}
         annotations:

@@ -1297,3 +1297,91 @@ tests:
             exp_annotations:
               summary: "m1 sync prompt cache hit ratio is 0% over 30m, below 30%, for 15m"
               description: *cache-text
+
+  # --- the engine contract guard: with prefix caching off the ratio is 0 by construction, and that case has its own signal ----------------
+  # carmona_engine_contract_ok{check="prefix_caching"} is 1 (on), 0 (off) and ABSENT when the engine does not say (the check cannot be
+  # made, or the simulator, which has no such label). Only a 0 silences this alert, and only for that model.
+
+  - name: PromptCacheHitRatioLow stays quiet while the engine contract says prefix caching is off
+    interval: 15s
+    input_series:
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="hit"}', values: '0x400'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="miss"}', values: '0+600000x400'}
+      - {series: 'carmona_engine_contract_ok{job="inference", instance="10.0.0.2:8081", model="m1", replica="0", check="prefix_caching"}', values: '0x400'}
+      - {series: 'carmona_engine_contract_ok{job="inference", instance="10.0.0.2:8081", model="m1", replica="0", check="models"}', values: '1x400'}
+    alert_rule_test:
+      - {eval_time: 20m, alertname: PromptCacheHitRatioLow, exp_alerts: []}
+      - {eval_time: 60m, alertname: PromptCacheHitRatioLow, exp_alerts: []}
+
+  # Another failing check says nothing about the cache, and a cache the engine says is on has no excuse: both fire. (The cases above
+  # and below have the gauge absent, which also fires.)
+  - name: PromptCacheHitRatioLow still fires when prefix caching is on and when another contract check fails
+    interval: 15s
+    input_series:
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="hit"}', values: '0x400'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="miss"}', values: '0+600000x400'}
+      - {series: 'carmona_engine_contract_ok{job="inference", instance="10.0.0.2:8081", model="m1", replica="0", check="prefix_caching"}', values: '1x400'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m2", mode="sync", result="hit"}', values: '0x400'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m2", mode="sync", result="miss"}', values: '0+600000x400'}
+      - {series: 'carmona_engine_contract_ok{job="inference", instance="10.0.0.2:8081", model="m2", replica="0", check="capacity"}', values: '0x400'}
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: PromptCacheHitRatioLow
+        exp_alerts:
+          - exp_labels: {severity: info, model: m1, mode: sync}
+            exp_annotations:
+              summary: "m1 sync prompt cache hit ratio is 0% over 30m, below 30%, for 15m"
+              description: *cache-text
+          - exp_labels: {severity: info, model: m2, mode: sync}
+            exp_annotations:
+              summary: "m2 sync prompt cache hit ratio is 0% over 30m, below 30%, for 15m"
+              description: *cache-text
+
+  # The guard is per model: m1 has caching off (both modes are silenced, whichever inference-service replica reports it), m2 has a 0
+  # on one of its two engine replicas (the model's ratio is polluted by that one: silenced too), m3 is fine and is the one that fires.
+  - name: PromptCacheHitRatioLow guard silences the model whose engine has caching off, in every mode, and no other model
+    interval: 15s
+    input_series:
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="hit"}', values: '0x400'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="batch", result="hit"}', values: '0x400'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m2", mode="sync", result="hit"}', values: '0x400'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m3", mode="sync", result="hit"}', values: '0x400'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m3", mode="batch", result="hit"}', values: '0x400'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="miss"}', values: '0+600000x400'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="batch", result="miss"}', values: '0+600000x400'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m2", mode="sync", result="miss"}', values: '0+600000x400'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m3", mode="sync", result="miss"}', values: '0+600000x400'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m3", mode="batch", result="miss"}', values: '0+600000x400'}
+      - {series: 'carmona_engine_contract_ok{job="inference", instance="10.0.0.2:8081", model="m1", replica="0", check="prefix_caching"}', values: '0x400'}
+      - {series: 'carmona_engine_contract_ok{job="inference", instance="10.0.0.3:8081", model="m1", replica="0", check="prefix_caching"}', values: '0x400'}
+      - {series: 'carmona_engine_contract_ok{job="inference", instance="10.0.0.2:8081", model="m2", replica="0", check="prefix_caching"}', values: '1x400'}
+      - {series: 'carmona_engine_contract_ok{job="inference", instance="10.0.0.2:8081", model="m2", replica="1", check="prefix_caching"}', values: '0x400'}
+      - {series: 'carmona_engine_contract_ok{job="inference", instance="10.0.0.2:8081", model="m3", replica="0", check="prefix_caching"}', values: '1x400'}
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: PromptCacheHitRatioLow
+        exp_alerts:
+          - exp_labels: {severity: info, model: m3, mode: sync}
+            exp_annotations:
+              summary: "m3 sync prompt cache hit ratio is 0% over 30m, below 30%, for 15m"
+              description: *cache-text
+          - exp_labels: {severity: info, model: m3, mode: batch}
+            exp_annotations:
+              summary: "m3 batch prompt cache hit ratio is 0% over 30m, below 30%, for 15m"
+              description: *cache-text
+
+  # An engine that was started without caching and is fixed: the check reads 0 for 45 minutes (no alert), then 1 as the hits come back.
+  # The 30 m ratio is still under 0.30 for about 14 minutes after the fix (misses leave the window as hits enter it), shorter than the
+  # 15m `for`, so the old window never turns into an alert. (Per minute: 160000 miss tokens before, 80000 hit tokens after.)
+  - name: PromptCacheHitRatioLow does not fire on the tail of the old window once the engine is fixed
+    interval: 15s
+    input_series:
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="hit"}', values: '0x180 20000+20000x300'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="miss"}', values: '0+40000x180 7200000x300'}
+      - {series: 'carmona_engine_contract_ok{job="inference", instance="10.0.0.2:8081", model="m1", replica="0", check="prefix_caching"}', values: '0x180 1x300'}
+    alert_rule_test:
+      - {eval_time: 44m, alertname: PromptCacheHitRatioLow, exp_alerts: []}
+      - {eval_time: 52m, alertname: PromptCacheHitRatioLow, exp_alerts: []}
+      - {eval_time: 59m, alertname: PromptCacheHitRatioLow, exp_alerts: []}
+      - {eval_time: 61m, alertname: PromptCacheHitRatioLow, exp_alerts: []}
+      - {eval_time: 90m, alertname: PromptCacheHitRatioLow, exp_alerts: []}
