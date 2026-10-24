@@ -1127,7 +1127,7 @@ tests:
                 A replica of vllm no longer resolves or no longer exists, and the rest still answer, so no `up == 0`
                 exists to alert on. Compare `docker compose ps vllm` with the replicas you asked for.
 
-  # --- P0-1b: the prompt cache hit ratio (carmona_inference_prompt_cache_tokens_total, counted once per request by inference-service) ----
+  # --- P0-1b: the prompt cache hit ratio (carmona_inference_prompt_cache_tokens_total, counted once per engine run whose final usage was seen, by inference-service) ----
   # The counter has the labels model, mode and result (hit, miss); every inference-service replica counts its own requests, so the rules
   # sum the replicas. Values below are per 15 s scrape; at 31 m both the 15 m and the 30 m window are full, so a rate is the slope.
 
