@@ -247,7 +247,7 @@ floor and the 15 m are placeholders that the GPU day (Day A) tunes. What to do, 
 cached tokens and every request reads as a miss; no gauge flags that flag, but `carmona_engine_prefix_cache_hit_ratio{model}`, the
 engine's own hit ratio, clearly above 0 while this alert's ratio is near 0 means the flag is missing, and both near 0 means a cold or
 dead cache), look at engine restarts and at memory pressure (`engine:cache_usage` near 1,
-preemptions), check the customer's prompt layout against `docs/inference/prompt-caching.md`, and read the split of
+preemptions), check the customer's prompt layout against [the prompt layout contract](../inference/prompt-caching.md), and read the split of
 `carmona_inference_first_output_seconds` by `cache` (`none`, `partial`, `full`). The playbook in full is the alert's row in the reference.
 
 The engine's `/metrics` takes the engine key on llama.cpp, and Prometheus expands no environment variable in a
