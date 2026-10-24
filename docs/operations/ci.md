@@ -283,7 +283,7 @@ refused, and **Settings → Pages → Source** must be *Deploy from a branch*, b
 keep a Java version in step. The integration test is what actually needs to run, and only `back` can run it —
 it is the only repository that sees all thirteen modules at once.
 
-**The full stack, on every pull request.** Starting fourteen containers and running 443 lines of smoke test
+**The full stack, on every pull request.** Starting fourteen containers and running about 600 lines of smoke test
 takes minutes, and it is the only check that catches a broken migration, a route predicate that no longer
 matches its path, or a filter that stopped stripping a header.
 
@@ -315,4 +315,4 @@ token that cannot write anything.
 - [.gitmodules](https://github.com/carmonaai/back/blob/main/.gitmodules) — the repositories the token has to
   be able to read.
 - [smoke.sh](https://github.com/carmonaai/back/blob/main/docker/smoke.sh) — what the workflow is actually
-  asserting, in 443 lines.
+  asserting, in about 600 lines.

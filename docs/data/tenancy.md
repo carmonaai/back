@@ -186,7 +186,8 @@ whether tenant A had recently sent a given prefix, one request at a time.
 tier's `priority`. Neither field is in the request's field allowlist, so a client cannot set either; both are
 written into a fresh upstream object built from the allowlisted fields. The salt is the organization id, not a
 secret — it does not need to be one, because its job is to partition the cache, and the organization id is
-already the partition key the rest of the platform uses.
+already the partition key the rest of the platform uses. What a customer does to hit its own cache is on
+[Prompt caching](../inference/prompt-caching.md).
 
 ## Per-organization rate buckets
 

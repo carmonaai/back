@@ -114,7 +114,7 @@ queue.</figcaption>
 6. **Each token goes back down the same connection**, through the relay, to the client that asked for it —
    four requests being served at once produce four interleaved streams, not one batch result.
 
-## The three pages here
+## The four pages here
 
 <div class="grid cards" markdown>
 
@@ -139,6 +139,13 @@ queue.</figcaption>
     [Capacity and fairness](capacity.md) explains C and q, the tier shares, the per-organization cap and the
     honest ceiling on all of them.
 
+-   **Why a long prompt can be cheap**
+
+    ---
+
+    [Prompt caching](prompt-caching.md) gives the six-rule layout contract that keeps the start of a prompt
+    identical, what the platform measures about it and what it does not promise.
+
 </div>
 
 ## The model of how inference works here
@@ -161,6 +168,10 @@ gets a 429 with a retry delay. What reaches the engine is already bounded, which
 standard 10, trial 20, batch and flex 30 — vLLM runs lower values first) and `cache_salt` set to the
 organization id. The second one is not a performance knob: without it, one tenant could measure how warm
 another tenant's prefix cache is by watching its own first-token latency.
+
+**The start of the prompt is the unit of reuse.** The engine reads back the part of a prompt that matches an
+earlier request, from the first token on, so what a customer puts first decides what a 30,000-token request
+costs. The layout rules are on [Prompt caching](prompt-caching.md).
 
 **Usage comes from the engine, per step.** Every request asks the engine for `stream_options.include_usage`
 and `continuous_usage_stats`, so the real prompt and completion token counts arrive on the stream that is

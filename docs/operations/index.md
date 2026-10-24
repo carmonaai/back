@@ -13,7 +13,7 @@ is already running.
   containers and waits for their health checks. The smoke test drives the whole stack through the gateway.
   Two further checks run against the same stack: a load bench on the GPU and a check of the books. Prometheus
   scrapes every service's management port and the engine's own metrics endpoint every fifteen seconds, Grafana
-  draws the provisioned dashboards, and twenty alert rules are evaluated with nowhere to send them.</desc>
+  draws the provisioned dashboards, and twenty-one alert rules are evaluated with nowhere to send them.</desc>
 
   <defs>
     <marker id="dops-arrow-flow" viewBox="0 0 10 10" refX="9" refY="5"
@@ -85,7 +85,7 @@ is already running.
   <g class="cmn-node cmn-node--accent" id="dops-rules" aria-labelledby="dops-rules-label">
     <rect x="530" y="176" width="110" height="56" rx="10"/>
     <text id="dops-rules-label" x="585" y="196">rules.yml</text>
-    <text class="cmn-sub" x="585" y="214">7 alerts</text>
+    <text class="cmn-sub" x="585" y="214">21 alerts</text>
   </g>
 
   <!-- Payloads -->
@@ -126,7 +126,7 @@ images, starts the fourteen containers and waits for their health checks before 
 driving the running stack through the gateway. Steps 4 and 5 are the two checks that need a running stack and
 a reason to run them — the GPU load bench and the books. Step 6 is the metrics flow, which is asynchronous and
 independent of every check: Prometheus scrapes each service's management port and the engine's own `/metrics`
-every 15 s. Step 7 is Grafana drawing the provisioned dashboards, and `rules.yml` evaluating twenty alert rules
+every 15 s. Step 7 is Grafana drawing the provisioned dashboards, and `rules.yml` evaluating twenty-one alert rules
 with nowhere to send them.</figcaption>
 </figure>
 
@@ -149,7 +149,7 @@ with nowhere to send them.</figcaption>
    any balance differs from the sum of its ledger.
 6. **Prometheus scrapes** every service's `:8081/actuator/prometheus` and the engine's `/metrics` every 15 s.
    Nothing is published: the metrics stay on the internal network, like the port they come from.
-7. **Grafana draws three provisioned dashboards and lists the twenty alert rules** Prometheus evaluates. No
+7. **Grafana draws three provisioned dashboards and lists the twenty-one alert rules** Prometheus evaluates. No
    notification leaves the machine, because no destination has been chosen.
 
 ## What it is
@@ -170,7 +170,7 @@ in [Running it locally](running.md), which is written to be followed top to bott
 | Command | Environment | Passes when | Typical duration |
 |---|---|---|---|
 | `mvn -B clean verify` | any | every module builds, unit tests and Testcontainers ITs pass | a few minutes |
-| `bash smoke.sh` | CPU stack (CI) or GPU stack | every assertion in 443 lines holds, including the canary sweep | 2–4 minutes |
+| `bash smoke.sh` | CPU stack (CI) or GPU stack | every assertion in about 600 lines holds, including the canary sweep | 2–4 minutes |
 | `bash bench.sh` | GPU stack only | enterprise goodput ≥ 95%, every trial 429 under 100 ms, no TTFT timeouts | ~90 s |
 | `bash batch-bench.sh` | GPU stack only | a 10,000-line batch completes with one usage event per line, killed mid-call | ~20 minutes |
 | `bash revenue-check.sh` | either | every balance equals the sum of its ledger | seconds |
