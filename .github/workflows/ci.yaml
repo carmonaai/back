@@ -36,7 +36,7 @@ jobs:
           persist-credentials: false
 
       # The modules are private sibling repos GITHUB_TOKEN can't read. CARMONAI_TOKEN is a
-      # fine-grained token, Contents: read-only on the module repos only (not back).
+      # fine-grained token, Contents: read-only on the module repos and on bench (not back).
       - name: Fetch the modules
         env:
           TOKEN: ${{ secrets.CARMONAI_TOKEN }}
