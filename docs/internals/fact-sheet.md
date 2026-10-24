@@ -233,7 +233,7 @@ console, and no Kubernetes or second replica. Password resets have a per-IP thro
 **The flood brake is Valkey-backed** (one Lua token bucket, shared by replicas) and answers an OpenAI-shaped
 429 with `retry-after` and `retry-after-ms`; only its fail-open path keeps an in-memory bucket, for the case
 where Valkey itself is unreachable. **Observability exists**: `docker/prometheus/rules.yml` holds the
-recording rules and 7 alerts and `docker/grafana/dashboards/` the three dashboards, all built 2026-10-05;
+recording rules and 21 alerts and `docker/grafana/dashboards/` the three dashboards, built 2026-10-05 and extended since;
 what is missing is an **Alertmanager destination**, so the rules fire into nothing. Tracing is not wired.
 Per-service p95/p99 needs
 `management.metrics.distribution.percentiles-histogram.http.server.requests: true` in each service. Full list
@@ -264,5 +264,5 @@ code. They are recorded here so that nobody re-derives them:
 1. "The gateway's flood brake is per-replica in memory." It is not any more: `RateLimitFilter` keeps the
    bucket in Valkey through one Lua round trip, with in-memory buckets only on the fail-open path. It answers
    an OpenAI-shaped 429 with `retry-after` and `retry-after-ms`.
-2. "There is no observability." Prometheus and Grafana were added on 2026-10-05, with 7 alert rules and 3
-   provisioned dashboards. What is genuinely missing is the alerting *destination*.
+2. "There is no observability." Prometheus and Grafana were added on 2026-10-05; the rule file now holds 21 alert rules and
+   there are 3 provisioned dashboards. What is genuinely missing is the alerting *destination*.

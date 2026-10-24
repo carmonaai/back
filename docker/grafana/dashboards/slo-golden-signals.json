@@ -343,6 +343,63 @@
       "targets": [
         {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum by (job) (increase(vllm:num_preemptions_total{job=~\"engine|vllm\"}[5m]))", "legendFormat": "preemptions {{job}}", "editorMode": "code", "range": true}
       ]
+    },
+    {
+      "id": 17,
+      "type": "row",
+      "title": "Prompt cache (what decides how many customers one card carries)",
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 38},
+      "panels": []
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Prompt cache hit ratio by model and mode",
+      "description": "The share of the measured prompt tokens that the engine served from its prefix cache (carmona_inference_prompt_cache_tokens_total, counted once per engine run whose final usage was seen). Capacity per card goes with 1 / (1 - ratio): for 32000-token requests, 75 an hour per customer, on one RTX 8000, about 3 customers at 0, about 7 at 0.6 and about 30 at 0.9 (an estimate until the GPU day, Day A, measures prefill speed and the real ratio). The 30m line is prompt_cache:hit_ratio_30m, the number the PromptCacheHitRatioLow alert compares with the dashed 0.30 line; it fires after 15m under the line when at least 300000 prompt tokens were measured in the window (the next panel shows the volume), some of them in the last 5 minutes, and the engine contract does not say prefix caching is off. The 15m line is prompt_cache:hit_ratio_15m, the quicker reading. 0.30 and the floor are placeholders until Day A. Empty until the first measured request creates the counter. The first request of each prefix after an engine restart is cold by design.",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 39},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 8, "showPoints": "never", "thresholdsStyle": {"mode": "dashed"}},
+          "color": {"mode": "palette-classic"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 0.3}]}
+        },
+        "overrides": []
+      },
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"refId": "r30", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "prompt_cache:hit_ratio_30m", "legendFormat": "30m {{model}} {{mode}} (alert)", "editorMode": "code", "range": true},
+        {"refId": "r15", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "prompt_cache:hit_ratio_15m", "legendFormat": "15m {{model}} {{mode}}", "editorMode": "code", "range": true}
+      ]
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "Prompt tokens by cache result (tokens/s)",
+      "description": "Hit tokens came from the engine's prefix cache, miss tokens were computed (prefilled). Stacked, so the total is the measured prompt traffic the ratio is a share of, and the miss part is what the card pays for. Only requests whose final engine usage chunk was seen are counted, so this is not the billed input (carmona_inference_tokens_total, kind input, which includes estimates for cut streams). Over 300000 tokens in 30 minutes (about 167 per second) for one model and one mode is the traffic floor under which the alert stays quiet; this panel adds the modes of a model together, so a model can sit above that line here and still be under the floor in each of its modes.",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 39},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 30, "showPoints": "never", "stacking": {"mode": "normal", "group": "A"}},
+          "color": {"mode": "palette-classic"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}
+        },
+        "overrides": [
+          {"matcher": {"id": "byRegexp", "options": ".* hit"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "green"}}]},
+          {"matcher": {"id": "byRegexp", "options": ".* miss"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "orange"}}]}
+        ]
+      },
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum by (model, result) (rate(carmona_inference_prompt_cache_tokens_total[$__rate_interval]))", "legendFormat": "{{model}} {{result}}", "editorMode": "code", "range": true}
+      ]
     }
   ]
 }

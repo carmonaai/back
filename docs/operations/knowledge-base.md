@@ -218,7 +218,7 @@ headers, rate limiting and the Marco Civil access log; accounts, sessions, JWTs 
 rotation; organizations, memberships and tiers; inference on two engines with admission control, tier
 priorities and `cache_salt`; usage metering through a durable Valkey stream with 90-day partitioned events and
 sealed 5-minute windows; billing with an append-only ledger in micro-BRL, balances and the `no_credit` flag;
-the Files and Batch API; erasure and export; Prometheus, Grafana, three dashboards and twenty alert rules; and
+the Files and Batch API; erasure and export; Prometheus, Grafana, three dashboards and twenty-one alert rules; and
 the CI workflow.
 
 **Planned, not built.** Hosting and Kubernetes; a payment rail (credit comes from a staff grant); a customer

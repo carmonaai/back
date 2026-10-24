@@ -9,7 +9,8 @@
 # It starts by waiting, at most 60 s, until the console login route answers something other than 503: right after `up --wait`
 # the gateway has answered 503 there once in four runs, before any assertion. The wait costs one login attempt of this IP's bucket.
 # It stops and restarts valkey once (API-key lookups must fail closed with 503), runs chats on the engine
-# (the simulator by default, vLLM with ENGINE=vllm), drains every engine replica through inference-service's management port and
+# (the simulator by default, vLLM with ENGINE=vllm), checks that inference-service counted their prompt tokens in the prompt cache
+# counter, drains every engine replica through inference-service's management port and
 # puts it back (503 engine_unavailable while drained; a running stream finishes), and greps every log and a database dump for a canary string.
 # Run it against another compose project with COMPOSE_PROJECT_NAME=... (compose reads it; the stack must run under it).
 # On the two-simulator stack (compose.fleet.yaml) run it with FLEET=1, which adds that file to every compose call and asserts that two replicas are listed.
@@ -258,6 +259,25 @@ else
     || { row=$(sql "SELECT concat_ws('|', input_tokens, output_tokens, coalesce(ttft_ms::text, 'NULL'), duration_ms) FROM usage.usage_event WHERE organization_id = '$org' AND status = 'cancelled'" | tr -d '\r' | tr '\n' ' ')
          echo "FAIL the cancelled stream recorded no output tokens (row input|output|ttft_ms|duration_ms: $row)"; note_fail; }
 fi
+
+# The prompt cache counter (P0-1): the answered chats above ended with a final usage chunk, so inference-service counted their prompt
+# tokens as hit or miss for the model. The simulator puts prompt_tokens_details.cached_tokens on that chunk (always 0 here: compose.yaml
+# does not start it with --enable-kvcache), and a short prompt is under one cache block on vLLM too, so what is asserted is the miss
+# series: it exists and is positive. The hit series is not asserted (0 on the simulator), and the cancelled stream is not counted by
+# design (its final chunk never came). The management port is asked through the tools container, as the drain section below does; with
+# several inference replicas the name answers as one of them, so this polls until that one has the series.
+cache_miss_tokens() {
+  "${DC[@]}" exec -T tools curl -s -m 5 http://inference:8081/actuator/prometheus | tr -d '\r' \
+    | awk -v m="model=\"$M\"" '/^carmona_inference_prompt_cache_tokens_total\{/ && index($0, "result=\"miss\"") && index($0, m) { s += $NF } END { printf "%d\n", s }'
+}
+miss=0
+for _ in $(seq 10); do
+  miss=$(cache_miss_tokens)
+  [[ ${miss:-0} -gt 0 ]] && break
+  sleep 1
+done
+[[ ${miss:-0} -gt 0 ]] && echo "ok   prompt cache counter: $miss prompt tokens counted as result=miss for $M" \
+  || { echo "FAIL carmona_inference_prompt_cache_tokens_total has no result=miss series for $M after answered chats"; note_fail; }
 
 # Usage survives a crash: with usage-service down, the events wait in Valkey's stream; inference-service
 # is killed (no graceful flush) and restarted; each event then reaches usage-service once.
