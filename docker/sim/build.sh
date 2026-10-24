@@ -22,7 +22,7 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 TAG=${SIM_IMAGE:-carmona/llm-d-inference-sim:v0.11.4-disconnect.1}
 SRC=${SIM_SRC:-$here/../../../prototype-sim/_sim-src-v0.11.4}
-SRC_PIN=c014e9cf50b2690601b7467efb964fd22ee6d3343a839e3ebda14039406c7f0b
+SRC_PIN=a5e33354b7d8de92844a7632fde8bbe299f06dc7f61e63aad24437878608c9e1
 [[ $TAG == *:* && $TAG != *:latest ]] || { echo "SIM_IMAGE must carry an explicit tag that is not latest: $TAG" >&2; exit 1; }
 
 [[ -f $SRC/go.mod ]] || { echo "no simulator source at $SRC: check out llm-d-inference-sim tag v0.11.4 and set SIM_SRC" >&2; exit 1; }
@@ -32,7 +32,7 @@ trap 'rm -rf "$ctx" "$log"' EXIT
 (cd "$SRC" && tar -c --exclude=.git .) | tar -x -C "$ctx"
 cd "$ctx"
 find . \( -name '*.go' -o -name go.mod -o -name go.sum \) -type f -exec sed -i 's/\r$//' {} +
-got=$(find . -type f \( -name '*.go' -o -name go.mod -o -name go.sum \) | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -d' ' -f1)
+got=$(find . -type f \( -name '*.go' -o -name go.mod -o -name go.sum \) | LC_ALL=C sort | xargs sha256sum | sed -E 's/^([0-9a-f]{64}) [ *]/\1  /' | sha256sum | cut -d' ' -f1)
 if [[ $got != "$SRC_PIN" ]]; then
   echo "the source at $SRC is not llm-d-inference-sim v0.11.4 (source hash $got, want $SRC_PIN)" >&2
   exit 1
