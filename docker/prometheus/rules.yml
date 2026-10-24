@@ -422,7 +422,7 @@ groups:
             the first thing to look for. The 400 text names the problem and never repeats the content; no organization is
             on any metric, so the client is found from the customer's side or from the access log by time.
 
-  # The prompt cache (P0-1). carmona_inference_prompt_cache_tokens_total{model, mode, result} counts, once per request whose engine
+  # The prompt cache (P0-1). carmona_inference_prompt_cache_tokens_total{model, mode, result} counts, once per engine run whose final
   # usage was seen, the prompt tokens the engine served from its prefix cache (result="hit") and the rest (result="miss"). The hit
   # ratio is what sets how many customers one card carries (capacity goes with 1 / (1 - ratio)), and the one thing a customer can
   # break without knowing it (a timestamp near the top of a prompt invalidates every block after it).

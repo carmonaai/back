@@ -157,9 +157,9 @@ carries histogram boundaries, and client-side quantiles do not aggregate across 
 `histogram_quantile()` over the buckets is what the dashboards and rules compute.
 
 `carmona_inference_prompt_cache_tokens_total` is the request-level measure of the prefix cache: for each request whose final engine usage
-chunk was seen, the prompt tokens the engine served from its cache (`hit`) and the rest (`miss`). It is counted once per request and only
+chunk was seen, the prompt tokens the engine served from its cache (`hit`) and the rest (`miss`). It is counted once per engine run and only
 when that chunk came, because the engine reports cached tokens only there: a request cut before it would read as a miss for lack of
-news and pull the ratio down. It is not the billed input, which stays `carmona_inference_tokens_total{kind="input"}`, estimates
+news and pull the ratio down. A batch line cut short after the chunk is counted, and so is its re-run: the engine served both prompts. It is not the billed input, which stays `carmona_inference_tokens_total{kind="input"}`, estimates
 included. A series appears with the first measured request. The hit ratio is the share of `hit` in the sum, by model and mode, and
 capacity per card goes with 1 / (1 − ratio): the number that decides whether one card carries 3 customers or 30 for long-prefix
 traffic, and the one a customer can break without knowing (a timestamp near the top of a prompt invalidates every block after it).
