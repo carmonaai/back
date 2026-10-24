@@ -152,6 +152,8 @@ Rounding per event and then adding would accumulate a fraction of a micro-BRL pe
 would stop being the sum of anything anyone can reconstruct. Cached input is a subset of input, not an
 addition: the formula charges `(input − cached) × input_price + cached × cached_price`, and the
 `cached_input_tokens BETWEEN 0 AND input_tokens` check constraint keeps that subtraction from needing a guard.
+What keeps the cached share high is the customer's prompt layout, which is on
+[Prompt caching](../inference/prompt-caching.md).
 
 The honest edge is the customer summary, which prices per (model, mode, UTC day) rather than per window,
 because one row per 5-minute window is 267k rows a month at the prototype's window size. Per-day rounding can
