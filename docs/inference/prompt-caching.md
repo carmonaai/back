@@ -113,8 +113,9 @@ tokens were read back.</figcaption>
    it.** A block can only match if every block before it matched ([vLLM design page][vllm]).
 4. **Blocks that match are read back from memory.** Matching stops at the first block that differs.
 5. **Everything after that block is computed in prefill** and paid at the full input price.
-6. **The final usage chunk says how many prompt tokens were read back** (`cached_tokens`). Billing prices
-   those apart, and the check in rule 5 reads the same number.
+6. **The final usage chunk says how many prompt tokens were read back** (`cached_tokens`). A streaming client
+   receives that chunk only if it sends `stream_options.include_usage`. Billing prices those tokens apart, and
+   the check in rule 5 reads the same number.
 
 ## The layout contract
 
@@ -126,13 +127,18 @@ tokens were read back.</figcaption>
 3. **Everything that changes per request comes last.** The new user turn, timestamps, request or session ids,
    names, and retrieved snippets that differ per turn. Nothing per-request above the shared part.
 4. **One organization, one model name, one `cache_salt` per cache.** The platform sets the salt from the
-   organization, so every API key of one organization shares one cache and two organizations never share one,
-   even for an identical prompt. A model name is one engine, and a second name is a second, cold cache.
+   organization, so every API key of one organization shares one cache, and two organizations do not share one,
+   even for an identical prompt. A model name is one engine, and a second name is a second, cold cache. The
+   same happens when the alias `carmona/chat-standard` moves to another backing model, which is announced in
+   advance, and a model with several replicas has one cache per replica.
 5. **Check it.** Send the same request twice and read `usage.prompt_tokens_details.cached_tokens` on the
-   second. Then change one line at the start of the prompt and one at the end and compare: the start should
-   lose almost everything, the end almost nothing. The cache is best effort. It is empty after an engine
-   restart, old blocks are evicted under memory pressure, and the first request after the daily GPU window
-   opens is cold by design (the [runbook](../operations/running.md) warms it with the customer's own prefix).
+   second; a streaming request must send `stream_options.include_usage` to receive it. Then change one line at
+   the start of the prompt and one at the end and compare. On a standard prefix cache the start loses almost
+   everything and the end almost nothing; whether this engine does the same on a hybrid model is not yet
+   measured `[UNVERIFIED]`, and [What Day A settles](#what-day-a-settles) says what each outcome would mean. The
+   cache is best effort. It is empty after an engine restart, old blocks are evicted under memory pressure,
+   and the first request after the daily GPU window opens is cold by design (the
+   [runbook](../operations/running.md) warms it with the customer's own prefix).
 6. **A change anywhere in the prompt invalidates the cache from the first changed block to the end.** Only full
    blocks are cached, so the last partial block of a prompt is always computed ([vLLM design page][vllm]). Our
    block size is **not yet measured** `[UNVERIFIED]`: about 1,056 tokens is expected for Qwen3.6 from reading
@@ -189,15 +195,16 @@ computed again.
 | A request, session or trace id, or a random value, near the top | same | keep ids in your own logs; the `user` field is accepted and ignored, so it is safe |
 | The patient's or user's name in the system prompt | one prompt per person: the shared part is no longer shared | put it after the history |
 | History edited in place: summarised, a typo fixed, another whitespace or template | everything after the edit is a new prompt | append only; if you must summarise, do it rarely and in one step, and the next request pays once |
-| The oldest turns dropped to stay under a limit | the start of the history moves, so every history block changes (the stable part above it still hits) | cut in large, rare steps, not one turn per request |
-| Tools reordered, keys of a tool schema reordered, or JSON serialised differently | the chat template renders tool definitions into the prompt text, so another order is other tokens (not yet checked for this model's template) `[UNVERIFIED]` | build the list once and serialise it the same way |
+| The oldest turns dropped to stay under a limit | the start of the history moves, so every history block changes (on a standard prefix cache the stable part above it still hits) | cut in large, rare steps, not one turn per request |
+| Tools reordered, or the keys of a tool schema reordered | the chat template renders tool definitions into the prompt text, so another order is other tokens (not yet checked for this model's template) `[UNVERIFIED]` | build the list once and keep it in one order |
 | `tools` or `tool_choice` toggled between requests | whether vLLM renders tools when `tool_choice` is `none` is `[UNVERIFIED]` | keep both fixed |
 | Retrieved snippets that differ per turn, placed before the history | per-request text above the shared part | place them in the new turn |
 | The model's reasoning replayed inside the history | the platform neutralises think tags in client text, so the engine reads other text than the model wrote | send back only `content` |
 | Another model name, or an API key of another organization | another engine, or another `cache_salt` | one model name and one organization per prompt family |
 
 What does not break it: sampling parameters (`temperature`, `seed`, `max_tokens`), `stream`, `service_tier`,
-`user` and `metadata`, and using several API keys of the same organization. None of them is part of the
+`user` and `metadata`, how the request body is spaced or ordered outside `messages` and `tools`, and using
+several API keys of the same organization. None of them is part of the
 prompt, and vLLM's block hash covers the tokens plus extras such as LoRA ids, multimodal hashes and the cache
 salt ([vLLM design page][vllm]).
 
@@ -211,8 +218,8 @@ nothing about the commercial price card, which is set separately and which this 
 
 **Time.** A cold 32,000-token prompt takes seconds of prefill on the target card, at a prefill speed that is
 **not yet measured** `[UNVERIFIED]`. A request that hits the cache computes only the tokens after the match.
-That is an estimate for sizing, not a response-time promise: the platform promises none (see the end of this
-page).
+That is an estimate for sizing, not a response-time promise: the platform promises none (see
+[what it does and does not promise](#what-the-platform-does-and-does-not-promise)).
 `carmona_inference_first_output_seconds{cache}` splits the time to the first output into `none`, `partial` and
 `full` by the share of the prompt that came from the cache (under 10 percent, in between, over 90 percent),
 which is the number that shows the operator what the layout is worth. A customer reads the same split in the
@@ -226,8 +233,9 @@ which is the number that shows the operator what the layout is worth. A customer
 | `cachedInputTokens` in the usage event | the same number per request, summed per organization and window for billing | exists |
 | `carmona_inference_first_output_seconds{cache}` | how long the first output took, by share cached | exists |
 | `carmona_engine_prefix_cache_hit_ratio` | the engine's own hit ratio per scrape, from its counters | exists in `Metrics` |
-| `carmona_inference_prompt_cache_tokens_total{model,mode,result}` | prompt tokens served from the cache (`hit`) and the rest (`miss`) | ships with this change |
-| Alert `PromptCacheHitRatioLow` | the 30-minute hit ratio is under 0.30 with real traffic behind it; informational | ships with this change |
+| `carmona_inference_prompt_cache_tokens_total{model,mode,result}` | prompt tokens served from the cache (`hit`) and the rest (`miss`) | exists |
+| Recording rules `prompt_cache:hit_ratio_15m`, `prompt_cache:hit_ratio_30m`, `prompt_cache:tokens_rate_15m`, `prompt_cache:tokens_30m` | the hit ratio over 15 and 30 minutes, and the measured-token rate and count behind it, per `model` and `mode` | exists |
+| Alert `PromptCacheHitRatioLow` | the 30-minute hit ratio is under 0.30 with real traffic behind it; informational | exists |
 
 The counter is added once per request, and only when the engine's final usage chunk was seen and the prompt was
 not empty: that chunk is the only one that carries `cached_tokens`, so a request cut before it would count as
@@ -235,28 +243,35 @@ a miss for lack of news and bias the ratio down. It does not replace `carmona_in
 stays the billing count, estimates included. The hit ratio is `sum(rate(...{result="hit"})) /
 sum(rate(...))`. The series appears with the first measured request, and the rules and the alert stay silent
 while it does not exist, when traffic is below a floor, and when the engine contract check says prefix caching
-is off. The 0.30 threshold and the floor are placeholders that Day A tunes. See
-[Observability](../operations/observability.md) for the rule names.
+is off. The 0.30 threshold and the floor are placeholders that Day A tunes. The rules are in
+[`rules.yml`](https://github.com/carmonaai/back/blob/main/docker/prometheus/rules.yml).
 
 Metrics carry `model` and `mode` only, never an organization, so this is a fleet number. One customer's ratio
 is read from its usage events. If the engine's own ratio is high and the request-level one is near zero, check
 that the engine runs with `--enable-prompt-tokens-details` `[INFER]`.
 
-## What the platform does not promise
+## What the platform does and does not promise
 
-- **No hit ratio.** There is no minimum, no latency promise for a cached request, and a hit still waits for its
-  queue and for the tokens after the match.
-- **No memory across restarts.** The cache lives in the engine's GPU memory. A restart empties it, the daily
-  window destroys the card, and the first request of the day is cold. Eviction is least recently used, under
-  memory pressure ([vLLM design page][vllm]); we promise no minimum lifetime.
-- **No rewriting of your prompt to help the cache.** `ChatRequest` passes `messages` and `tools` through in the
-  order sent and adds no text. The one change we make is `ControlTokenGuard` neutralising role markers and
-  control tokens in client text. It is a pure function of the text, so the same prompt gives the same bytes every
-  time and the cache is not affected.
-- **No sharing between organizations.** That is the purpose of `cache_salt`
-  ([Tenancy](../data/tenancy.md)).
-- **No view of where a prompt first differs from the last one.** A diagnostic for that is planned, behind a
-  measured trigger, and not built.
+**It does**
+
+- **Pass your prompt on as it is.** `ChatRequest` passes `messages` and `tools` through in the order sent and
+  adds no text. The one change we make is `ControlTokenGuard` neutralising role markers and control tokens in
+  client text. It is a pure function of the text, so the same prompt gives the same bytes every time and the
+  cache is not affected.
+- **Keep organizations apart.** That is the purpose of `cache_salt` ([Tenancy](../data/tenancy.md)), and by
+  design the salt is part of the first block's hash ([vLLM design page][vllm]), so two organizations sending
+  the same prompt cannot match each other. The check is that pair of requests, with the second organization
+  reading `cached_tokens` 0. It has not been run against this engine `[UNVERIFIED]`.
+
+**It does not**
+
+- **Promise a hit ratio.** There is no minimum, no latency promise for a cached request, and a hit still waits
+  for its queue and for the tokens after the match.
+- **Keep the cache across restarts.** The cache lives in the engine's GPU memory. A restart empties it, the
+  daily window destroys the card, and the first request of the day is cold. Eviction is least recently used,
+  under memory pressure ([vLLM design page][vllm]); we promise no minimum lifetime.
+- **Show where a prompt first differs from the last one.** A diagnostic for that is planned, behind a measured
+  trigger, and not built.
 
 ## What Day A settles
 
@@ -270,11 +285,11 @@ step where prefix caching is on, and each prints a verdict.
 | | `early_bust` | a change loses more than the blocks after it; the measured loss replaces "from the first changed block" |
 | | `no_cache` | the contract still holds for any engine, but this page's cost and capacity claims lose their premise |
 | `bench/workload/probe_burst_cold.py`: 8 identical cold 32k requests at once | `computed_n_times` | add burst advice: send one request, wait for its first token, then send the rest |
+| | `partial` | burst advice only if the probe's `single_flight_priming` answer is `yes`; otherwise none |
 | | `deduplicated` | no burst advice |
-| `bench/perf/probe_decode_roofline.py`: decode speed at 1 to 32 streams | `kernel_path_suspect` and the others | nothing in the layout; it says whether the decode figures behind the capacity paragraph can be trusted |
+| `bench/perf/probe_decode_roofline.py`: decode speed at 1 to 32 streams | `kernel_path_suspect`, `memory_bound_as_modelled`, `above_model` | nothing in the layout; it says whether the decode ceiling used to size a card can be trusted |
 
-The same probes also settle the block size of rule 6. The verdict words are those of the probe design and the
-probes print them.
+The divergence probe also estimates the block size of rule 6. The probes print the verdict words above.
 
 ## What the hit ratio is worth
 
