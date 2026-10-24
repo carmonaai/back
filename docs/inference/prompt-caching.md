@@ -139,7 +139,7 @@ tokens were read back.</figcaption>
    cache is best effort: it is empty after an engine restart, old blocks are evicted under memory pressure,
    and the first request after the daily GPU window opens is cold by design (the
    [runbook](../operations/running.md) warms it with the customer's own prefix).
-6. **A change anywhere in the prompt invalidates the cache from the first changed block to the end.** Only full
+6. **A change anywhere in the prompt invalidates the cache at least from the first changed block to the end.** Only full
    blocks are cached, so the last partial block of a prompt is always computed ([vLLM design page][vllm]). Our
    block size is **not yet measured** `[UNVERIFIED]`: about 1,056 tokens is expected for Qwen3.6 from reading
    vLLM's source, and a Day A probe reads the real figure.
