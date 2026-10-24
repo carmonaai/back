@@ -162,6 +162,7 @@ nav:
       - Batching and response routing: inference/batching.md
       - Routing responses: inference/routing.md
       - Capacity and fairness: inference/capacity.md
+      - Prompt caching: inference/prompt-caching.md
   - Data:
       - data/index.md
       - Schemas: data/schemas.md
