@@ -1673,3 +1673,17 @@ tests:
       - {eval_time: 20m, alertname: PromptCacheHitRatioLow, exp_alerts: []}
       - {eval_time: 25m, alertname: PromptCacheHitRatioLow, exp_alerts: []}
       - {eval_time: 34m, alertname: PromptCacheHitRatioLow, exp_alerts: []}
+
+  # The 15 m record is the average of its window and not the last two scrapes: 25% hits for 130 scrapes, then one scrape of nothing but
+  # hits (4500 tokens). The window holds 59 intervals: 58 at 375 hit and 1125 miss tokens, and the last, so 26250 hit tokens of 91500, 28.7%,
+  # which is 0.29 to two places. An irate reads the last interval alone and says 1.
+  - name: prompt_cache:hit_ratio_15m is the 15 minute average and not the last two scrapes
+    interval: 15s
+    input_series:
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="hit"}', values: '0+375x130 53250x0'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="miss"}', values: '0+1125x130 146250x0'}
+    promql_expr_test:
+      - expr: round(prompt_cache:hit_ratio_15m, 0.01)
+        eval_time: 32m45s
+        exp_samples:
+          - {labels: '{model="m1", mode="sync"}', value: 0.29}
