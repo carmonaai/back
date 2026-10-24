@@ -81,17 +81,22 @@ running batches live in `batch_line`, so those batches still finish and write th
   (discussion [aws-sdk-java-v2 #5802](https://github.com/aws/aws-sdk-java-v2/discussions/5802)).
   Tested against MinIO only; the multipart-with-checksum path on real AWS S3 follows the documents above and was not run.
 
-**Store for compose and tests: MinIO `RELEASE.2025-09-07T16-13-09Z`, pinned by digest.**
+**Store for compose and tests: `pgsty/minio` `RELEASE.2026-08-04T00-00-00Z`, pinned by digest (changed 2026-10-24; was MinIO `RELEASE.2025-09-07T16-13-09Z`).**
 
 - MinIO stopped publishing community images and binaries in October 2025, announced maintenance mode in December 2025, and
-  archived the repository on 2026-04-25 ("THIS REPOSITORY IS NO LONGER MAINTAINED", github.com/minio/minio). This tag is
-  the newest image I could confirm. It predates the source-only security release of 2025-10-15 and the fix for
-  CVE-2025-62506 that the pgsty fork advertises, so it is for development and CI on the internal network only. Docker Hub's tag listing could not be fetched, so "last published" is
-  not proven. If an image with fixes is wanted, the community fork `pgsty/minio` is a drop-in, or any other S3-compatible
-  service: nothing in the code is MinIO-specific.
+  archived the repository on 2026-04-25 ("THIS REPOSITORY IS NO LONGER MAINTAINED", github.com/minio/minio). Its images were
+  then removed from Docker Hub and quay.io: `docker pull minio/minio:RELEASE.2025-09-07...@sha256:14cea493...` answers `pull access denied`,
+  which is why the `ci` workflow of `back` failed in `batch-service` (`BucketIT` and `BatchServiceIT`, `Can't get Docker image`) in the run of
+  2026-10-23, the first to get past `inference-service`. A digest pin does not survive the registry deleting the repository.
+- The replacement is `pgsty/minio` and `pgsty/mc` on Docker Hub, the community-maintained fork (server `RELEASE.2026-08-04T00-00-00Z`,
+  mc `RELEASE.2026-10-18T00-00-00Z`, both pinned by index digest in `docker/compose.minio.yaml` and in `MinioForTests`). It is a drop-in:
+  the 28 ITs of `batch-service` (`BucketIT` 11, `BatchServiceIT` 17) pass unchanged against it, and `minio-init` (bucket, policy, user) runs
+  with its `mc`. It is a third-party fork: for development and CI on the internal network only, and a different S3-compatible service is a
+  change of two image names (nothing in the code is MinIO-specific). If the fork's images disappear too, build one from the fork's source
+  and keep it in a registry the org controls.
 - Tests use `org.testcontainers:testcontainers-minio` (managed by Spring Boot's BOM, 2.0.5; class
   `org.testcontainers.containers.MinIOContainer`), same image, credentials made up per run.
-- `minio/mc:RELEASE.2025-08-13T08-35-41Z` (digest pinned) creates the bucket and the scoped user in compose.
+- `pgsty/mc:RELEASE.2026-10-18T00-00-00Z` (digest pinned) creates the bucket and the scoped user in compose.
 
 ### Threat model for stored customer files
 

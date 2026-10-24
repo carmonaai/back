@@ -25,6 +25,10 @@ jobs:
   build:
     runs-on: ubuntu-latest   # Docker preinstalled; Testcontainers needs a Linux runner
     timeout-minutes: 30
+    env:
+      # smoke.sh needs the object-storage overlay (batch-service keeps its files in S3), so the stack starts, logs and
+      # stops with both files. Paths are relative to the docker/ working directory of those steps.
+      COMPOSE_FILE: compose.yaml:compose.minio.yaml
     steps:
       # back itself, with the default GITHUB_TOKEN.
       - uses: actions/checkout@v7
@@ -72,12 +76,26 @@ jobs:
           # must carry it too: without the line, compose aborts at variable interpolation before any
           # container starts.
           echo "GRAFANA_ADMIN_PASSWORD=$(openssl rand -base64 18)"
+          # compose.minio.yaml (the batch section of smoke.sh): MinIO's administrator, and the bucket-scoped user
+          # batch-service gets. The bucket name is not a secret.
+          echo "MINIO_ROOT_USER=$(openssl rand -hex 12)"
+          echo "MINIO_ROOT_PASSWORD=$(openssl rand -hex 24)"
+          echo "STORAGE_BUCKET=batch-files"
+          echo "STORAGE_ACCESS_KEY=$(openssl rand -hex 12)"
+          echo "STORAGE_SECRET_KEY=$(openssl rand -hex 24)"
           } > .env
 
       # BE-24: billing, organization, account and auth refuse to start without the internal secret file.
       - name: Create the internal secret
         working-directory: docker
         run: bash init-secrets.sh
+
+      # The simulated engine is upstream's llm-d-inference-sim v0.11.4 plus docker/sim/disconnect.patch, a local image
+      # that compose never pulls. build.sh refuses a source that is not exactly v0.11.4 (it hashes the Go files).
+      - name: Build the simulated engine
+        run: |
+          git clone --quiet --depth 1 --branch v0.11.4 https://github.com/llm-d/llm-d-inference-sim "$RUNNER_TEMP/sim-src"
+          SIM_SRC="$RUNNER_TEMP/sim-src" bash docker/sim/build.sh
 
       - name: Start the stack
         id: stack

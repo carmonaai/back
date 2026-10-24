@@ -7,16 +7,18 @@
 #                                          (MinIO wants a secret of at least 8 characters)
 # Nothing here is published: minio and batch talk over the internal network. The MinIO console is not exposed.
 #
-# The image is the last one MinIO published (September 2025). MinIO's community edition has been archived since
-# April 2026 and gets no more releases, so this is for development and CI. batch-service speaks plain S3: production
-# points STORAGE_ENDPOINT at any S3-compatible service (or leaves it empty for AWS S3) and needs no code change.
+# The images are pgsty/minio and pgsty/mc, the community-maintained fork of MinIO (a drop-in: same server, same mc). MinIO
+# itself archived its community edition in April 2026 and removed minio/minio and minio/mc from Docker Hub and quay.io, so
+# the original pins can no longer be pulled. Digest-pinned like every other image here; this is for development and CI.
+# batch-service speaks plain S3: production points STORAGE_ENDPOINT at any S3-compatible service (or leaves it empty for
+# AWS S3) and needs no code change.
 
 services:
   # Runs once and exits: hands the data volume to the user MinIO runs as (a fresh named volume belongs to root and MinIO
   # as a normal user cannot write it). It is the only container here that runs as root: for one chown, with every
   # capability dropped but CAP_CHOWN, a read-only filesystem and no network.
   minio-volume:
-    image: minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    image: pgsty/mc:RELEASE.2026-10-18T00-00-00Z@sha256:6ecdaec70bc5e8cf9d0e9a70c190f3beb1c83f11617ff4333f1fcd71ab1daf18
     user: "0:0"
     entrypoint: ["chown", "-R", "10001:10001", "/data"]
     restart: "no"
@@ -28,7 +30,7 @@ services:
     volumes: [minio-data:/data]
 
   minio:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
     user: "10001:10001"
     command: ["server", "/data"]
     cap_drop: [ALL]
@@ -50,7 +52,7 @@ services:
 
   # Runs once and exits: the bucket, and a user whose policy allows only that bucket's objects. Safe to run again.
   minio-init:
-    image: minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    image: pgsty/mc:RELEASE.2026-10-18T00-00-00Z@sha256:6ecdaec70bc5e8cf9d0e9a70c190f3beb1c83f11617ff4333f1fcd71ab1daf18
     restart: "no"
     user: "10001:10001"
     cap_drop: [ALL]
