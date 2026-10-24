@@ -209,11 +209,14 @@ input price + output × output price`, where cached tokens are a subset of the i
 cached token costs half of an input token (0.25 against 0.50 BRL per million for `carmona/qwen3-4b`). They say
 nothing about the commercial price card, which is set separately and which this page does not quote.
 
-**Time.** A cold 32,000-token prompt is about 8 s of prefill on the target card, at an assumed 4,000 prompt
-tokens per second that is **not yet measured** `[UNVERIFIED]`. A request that hits the cache computes only the
-tokens after the match. `carmona_inference_first_output_seconds{cache}` splits the time to the first output
-into `none`, `partial` and `full` by the share of the prompt that came from the cache (under 10 percent, in
-between, over 90 percent), which is the number that shows a customer what the layout is worth.
+**Time.** A cold 32,000-token prompt takes seconds of prefill on the target card, at a prefill speed that is
+**not yet measured** `[UNVERIFIED]`. A request that hits the cache computes only the tokens after the match.
+That is an estimate for sizing, not a response-time promise: the platform promises none (see the end of this
+page).
+`carmona_inference_first_output_seconds{cache}` splits the time to the first output into `none`, `partial` and
+`full` by the share of the prompt that came from the cache (under 10 percent, in between, over 90 percent),
+which is the number that shows the operator what the layout is worth. A customer reads the same split in the
+`cached_tokens` of its own responses.
 
 ## What the platform measures
 
@@ -273,23 +276,26 @@ step where prefix caching is on, and each prints a verdict.
 The same probes also settle the block size of rule 6. The verdict words are those of the probe design and the
 probes print them.
 
-## Capacity in one paragraph
+## What the hit ratio is worth
 
-On one RTX 8000 the card is spent on prefill, so the number of customers one card carries scales as
-1 / (1 − hit ratio). For a customer sending 75 requests an hour of 32,000 tokens at peak, with prefill held to
-50 percent busy and a prefill speed of 3,000 to 5,000 tokens/s, the throughput study (section 4) estimates:
+A card that serves long prompts spends its time on prefill, so how many such requests it can take scales as
+1 / (1 − hit ratio): every token read back is a token not computed. The table is that arithmetic and nothing
+else.
 
-| Prompt cache hit ratio | Uncached tokens per request | Customers per card |
+| Prompt cache hit ratio | Share of the prompt still computed | Prefill capacity, against hit ratio 0 |
 |---|---|---|
-| 0 | 32,000 | 2.2 to 3.8 |
-| 0.4 | 19,200 | 3.8 to 6.2 |
-| 0.6 | 12,800 | 5.6 to 9.4 |
-| 0.9 | 3,200 | 22 to 38 |
-| 0.97 | 960 | 75 to 125 |
+| 0 | 100% | 1x |
+| 0.4 | 60% | 1.7x |
+| 0.6 | 40% | 2.5x |
+| 0.9 | 10% | 10x |
+| 0.97 | 3% | 33x |
 
-**This is an estimate pending Day A**, not a promise: the prefill speed comes from a different GPU, the hit
-ratios are unmeasured on this engine, and peak simultaneity and cold-start bursts are left out. The layout in
-this page is what moves a customer from one row to another.
+**This is an upper bound from prefill alone, pending Day A.** The hit ratios are unmeasured on this engine, and
+if the cache does not work on this model the ratio is 0 and the first row applies. The table also leaves out the limits that bite first in
+the top rows: peak simultaneity, cold-start bursts, the time decode takes, and above all the cache's own
+memory, which holds only a limited number of long prefixes at once. Past that number old prefixes are evicted,
+the hit ratio falls, and the top rows are out of reach. The layout on this page decides which row a customer is
+on; it does not lift those limits. Figures for a particular card are not published here.
 
 ## Why it is like this
 
@@ -317,9 +323,9 @@ engine did not say" as "no hit", and the ratio would read low exactly when a cli
   ([Routing responses](routing.md)).
 - **A customer under about 80 percent in the first month** would justify the diagnostic of where a prompt first
   differs.
-- **A cache that survives restarts** is not built: a cold 32k prefill is about 8 s of GPU `[UNVERIFIED]`, so
-  losing the cache at each window start costs one slow answer, not money. More than about 20 active prefixes per
-  card, or restarts that cost customers more than one slow request a day, would reopen it.
+- **A cache that survives restarts** is not built: a cold long prefill is seconds of GPU `[UNVERIFIED]`, so
+  losing the cache at each window start costs one slow answer, not money. Active prefixes that no longer fit in
+  the cache's memory, or restarts that cost customers more than one slow request a day, would reopen it.
 
 ## Where to look
 
