@@ -37,3 +37,6 @@
 [submodule "api/batch-service"]
 	path = api/batch-service
 	url = https://github.com/carmonaai/batch-service.git
+[submodule "bench"]
+	path = bench
+	url = https://github.com/carmonaai/bench.git

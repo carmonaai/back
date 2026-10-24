@@ -198,6 +198,11 @@ updated by hand. The clone rewrites the URL rather than passing credentials per 
 `git config --global --remove-section` on the same key — because `git -c` settings do not reliably reach the
 `git submodule` child processes. Removing it immediately keeps the token out of any later `git config --list`.
 
+`bench`, the benchmark kit for the rented GPU days, is a fourteenth submodule at the root of `back` (`bench/`, its own
+private repository `carmonaai/bench`). CI does not build or run it, but the walk above and `git submodule update`
+visit it like the others, so `CARMONAI_TOKEN` needs `Contents: read-only` on `carmonaai/bench` too; until the
+token is granted it, the fetch step fails with `CARMONAI_TOKEN cannot read carmonaai/bench (HTTP 404)`.
+
 ## Build, test, and start the stack
 
 `actions/setup-java@v6` installs Temurin **25** with `cache: maven`, then `mvn -B verify` runs. Temurin 25 is
