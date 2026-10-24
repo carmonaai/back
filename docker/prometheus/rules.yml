@@ -432,10 +432,11 @@ groups:
       - record: prompt_cache:tokens_rate_15m
         expr: sum by (model, mode) (rate(carmona_inference_prompt_cache_tokens_total[15m]))
 
-      # The hit ratio. Counters are created by their first increment, so a cache that never hits has a miss series and no hit series, and
-      # `hit / total` over a vector with no hit would be empty: silent exactly when the cache is dead. `or 0 * total` puts a zero hit rate
-      # on every model and mode that has traffic and no hit series, so the ratio reads 0. A model and mode with no traffic in the window
-      # has a total of 0 and the ratio is NaN, which no comparison passes.
+      # The hit ratio. inference-service creates the hit and the miss series together (it touches both on every request, at 0 if need be),
+      # so a dead cache shows a hit series that reads 0. The rule does not depend on that: a counter is created by its first increment, and
+      # `hit / total` over a vector with no hit series would be empty, silent exactly when the cache is dead. `or 0 * total` puts a zero
+      # hit rate on every model and mode that has traffic and no hit series, so the ratio reads 0 however the counter is written. A model
+      # and mode with no traffic in the window has a total of 0 and the ratio is NaN, which no comparison passes.
       - record: prompt_cache:hit_ratio_15m
         expr: |
           (

@@ -1404,9 +1404,9 @@ tests:
       - {eval_time: 61m, alertname: PromptCacheHitRatioLow, exp_alerts: []}
       - {eval_time: 90m, alertname: PromptCacheHitRatioLow, exp_alerts: []}
 
-  # A cache that never hits: only the miss series exists, because a counter is created by its first increment and nothing was ever added
-  # to the hit one (or the engine reports no cached_tokens at all). `hit / total` over a vector with no hit series is an empty vector,
-  # which would make the alert silent exactly when the cache is dead. The ratio is 0, so the alert fires.
+  # Only the miss series exists. inference-service creates both series together (at 0 if need be), so the counter does not produce this
+  # state; the rule must not depend on that. `hit / total` over a vector with no hit series is an empty vector, which would make the
+  # alert silent exactly when the cache is dead (a flag missing, the engine reporting no cached_tokens). The ratio is 0, so the alert fires.
   - name: PromptCacheHitRatioLow fires and the ratio reads 0 when the hit series does not exist
     interval: 15s
     input_series:
