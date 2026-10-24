@@ -436,3 +436,35 @@ groups:
         expr: |
           sum by (model, mode) (rate(carmona_inference_prompt_cache_tokens_total{result="hit"}[15m]))
             / sum by (model, mode) (rate(carmona_inference_prompt_cache_tokens_total[15m]))
+
+      # The 30 minute reading, which is what the alert and the dashboard line compare with 0.30: a window long enough that one
+      # long prompt does not move it, and the same number in both places.
+      - record: prompt_cache:hit_ratio_30m
+        expr: |
+          sum by (model, mode) (rate(carmona_inference_prompt_cache_tokens_total{result="hit"}[30m]))
+            / sum by (model, mode) (rate(carmona_inference_prompt_cache_tokens_total[30m]))
+
+      # Info: a signal about capacity and about how a customer builds prompts, not an outage. for 15m, because the daily window starts
+      # with an empty cache: the first requests of each prefix are cold by design and the runbook warms it, and once hits resume the
+      # 30 m ratio crosses 0.30 within about nine minutes (0.30 x 30 m), so a cold start never holds the condition for 15.
+      # ponytail: 0.30 and the 15m are placeholders, tuned on Day A when the first measured hit ratio of this model exists.
+      - alert: PromptCacheHitRatioLow
+        expr: prompt_cache:hit_ratio_30m < 0.30
+        for: 15m
+        labels: {severity: info}
+        annotations:
+          summary: "{{ $labels.model }} {{ $labels.mode }} prompt cache hit ratio is {{ $value | humanizePercentage }} over 30m, below 30%, for 15m"
+          description: >-
+            Under 30% of the prompt tokens measured in the last 30 minutes came from the engine's prefix cache, with at
+            least 300000 prompt tokens behind that ratio. Capacity per card goes with 1 / (1 - hit ratio), so every point
+            lost is customers the card no longer carries. The 0.30 line and the 300000-token floor are placeholders that
+            the GPU day (Day A) tunes. It stays quiet while the series does not exist, while the traffic is under the floor,
+            and while the engine contract says prefix caching is off (carmona_engine_contract_ok{check="prefix_caching"}
+            reads 0: EngineContractMismatch names that case). What to do: confirm that flag first. Then look at engine
+            restarts (a restart empties the cache, and the first request of each prefix after it is cold) and at memory
+            pressure (engine:cache_usage near 1, vllm:num_preemptions_total rising: old blocks are evicted to make room).
+            Then the customer's prompt layout against docs/inference/prompt-caching.md: anything that changes per request
+            above the shared part (a timestamp, an id, a name) breaks the cache from that point on.
+            carmona_inference_first_output_seconds by cache (none, partial, full) tells which: mostly none means the cache
+            is not hit at all, partial means a prefix is hit and something early in the prompt changes. The metric has no
+            organization on purpose; per-organization numbers are the cachedInputTokens and inputTokens of the usage events.

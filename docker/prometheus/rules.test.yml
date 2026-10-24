@@ -1131,15 +1131,15 @@ tests:
   # The counter has the labels model, mode and result (hit, miss); every inference-service replica counts its own requests, so the rules
   # sum the replicas. Values below are per 15 s scrape; at 31 m both the 15 m and the 30 m window are full, so a rate is the slope.
 
-  # Recording rules: exact values, by model and mode, summed over the replicas. m1 sync is two replicas (500+1500 and 250+750 tokens
+  # Recording rules: exact values, by model and mode, summed over the replicas. m1 sync is two replicas (375+1125 tokens each
   # per scrape: 25% hit, 3000 tokens per scrape = 200 tokens/s); m1 batch is 75% on one replica (1500 tokens per scrape); m2 sync is 30% (also 1500).
   - name: prompt_cache records are the hit ratio and the measured token rate per model and mode, summed over the replicas
     interval: 15s
     input_series:
-      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="hit"}', values: '0+500x130'}
-      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="miss"}', values: '0+1500x130'}
-      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.3:8081", model="m1", mode="sync", result="hit"}', values: '0+250x130'}
-      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.3:8081", model="m1", mode="sync", result="miss"}', values: '0+750x130'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="hit"}', values: '0+375x130'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="miss"}', values: '0+1125x130'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.3:8081", model="m1", mode="sync", result="hit"}', values: '0+375x130'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.3:8081", model="m1", mode="sync", result="miss"}', values: '0+1125x130'}
       - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="batch", result="hit"}', values: '0+1125x130'}
       - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="batch", result="miss"}', values: '0+375x130'}
       - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m2", mode="sync", result="hit"}', values: '0+450x130'}
@@ -1157,3 +1157,77 @@ tests:
           - {labels: 'prompt_cache:tokens_rate_15m{model="m1", mode="sync"}', value: 200}
           - {labels: 'prompt_cache:tokens_rate_15m{model="m1", mode="batch"}', value: 100}
           - {labels: 'prompt_cache:tokens_rate_15m{model="m2", mode="sync"}', value: 100}
+      - expr: prompt_cache:hit_ratio_30m
+        eval_time: 31m
+        exp_samples:
+          - {labels: 'prompt_cache:hit_ratio_30m{model="m1", mode="sync"}', value: 0.25}
+          - {labels: 'prompt_cache:hit_ratio_30m{model="m1", mode="batch"}', value: 0.75}
+          - {labels: 'prompt_cache:hit_ratio_30m{model="m2", mode="sync"}', value: 0.3}
+
+  # The two windows are different windows. Counters start at 10 million so no rate is cut at zero. For the first 15 minutes every scrape
+  # adds 59000 miss tokens, then every scrape adds 60000 hit tokens. At 30 m the last 15 m is all hits (ratio 1) and the 30 m window
+  # holds 60 scrapes of misses and 59 of hits, 3.54 million tokens each (the first scrape of a window only starts the count): 0.5.
+  - name: prompt_cache ratios of 15 m and 30 m read their own window
+    interval: 15s
+    input_series:
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="hit"}', values: '10000000x61 10060000+60000x60'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="miss"}', values: '10000000+59000x61 13599000x61'}
+    promql_expr_test:
+      - expr: prompt_cache:hit_ratio_15m
+        eval_time: 30m
+        exp_samples:
+          - {labels: 'prompt_cache:hit_ratio_15m{model="m1", mode="sync"}', value: 1}
+      - expr: prompt_cache:hit_ratio_30m
+        eval_time: 30m
+        exp_samples:
+          - {labels: 'prompt_cache:hit_ratio_30m{model="m1", mode="sync"}', value: 0.5}
+
+  # 4000 tokens/s measured (60000 per scrape, far over any floor), 20% of them hits for the first 20 minutes, then 80%. Pending from the
+  # first scrape that has a rate (15 s), so it fires at 15m15s and not at 15m. The 30 m window forgets the low ratio after the switch:
+  # the share of hits in it passes 30% five minutes later, so it is resolved long before 30 m.
+  - name: PromptCacheHitRatioLow fires after 15m below 30 percent, names model and mode, and resolves when the hit ratio recovers
+    interval: 15s
+    input_series:
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="hit"}', values: '0+12000x80 1008000+48000x200'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="miss"}', values: '0+48000x80 3852000+12000x200'}
+    alert_rule_test:
+      - {eval_time: 15m, alertname: PromptCacheHitRatioLow, exp_alerts: []}
+      - eval_time: 15m15s
+        alertname: PromptCacheHitRatioLow
+        exp_alerts:
+          - exp_labels: {severity: info, model: m1, mode: sync}
+            exp_annotations:
+              summary: "m1 sync prompt cache hit ratio is 20% over 30m, below 30%, for 15m"
+              description: &cache-text >-
+                Under 30% of the prompt tokens measured in the last 30 minutes came from the engine's prefix cache, with at
+                least 300000 prompt tokens behind that ratio. Capacity per card goes with 1 / (1 - hit ratio), so every point
+                lost is customers the card no longer carries. The 0.30 line and the 300000-token floor are placeholders that
+                the GPU day (Day A) tunes. It stays quiet while the series does not exist, while the traffic is under the floor,
+                and while the engine contract says prefix caching is off (carmona_engine_contract_ok{check="prefix_caching"}
+                reads 0: EngineContractMismatch names that case). What to do: confirm that flag first. Then look at engine
+                restarts (a restart empties the cache, and the first request of each prefix after it is cold) and at memory
+                pressure (engine:cache_usage near 1, vllm:num_preemptions_total rising: old blocks are evicted to make room).
+                Then the customer's prompt layout against docs/inference/prompt-caching.md: anything that changes per request
+                above the shared part (a timestamp, an id, a name) breaks the cache from that point on.
+                carmona_inference_first_output_seconds by cache (none, partial, full) tells which: mostly none means the cache
+                is not hit at all, partial means a prefix is hit and something early in the prompt changes. The metric has no
+                organization on purpose; per-organization numbers are the cachedInputTokens and inputTokens of the usage events.
+      - eval_time: 20m
+        alertname: PromptCacheHitRatioLow
+        exp_alerts:
+          - exp_labels: {severity: info, model: m1, mode: sync}
+            exp_annotations:
+              summary: "m1 sync prompt cache hit ratio is 20% over 30m, below 30%, for 15m"
+              description: *cache-text
+      - {eval_time: 30m, alertname: PromptCacheHitRatioLow, exp_alerts: []}
+      - {eval_time: 45m, alertname: PromptCacheHitRatioLow, exp_alerts: []}
+
+  # A healthy cache (80% hits) on the same traffic never alerts.
+  - name: PromptCacheHitRatioLow stays quiet while the hit ratio is healthy
+    interval: 15s
+    input_series:
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="hit"}', values: '0+48000x300'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="miss"}', values: '0+12000x300'}
+    alert_rule_test:
+      - {eval_time: 30m, alertname: PromptCacheHitRatioLow, exp_alerts: []}
+      - {eval_time: 60m, alertname: PromptCacheHitRatioLow, exp_alerts: []}
