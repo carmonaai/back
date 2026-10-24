@@ -239,7 +239,9 @@ replicas and the request guard:* `ReplicaUnhealthy` (1 m), `ReplicaWentUnhealthy
 neutral by default (the health gate is off), and an alert on a metric that does not exist stays silent. *Is the cache doing its job:*
 `PromptCacheHitRatioLow` (a signal, not a page): under 30 % of the measured prompt tokens served from the prefix cache over 30 m,
 for 15 m, with at least 300000 tokens behind the ratio. It stays quiet while the counter does not exist, while the traffic is under
-that floor, and while the engine contract says prefix caching is off (`EngineContractMismatch` names that case). The 0.30 line, the
+that floor, when no prompt token was measured in the last 5 minutes (the 30 m window remembers a burst for 30 minutes, the alert is about
+traffic that is going on, and it resolves 5 minutes after the traffic stops), and while the engine contract says prefix caching is off
+(`EngineContractMismatch` names that case). The 0.30 line, the
 floor and the 15 m are placeholders that the GPU day (Day A) tunes. What to do, in order: confirm the engine flags
 (`carmona_engine_contract_ok{check="prefix_caching"}`, and `--enable-prompt-tokens-details`, without which the engine reports no
 cached tokens and every request reads as a miss; no gauge flags that flag, but `carmona_engine_prefix_cache_hit_ratio{model}`, the
