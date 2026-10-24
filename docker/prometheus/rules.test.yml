@@ -1126,3 +1126,34 @@ tests:
               description: >-
                 A replica of vllm no longer resolves or no longer exists, and the rest still answer, so no `up == 0`
                 exists to alert on. Compare `docker compose ps vllm` with the replicas you asked for.
+
+  # --- P0-1b: the prompt cache hit ratio (carmona_inference_prompt_cache_tokens_total, counted once per request by inference-service) ----
+  # The counter has the labels model, mode and result (hit, miss); every inference-service replica counts its own requests, so the rules
+  # sum the replicas. Values below are per 15 s scrape; at 31 m both the 15 m and the 30 m window are full, so a rate is the slope.
+
+  # Recording rules: exact values, by model and mode, summed over the replicas. m1 sync is two replicas (500+1500 and 250+750 tokens
+  # per scrape: 25% hit, 3000 tokens per scrape = 200 tokens/s); m1 batch is 75% on one replica (1500 tokens per scrape); m2 sync is 30% (also 1500).
+  - name: prompt_cache records are the hit ratio and the measured token rate per model and mode, summed over the replicas
+    interval: 15s
+    input_series:
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="hit"}', values: '0+500x130'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="sync", result="miss"}', values: '0+1500x130'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.3:8081", model="m1", mode="sync", result="hit"}', values: '0+250x130'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.3:8081", model="m1", mode="sync", result="miss"}', values: '0+750x130'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="batch", result="hit"}', values: '0+1125x130'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m1", mode="batch", result="miss"}', values: '0+375x130'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m2", mode="sync", result="hit"}', values: '0+450x130'}
+      - {series: 'carmona_inference_prompt_cache_tokens_total{job="inference", instance="10.0.0.2:8081", model="m2", mode="sync", result="miss"}', values: '0+1050x130'}
+    promql_expr_test:
+      - expr: prompt_cache:hit_ratio_15m
+        eval_time: 31m
+        exp_samples:
+          - {labels: 'prompt_cache:hit_ratio_15m{model="m1", mode="sync"}', value: 0.25}
+          - {labels: 'prompt_cache:hit_ratio_15m{model="m1", mode="batch"}', value: 0.75}
+          - {labels: 'prompt_cache:hit_ratio_15m{model="m2", mode="sync"}', value: 0.3}
+      - expr: prompt_cache:tokens_rate_15m
+        eval_time: 31m
+        exp_samples:
+          - {labels: 'prompt_cache:tokens_rate_15m{model="m1", mode="sync"}', value: 200}
+          - {labels: 'prompt_cache:tokens_rate_15m{model="m1", mode="batch"}', value: 100}
+          - {labels: 'prompt_cache:tokens_rate_15m{model="m2", mode="sync"}', value: 100}
