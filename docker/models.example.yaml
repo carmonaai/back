@@ -1,0 +1,76 @@
+# The model list of inference-service, for compose.models.yaml: copy this file to models.yaml (git-ignored), keep the entry you serve and set what its
+# comments ask for. The keys are those of carmona.inference.models in api/inference-service/src/main/resources/application.yaml, where each is described.
+# A model is an entry here, with no code and no CARMONA_INFERENCE_MODELS_n_* variable. Entry 1 is live; 2, 3 and 4 are templates written as comments:
+# switch one on by toggling the comment off its lines (a leading `# ` each, the prose inside the block too). Entries 1 and 2 have the same id, so one of the two.
+# A `${NAME}` takes its value from docker/.env through the names listed in compose.models.yaml, or you write the value in its place. A placeholder with no
+# default has no value until it is given one: a number left that way stops the service at start, naming the property; a text left that way is read as its own text.
+# A model needs its context window, a max output within it, its slots and its queue, each its own: they depend on the model and on its hardware.
+# The levels of a reasoning model are words: write one that YAML reads as a boolean in quotes ("off", "on", "yes", "no").
+carmona:
+  inference:
+    models:
+      # 1. The simulator of the default stack. compose.yaml starts it as `engine` and this overlay does not (add --profile simulator-off to the compose
+      #    command). The values are compose.yaml's: the simulator's --model, --max-model-len and --max-num-seqs, and the 2 places inference-service lets wait at it
+      #    (the simulator's own queue holds 8, which admission never fills). It has no prefix-cache counters, so the contract check's metrics line stays at 0 for
+      #    this entry: a gauge, never a refusal.
+      - id: carmona/qwen3-4b            # the engine's served model name: what clients send, what billing prices and what is sent to the engine
+        created: 2026-10-01T00:00:00Z   # when the model became available; an ISO-8601 instant (a bare number is read as milliseconds), shown by GET /v1/models as Unix seconds
+        url: http://engine:8000
+        api-key: ${ENGINE_API_KEY}      # the key stays in docker/.env; the simulator ignores it
+        context-window: 4096            # the engine's --max-model-len
+        max-output: 1024                # 1 to the window: the cap on max_tokens, and what a request that names none is given
+        slots: 4                        # the engine's --max-num-seqs
+        queue: 2                        # places that may wait at the engine; 0 is a setting (a request then needs a free slot)
+
+      # 2. A small local vLLM model: Qwen3-4B-Instruct-2507 in 4 bits on the laptop's RTX 3050 6 GB, as the vllm service of compose.gpu.yaml runs it. The id, the
+      #    window and the sizes are those of that service's command: --served-model-name, --max-model-len 4096, --max-num-seqs 4 and --max-num-queued-reqs 6,
+      #    which is the slots plus the queue; the 4 and the 2 are what its bench found for that card. compose.models.yaml cannot be listed after compose.gpu.yaml,
+      #    so the engine runs on its own, started with that command, and the url is where it listens.
+      # - id: carmona/qwen3-4b
+      #   created: 2026-10-01T00:00:00Z
+      #   url: http://vllm:8000             # the name compose.gpu.yaml gives the service on this stack's network; any address that reaches the engine will do
+      #   api-key: ${VLLM_API_KEY}          # the --api-key the engine was started with
+      #   context-window: 4096
+      #   max-output: 1024
+      #   slots: 4
+      #   queue: 2
+
+      # 3. A model nobody has measured yet, which one person wants to try on an engine started by a generic recipe. The safe settings: one request at a
+      #    time and none waiting, so a second request at once finds no place and is refused with a 429; no reasoning levels, so reasoning_effort is ignored
+      #    for it; no limits, timeouts or prefill allowance of its own, so the global ones apply; no kv-tokens, so the engine's own reading of its KV cache
+      #    wins (without one only the slots are checked, and the log says so). Start the engine as compose.gpu.yaml starts vLLM: --served-model-name equal
+      #    to the id, --scheduling-policy priority and --enable-prompt-tokens-details. Measure the model before it serves customers.
+      # - id: example-org/example-model     # the engine's --served-model-name
+      #   created: 2026-11-12T00:00:00Z     # the day this entry was added
+      #   url: ${TRY_ENGINE_URL}            # the engine's address as this stack reaches it; a rented node has a new one with each rental
+      #   api-key: ${TRY_ENGINE_API_KEY}    # the engine's --api-key
+      #   context-window: ${TRY_CONTEXT_WINDOW}   # the --max-model-len the engine was started with; no default
+      #   max-output: ${TRY_MAX_OUTPUT}           # 1 to the window: the longest answer one request may ask for, your choice; no default
+      #   slots: 1
+      #   queue: 0
+
+      # 4. A remote node serving Kimi K3.1-Pro, the first worked example: a window of 1,048,576 tokens and reasoning that is always on, which a client steers
+      #    with the levels low, high and max. Nothing in it was measured for this model: every value that only a run on the node gives is a placeholder with no
+      #    default, so the service does not start until each one is set, and the comment above it says what measures it.
+      # - id: carmona/kimi-k3.1-pro
+      #   created: 2026-11-12T00:00:00Z
+      #   url: ${KIMI_ENGINE_URL}           # the node's address as this stack reaches it
+      #   api-key: ${KIMI_ENGINE_API_KEY}   # the key the node's engine was started with (--api-key)
+      #   context-window: 1048576           # the model's own window; the engine's --max-model-len must be at least this (the contract check warns when it is below)
+      #   # max-output is not measured, it is your choice: the longest answer one request may ask for, 1 to the window. What such an answer costs comes from the bench.
+      #   max-output: ${KIMI_MAX_OUTPUT}
+      #   # slots is C, from the bench on the node: the requests it runs at once while still meeting the latency targets. The engine's --max-num-seqs is the same number.
+      #   slots: ${KIMI_SLOTS}
+      #   # queue is q, from the same bench: the requests that may wait at the node within the targets. The engine's --max-num-queued-reqs is slots plus queue.
+      #   queue: ${KIMI_QUEUE}
+      #   # kv-tokens is left out: the engine's own reading of its KV cache, taken at start, wins.
+      #   reasoning:
+      #     efforts: [low, high, max]       # the levels a client may ask for with reasoning_effort; any other is a 400 invalid_reasoning_effort
+      #     # default is left out until a run has measured which level suits; unset, nothing is sent when the client names none and the engine decides.
+      #     # template-kwarg is left out: the level goes to the engine as the field reasoning_effort. Set it only if the chat template reads the level from a keyword.
+      #   # ttft-timeout is measured on the node: the time to the first event of a cold prompt of the largest size you accept. It needs its unit (a bare number is milliseconds).
+      #   ttft-timeout: ${KIMI_TTFT_TIMEOUT}
+      #   prefill:
+      #     # ms-per-token is measured on the node: milliseconds of prefill per input token (the service counts bytes / 4), from cold prompts of two or three sizes.
+      #     ms-per-token: ${KIMI_PREFILL_MS_PER_TOKEN}
+      #   # tiers is left out: the global limits apply, and a request near the window can never pass the trial tier's 20,000 input tokens a minute (carmona.inference.tiers).

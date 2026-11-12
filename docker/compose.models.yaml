@@ -1,0 +1,67 @@
+# The model list from a file instead of the environment, on top of compose.yaml: any model an engine can serve is added by settings alone,
+# with no rebuild and no CARMONA_INFERENCE_MODELS_n_* variable per model (round AM). Used with compose.minio.yaml, the way smoke.sh uses the stack:
+#   cp models.example.yaml models.yaml      # models.yaml is git-ignored: keep the entries you serve and set what their comments ask for
+#   docker compose -f compose.yaml -f compose.minio.yaml -f compose.models.yaml up -d --build --wait
+# A model is added, changed or removed by editing models.yaml and recreating inference-service: `up -d --force-recreate inference` with the same -f flags (only
+# that container is recreated, and it lets the streams it holds finish: its stop_grace_period is 720 s). The file is read once, at start, and a mistake in it
+# stops the service, naming the model and the rule.
+# This overlay starts no engine: the simulator is switched off as in compose.gpu.yaml, and nothing is added. An engine is whatever the file's url
+# reaches: a rented node, vLLM on the host or in a container of your own, the simulator. To serve the example's first entry from the simulator, add
+# --profile simulator-off to the command: the profile only keeps the simulator out of the other overlays, so naming it brings it back.
+# Not combined with compose.gpu.yaml or compose.fleet.yaml: listed after either, the `!reset`s below are not applied (checked with Compose 2.39.2), the keys
+# of model 0 stay in the environment, and an environment beats the file. A fleet is the `replicas:` list of an entry. Prometheus finds its engine jobs by DNS
+# name (prometheus/prometheus.yml), so a remote engine is not scraped there; inference-service's own carmona_engine_* gauges still show it.
+services:
+  # The simulator is the default engine; with a models file it is not started, and nothing may wait for it.
+  engine:
+    profiles: ["simulator-off"]
+
+  inference:
+    # models.yaml has to exist before the first `up`. The mount asks Compose not to create a missing path (`create_host_path: false`) and Docker Desktop makes an
+    # empty directory of that name all the same (checked on Windows with Compose 2.39.2): inference-service does not read it and stops at start, on the shipped
+    # model's missing url. If that happened, remove the directory and copy the file.
+    volumes:
+      - type: bind
+        source: ./models.yaml
+        target: /etc/carmona/models.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+    environment:
+      # Spring reads this as spring.config.additional-location: the list in the file replaces the whole model list of application.yaml. Not `optional:`,
+      # so a file that is not there stops the service instead of serving the shipped placeholder model.
+      SPRING_CONFIG_ADDITIONAL_LOCATION: file:/etc/carmona/models.yaml
+      # compose.yaml states model 0 through the environment, and an environment beats a file, taking a list whole from the first source that has any element
+      # of it: each of these keys is removed, or one left behind would make the file's models unread. `!reset` removes a key of the file it overlays.
+      CARMONA_INFERENCE_MODELS_0_ID: !reset null
+      CARMONA_INFERENCE_MODELS_0_CREATED: !reset null
+      CARMONA_INFERENCE_MODELS_0_URL: !reset null
+      CARMONA_INFERENCE_MODELS_0_APIKEY: !reset null
+      CARMONA_INFERENCE_MODELS_0_CONTEXTWINDOW: !reset null
+      CARMONA_INFERENCE_MODELS_0_MAXOUTPUT: !reset null
+      CARMONA_INFERENCE_MODELS_0_SLOTS: !reset null
+      CARMONA_INFERENCE_MODELS_0_QUEUE: !reset null
+      # compose.yaml narrows the contract check to the simulator's four metric families; the engines of this file are held to the code default (vLLM's
+      # eight), which `!reset` brings back, as compose.gpu.yaml does. An entry the simulator serves then fails that check: a gauge and a log line, never a refusal.
+      CARMONA_INFERENCE_CONTRACT_REQUIREDFAMILIES: !reset null
+      # What the file's ${NAME} placeholders read: the engines' keys and addresses stay in docker/.env (or the shell), one line here for each name.
+      # A name with no value is not set in the container, and a number placeholder left unset stops the service at start (its entry says what measures it).
+      # ponytail: one line per name, because Compose passes nothing it is not told, so a placeholder you add to the file needs its line here too, or its value
+      # written into the file. An `env_file` of models-only values would take any name, at the price of a second file of secrets; do that if names pile up.
+      ENGINE_API_KEY: ${ENGINE_API_KEY:?set in .env}   # entry 1; also what compose.yaml and Prometheus already require
+      VLLM_API_KEY:                                    # entry 2; the key compose.gpu.yaml starts vLLM with
+      TRY_ENGINE_URL:                                  # entry 3
+      TRY_ENGINE_API_KEY:
+      TRY_CONTEXT_WINDOW:
+      TRY_MAX_OUTPUT:
+      KIMI_ENGINE_URL:                                 # entry 4
+      KIMI_ENGINE_API_KEY:
+      KIMI_MAX_OUTPUT:
+      KIMI_SLOTS:
+      KIMI_QUEUE:
+      KIMI_TTFT_TIMEOUT:
+      KIMI_PREFILL_MS_PER_TOKEN:
+    # Nothing waits for an engine: it may be a node the stack cannot see or a simulator started a moment later (the KV budget is read with a retry).
+    depends_on: !override
+      valkey: { condition: service_healthy }
+      usage: { condition: service_healthy }
