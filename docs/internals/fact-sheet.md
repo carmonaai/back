@@ -47,7 +47,7 @@ and the pitfalls list).
 
 | Class | What it does |
 |---|---|
-| `V1RequestFilter` | `/v1` checks that run *before* authentication: refuses `Transfer-Encoding` and HTTP/1.0 (a body must not be readable two ways), refuses credentials in the query string, requires `Content-Length`, caps the body at **4 MB**. |
+| `V1RequestFilter` | `/v1` checks that run *before* authentication: refuses `Transfer-Encoding` and HTTP/1.0 (a body must not be readable two ways), refuses credentials in the query string, requires `Content-Length`, caps the body at **4 MB** (`request-body.max-size`), or **32 MB** (`chat-max-size`) for `POST /v1/chat/completions` only. |
 | `ApiKeyAuthenticationManager` | Bearer `cmn_…` → format + CRC check (no I/O) → SHA-256 → Valkey `apikey:{hash}` (60 s TTL) → on a miss, auth-service. Caches misses too, so garbage keys cannot hammer auth-service. Refuses an expired key from the cache. Then the `no_credit:{org}` flag → 402. |
 | `ApiKeyFormat` | The key's shape and its checksum, so an obviously malformed key never costs a round trip. |
 | `IdentityHeadersFilter` | Strips every inbound identity header, then sets `id-account` (from the JWT) or `id-organization` + `id-api-key` + `tier` (from the API key). Also strips `Cookie` except on the two session endpoints. Services trust these headers and nothing else. |

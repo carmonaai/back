@@ -54,7 +54,8 @@ can happen next: the gateway writes a refusal itself, or the request reaches an 
    replaced — stamps it on the response at commit time, and registers the line it writes when the exchange
    ends, however it ends.
 2. **`V1RequestFilter` runs before Spring Security** on paths under `/v1/`: no `Transfer-Encoding`, no
-   HTTP/1.0, no credential-looking query string, a `Content-Length`, and at most 4 MB.
+   HTTP/1.0, no credential-looking query string, a `Content-Length`, and a body within its cap: 4 MB, or
+   32 MB for a chat completion.
 3. **Authentication runs by path.** On `/v1/**` the API key is resolved by `ApiKeyAuthenticationManager` and
    the credit flag checked; everywhere else a JWT is verified locally against the cached JWKS.
 4. **`RateLimitFilter` charges a token bucket** keyed by the account or the API key, or by client IP when
@@ -86,7 +87,26 @@ Spring Security sees it, and why the identity headers are set as late as possibl
 nginx → gateway → inference-service. It refuses: a `Transfer-Encoding` header or an HTTP/1.0 request
 (`unsupported_framing`); a query string matching `(?i)cmn_|key|token` (`credentials_in_url`), because query
 strings end up in logs and browser history; a `POST` with no `Content-Length` (`length_required`, 411); and a
-body over `MAX_BODY` = 4 MB (`request_too_large`, 413). Nothing is checked before it.
+body over its cap (`request_too_large`, 413). Nothing is checked before it.
+
+The cap is a setting under `carmona.gateway.request-body`, and there are two. `max-size` is 4MB (4,194,304 bytes) for
+every `/v1` request: files, batches, the model list, and every method but `POST` on the chat path. `chat-max-size` is
+32MB (33,554,432 bytes) for `POST /v1/chat/completions` only, the one request whose size follows a model, because a
+prompt for a long context window is megabytes. The filter runs before the router, so it knows no route and no model,
+only the method and the path, and the cap is chosen from those two; a `PUT` or a `DELETE` on the chat path keeps
+`max-size`. The gateway knows nothing about models, so `chat-max-size` is one number set by hand for the deployment: 32MB
+equals the bound inference-service holds a model with a window of 2,097,152 tokens to (2,097,152 × 16 = 33,554,432
+bytes), twice that of the first worked example's 1,048,576 tokens (16,777,216 bytes). It is a flood guard, not a model
+limit: each model's own bound and the budget for bodies in flight are inference-service's, and a body over a small
+model's bound is still streamed to it and refused there. A deployment with a window above 2,097,152 tokens raises
+`chat-max-size`, and a `chat-max-size` below `max-size` stops the gateway at start. Both caps are held twice, on the
+declared `Content-Length`, with no upstream call, and on the bytes actually read. The 413 text states no number,
+because it differs by path.
+
+The body timeout did not grow with the cap. `request-body.timeout` is 60 s for every route, and 32MB is
+32 × 1,048,576 × 8 = 268,435,456 bits, so a chat body of that size needs 268,435,456 ÷ 60 = 4.47 Mbit/s or more to
+arrive in time; a slower sender is cut at 60 s without an answer and sends it again. Raising the one global timeout
+would hold every route's permits that much longer for an idle or trickling connection.
 
 ## API keys: the format check, the cache, and the 60-second TTL
 
@@ -162,7 +182,7 @@ echoed, and `e.getMessage()` is never used.
 |---|---|---|---|
 | 400 | `invalid_request_error` | `unsupported_framing`, `credentials_in_url` | bad framing, or a credential in the URL |
 | 411 | `invalid_request_error` | `length_required` | a `POST` without `Content-Length` |
-| 413 | `invalid_request_error` | `request_too_large` | body over 4 MB |
+| 413 | `invalid_request_error` | `request_too_large` | body over its cap: 4 MB, or 32 MB for a chat completion |
 | 401 | `invalid_request_error` | `invalid_api_key` | missing, malformed, unknown, revoked or expired |
 | 402 | `insufficient_quota` | `insufficient_balance` | the organization's prepaid balance is used up |
 | 403 | `permission_error` | `organization_not_active` | the key is fine, the organization is not |
@@ -208,7 +228,9 @@ would be a complete authentication bypass. `Cookie` is removed too, except on th
   the entry drains. Shortening the TTL is the fix if it ever matters.
 - **`RateLimitFilter` has no shared memory of a Valkey outage.** Its fallback buckets are per-replica and
   reset wholesale past 100,000 keys, so they bound one instance's flood, not a fleet's.
-- **The `/v1` body cap is 4 MB**, which is also what caps a Batch file upload; OpenAI allows 200 MB.
+- **The `/v1` body cap is 4 MB** for everything but a chat completion, so it is also what caps a Batch file upload
+  (batch-service's own multipart limit is 4MB too, and the two are raised together); OpenAI allows 200 MB. A chat
+  completion has its own cap, 32 MB, one number for the whole deployment because the gateway cannot read the model list.
 - **Alerts are visible but nobody is paged.** There is no Alertmanager destination configured.
 
 ## Where to look

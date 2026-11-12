@@ -145,7 +145,10 @@ whole non-streamed answer.</figcaption>
 decision: `priority` would let a caller buy a place in the engine's queue, `cache_salt` would let one tenant
 read the timing of another tenant's prefix cache, and `chat_template_kwargs` or a vLLM extension would reach a
 component the client is not supposed to configure. What does survive — `temperature`, `stop`, `seed`, `tools`
-— is an allowlist, so a field added to the OpenAI schema tomorrow is dropped until someone adds it on purpose.
+— is an allowlist, so a field added to the OpenAI schema tomorrow is dropped until someone adds it on purpose. One
+value is chosen by the client and written by the service: the reasoning level of a model whose entry lists levels,
+checked against that list and sent as `reasoning_effort` (or under the entry's `chat_template_kwargs` name); for any
+other model `reasoning_effort` is ignored and nothing of it is sent.
 
 **The pool is a decision about failure, not about performance.** Reactor Netty's default provider queues a
 request for a connection for 45 seconds; on a saturated engine that turns a slow answer into a stalled
@@ -179,7 +182,10 @@ deadline — and 600 s sits under the gateway's 660 s so the error comes from th
 - **A second engine replica** needs a way to choose one; today a model has exactly one URL in configuration.
   The upgrade is replica routing — fewest-waiting, or the Gateway API Inference Extension on Kubernetes.
 - **A model that legitimately pauses for longer than 30 s between tokens** would trip the idle deadline. The
-  fix is a per-model limit, not a larger global one.
+  fix is a per-model limit, not a larger global one, and it exists: a model's entry may set its own `ttft-timeout`,
+  `idle-timeout` and `response-timeout` (the last at most the global 600 s, which the gateway's 660 s route wait and
+  the shutdown phase are sized from) and its own `prefill` allowance, each falling back to the global key. A model
+  that sets none keeps the 30 s, 30 s and 600 s of this page.
 - **Tracing is not wired**, so a request's path across the engine call is not visible outside the metrics.
 - **Reading every frame costs one JSON parse per chunk.** The tracker parses each event to read its timing and
   usage, which is the price of per-request TTFT and ITL without keeping the text. It is the first thing to

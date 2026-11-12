@@ -142,6 +142,10 @@ immediate (trial, flex, batch) or arrives after the 1.5-second wait (standard, e
 5. **The model's share for this tier is checked next**, in memory, not in Valkey: trial and the batch lines
    get `C/2`, standard `0.85·C`, enterprise `C+q`. On `carmona/qwen3-4b` (C = 4, q = 2) that is 2, 3 and 6 —
    and then the organization's own `max-in-flight` (2, 4 and 16) caps what one customer can take of it.
+   The per-minute limits of the three buckets and that `max-in-flight` belong to the tier: the global `tiers`
+   unless the model's own entry has a `tiers.<tier>` of its own, which replaces the four limits for that model
+   alone. Admitting and settling look the limits up the same way, so a request is refunded against the limits
+   that admitted it. The shares `C/2`, `0.85·C` and `C+q` stay global fractions of the model's own `C` and `q`.
 6. **A paying tier that meets a cap waits**, polling every 100 ms for up to `admission-wait`, 1500 ms by
    default. Trial, flex and batch lines are refused at once: they are the traffic meant to be shed first.
 7. **While several organizations wait for one model, the lowest counter goes first.** Each organization has a

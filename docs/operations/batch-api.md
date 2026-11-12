@@ -237,11 +237,13 @@ because a misrouted URL answering 404 must not wipe everyone's files.
 
 ## The 4 MB cap, and why it exists
 
-`V1RequestFilter` in the gateway caps every `/v1` body at **4 MB**, requires a `Content-Length` and refuses
+`V1RequestFilter` in the gateway caps every `/v1` body at **4 MB** (`carmona.gateway.request-body.max-size`; only
+`POST /v1/chat/completions` has a cap of its own, `chat-max-size`), requires a `Content-Length` and refuses
 `Transfer-Encoding` outright; batch-service sets `spring.servlet.multipart.max-file-size: 4MB` as well and
-answers 413 `file_too_large` if reached anyway. The cap is not about the Batch API — it is the `/v1` body limit
-that protects the chat path from a request that cannot fit a context window, applied to a route that reuses the
-same prefix.
+answers 413 `file_too_large` if reached anyway. The cap is not about the Batch API — it is the default `/v1` body
+limit, applied to a route that reuses the same prefix. A chat completion has a larger one because the prompt for a
+long context window is megabytes; the file route keeps 4 MB, and batch-service's own limit has to be raised
+together with `max-size`, or the refusal only moves to after the upload was received.
 
 **OpenAI allows 200 MB**, and that is a real gap. It is also why file content is `bytea` in the `batch` schema
 rather than in object storage: the migration's own `ponytail:` comment names object storage as the upgrade

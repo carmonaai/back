@@ -85,7 +85,11 @@ still lands instead of failing the batch. Partitions are created a week ahead, s
 Validation is narrow and explicit: `eventId` must parse as a UUID; `requestId` (≤ 64), `organizationId`
 (≤ 36), `apiKeyId` (≤ 36) and `model` (≤ 128) must be non-blank; `mode`, `tier` and `status` must be one of the
 known words; token counts must be non-negative with `cachedInputTokens ≤ inputTokens`; `startedAt` must be
-present, `durationMs` non-negative and `ttftMs` either absent or non-negative.
+present, `durationMs` non-negative and `ttftMs` either absent or non-negative. Two fields are the exception to
+"narrow and explicit": `reasoningTokens` and `firstOutputMs` are never checked. A figure that does not fit (reasoning
+below 0 or above `outputTokens`, a first output below 0) is stored as null, "not reported", because an event refused
+over a number that only describes the request is dropped by the relay and its tokens are never billed. Unknown fields
+are ignored and missing ones are null, which is what lets inference-service and usage-service be rolled one at a time.
 
 ## What an event carries
 
@@ -100,6 +104,8 @@ present, `durationMs` non-negative and `ttftMs` either absent or non-negative.
 | `outputTokens` | 233 | what the customer read |
 | `status` | `ok` | `ok`, `error` (ours, not billed), `cancelled` |
 | `startedAt`, `ttftMs`, `durationMs` | instants and milliseconds | latency, not content |
+| `reasoningTokens` | a count, or null | the part of `outputTokens` the engine reported as reasoning: already inside the output and its price, never added to either; null when not reported, never 0 |
+| `firstOutputMs` | milliseconds, or null | from the start of a stream to its first content, tool call or reasoning; null for a non-streamed answer; `ttftMs` keeps its own meaning, the first content or tool call |
 
 And what it deliberately never carries: **no prompt, no answer, no client address, no headers.** The columns
 are ids, counts and timings, and the three word columns are `CHECK`-constrained so a typo becomes a rejected
@@ -141,7 +147,9 @@ re-run of an already-sealed range writes nothing.
 
 `usage_window` is keyed by `(organization_id, api_key_id, model, mode, window_start)`, with an index on
 `window_start` because billing walks it in that order. Failed requests are counted in `errors` and left out of
-the token sums, because an error of ours is not billed.
+the token sums, because an error of ours is not billed. The window has no column for reasoning tokens on purpose:
+billing reads only its three token sums, the summary reads events, and an older instance's seal statement, which
+does not list a new column, keeps working while a roll is in progress.
 
 ## The customer-facing summary
 
@@ -158,6 +166,14 @@ record — `Price.at` picks the row in effect, `Price.cost` does the rounding �
 produced by the same code as the number in the ledger. If pricing cannot be reached, every cost comes back
 `null`: the customer still reads their tokens, and never a number the platform made up. One unpriced row makes
 its whole group's cost `null` rather than a partial sum, because a partial sum understates a bill.
+
+Each group also carries `reasoningTokens`: the part of its output tokens that engines reported as reasoning, summed
+with the same filter as the output tokens (an error of ours is left out). It is already inside `outputTokens` and
+inside the price and is never added to either, so the cost does not change. It adds up only the requests that
+reported it, and a group in which none did shows `null`, not 0, because 0 would claim that its model did not think.
+The consequence is a known ceiling: a share taken against all of a group's output tokens understates the real one
+when some of the group's engines report none, for instance an engine started without a reasoning parser. Summing the
+output tokens of the events that did report, as the denominator, is the upgrade.
 
 ## Why it is like this
 

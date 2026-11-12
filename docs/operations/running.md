@@ -207,6 +207,35 @@ p95 is still 801 ms. Eight measured 159 output tok/s against 157 at four — the
 of 4,033 ms and 10% goodput. The engine's port is not published, and `smoke.sh` asserts that: on the GPU stack
 it curls `localhost:8000` and fails if anything answers.
 
+## The model list from a file
+
+`docker/compose.models.yaml` keeps the model list in a file instead of the environment: any model an engine can serve
+is added by settings alone, with no rebuild and no `CARMONA_INFERENCE_MODELS_n_*` variable per model.
+
+```bash
+cd docker
+cp models.example.yaml models.yaml    # git ignores models.yaml: keep the entries you serve, set what their comments ask for
+docker compose -f compose.yaml -f compose.minio.yaml -f compose.models.yaml up -d --build --wait
+```
+
+The overlay mounts `models.yaml` read-only into inference-service as an additional configuration location, takes the model
+keys of `compose.yaml` out of the environment (an environment beats a file, and replaces a list whole), and starts no
+simulator: the engine is whatever the entry's `url` reaches, a rented node, vLLM on the host or in a container of your
+own, or the simulator, started with `--profile simulator-off`. The engines' keys and addresses stay in `docker/.env`;
+the file reads them as `${NAME}` placeholders, one line for each name in the overlay. A name with no value is not set in
+the container, and a number left unset stops the service at start, naming the property. The overlay is not combined with
+`compose.gpu.yaml` or `compose.fleet.yaml`. To add, change or remove a model, edit `models.yaml` and recreate only
+inference-service (`up -d --force-recreate inference` with the same `-f` flags): it lets the streams it holds finish, its
+`stop_grace_period` being 720 s. The file is read once, at start, and a mistake in it stops the service, naming the model
+and the rule. [Adding a model](../services/inference.md#adding-a-model) says what each key means, what the engine must be
+started with and what to measure before the model serves customers. Prometheus finds its engine jobs by DNS name, so a
+remote engine is not scraped there; the service's own `carmona_engine_*` gauges still show it.
+
+`docker/smoke.sh` checks the new behaviour on the default stack: the listing shows the model's `context_window` and
+`max_output_tokens` as the stack states them, a chat request with a `reasoning_effort` that the stack's model does not list
+is answered 200 (the level is ignored, so an SDK that sends the field whatever the model does is not broken), and every
+row of the usage summary carries the key `reasoningTokens`, a number or null.
+
 ## The daily GPU window
 
 The rented card runs for a window and is destroyed after it (business plan: a weekday-peak window). Four steps, in
@@ -234,7 +263,9 @@ of the customer's organization**: inference-service sets `cache_salt` to the org
 cache is per organization, and a warm-up made from another organization warms nothing the customer can hit. It is a
 real request: it is billed and counted like any other (tell the customer, or grant the amount back). Until
 `prefill.ms-per-token` is set from the Day A cold curve, the first-token timeout is the plain 30 s (`ttft-timeout`), and
-a prefill that takes longer is cut and answers 503 `engine_timeout`: do not retry it, set the allowance first. Repeat
+a prefill that takes longer is cut and answers 503 `engine_timeout`: do not retry it, set the allowance first. Both are
+settings of a model's own entry as well (`ttft-timeout` and `prefill`), each falling back to the global key, so a model
+that reads long prompts slower than another has its own allowance. Repeat
 the step after any engine restart; the cache does not survive one. `bench/workload/probe32k.py --prefix` measures
 the cold and warm times of the bench's synthetic prefix on Day A; it does not warm the customer's.
 Watch `carmona_inference_first_output_seconds{cache}`: the warm-up is one `cache="none"` sample and the customer's
