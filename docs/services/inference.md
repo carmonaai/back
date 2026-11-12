@@ -288,8 +288,9 @@ built ([gaps](../reference/gaps.md)).
 
 **What the engine must be started with.** The backend's contract with a vLLM engine is a launch recipe as much as a
 set of keys. Each line below was read in vLLM's documents on 2026-11-12 (the OpenAI-compatible server and serving pages,
-and the source of its chat serving) and has not yet been checked by us on a real engine. A recipe that leaves one out
-degrades quietly, not loudly.
+and the source of its chat serving) and has not yet been checked by us on a real engine. Nothing stops at start when
+one is left out: the service starts, and the failure shows later, as a 404 from the engine, as an error on every chat
+request, as refusals of every tier but enterprise, or as an input bill without the cached discount.
 
 | Start the engine with | Because |
 |---|---|
@@ -297,7 +298,7 @@ degrades quietly, not loudly.
 | `--scheduling-policy priority` | The service sends `priority` 0, 10, 20 or 30 by tier. vLLM raises an error for a priority other than 0 when the model is not served with priority scheduling, so without it only enterprise requests pass. A test with an enterprise key proves nothing about the other tiers. |
 | `--enable-prompt-tokens-details` | Without it the usage chunks carry no cached token count, which reads as 0: all input is billed at the full input price and none at the cached price. |
 | a chat template | Without one the engine cannot process chat and every chat request errors. A model whose repository ships none needs `--chat-template`. |
-| `--reasoning-parser`, for a model that thinks | The engine reports `completion_tokens_details.reasoning_tokens` only when a reasoning parser is configured; without it `reasoningTokens` stays null and the thinking text is not split from the answer. |
+| `--reasoning-parser`, for a model that thinks | The engine reports `completion_tokens_details.reasoning_tokens` only when a reasoning parser is configured; without it `reasoningTokens` stays null and the response carries no separate `reasoning` field (the page we read does not say where the thinking text goes then). |
 
 The engine's `--max-num-seqs` is the entry's `slots`, and its `--max-num-queued-reqs` is the slots plus the queue,
 as `docker/compose.gpu.yaml` starts vLLM. `contract.fail-fast` stays false for a model nobody has measured: it ends the
