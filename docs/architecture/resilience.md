@@ -161,7 +161,7 @@ excluded from the count, because a service that answers "no such organization" i
 | `402` | `insufficient_balance` | gateway (`no_credit:{org}`) or inference (batch and flex credit check) | **not** OpenAI's `429 insufficient_quota`, "because SDKs retry 429s, and retrying can't add credit" |
 | `429` | `rate_limit_exceeded`, `model_busy`, `resource_unavailable` | inference admission, gateway flood brake | the caller's own limit: `retry-after` and `retry-after-ms` say when to come back |
 | `503` | `engine_unavailable`, `engine_timeout`, `service_unavailable`, `gateway_busy`, `inference_unavailable` | inference, gateway fallback, `UpstreamFailureHandler` | a dependency, not the caller: `Retry-After: 5` or `30` |
-| `502` | `engine_error` | inference | the engine answered 5xx without an OpenAI-shaped body, or refused our own key |
+| `502` | `engine_error` | inference | the engine answered 5xx without an OpenAI-shaped body, or refused our own key, or answered a non-streamed request 200 with no answer in it (empty, not JSON, no `choices` array) |
 
 Only the 429 and the 503 name a time to come back; the 402 and the 403 do not — which is why the credit gate is a 402.
 

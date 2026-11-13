@@ -50,6 +50,46 @@ list from a file), `operations/observability.md` (the two meters), `operations/b
 - AM-02: the summary's `reasoningTokens` counts only the requests that reported it; a share taken against all output tokens understates it when some engines report none.
 - AM-06: the capacity gauge reads no limits, so it stayed as it was.
 
+## Live check of 2026-11-13 and the three tasks after it (AM-14, AM-15, AM-16)
+
+The stack of branch `kimi-k31` (back `46e3e8f`, inference-service `691f6f1`) was run from a fresh clone with a model entry of 1,048,576 tokens: the default stack and `smoke.sh`
+first, then `compose.models.yaml` with entry 1 of `models.example.yaml` at `context-window: 1048576`. The engine was the simulator in echo mode, so no real engine and no real
+model ran, and nothing below says how one behaves. The report is `RESULTS.md` of the work folder and its raw logs are in `live-logs/` (the section numbers in the second column
+are RESULTS.md's). Three runs of the overlay: A as instructed, B with the simulator's window and KV cache raised to the entry's, C with the simulator's request-body cap raised
+and nothing else.
+
+| What was expected | What was seen (RESULTS.md) | What was done about it |
+|---|---|---|
+| `mvn -B verify` and `smoke.sh` pass on the stack | Both exit 0: the Maven run in two slices that cover the 13 modules, `smoke.sh` 150 ok and 0 failed (1, 3) | Nothing |
+| The overlay starts with the one changed line, `context-window: 1048576` | It started with nothing else set (no body budget, no memory limit); three contract WARN lines as designed (the simulator's window of 4096, its metric families, a window above 0.8 of its KV cache of 16,384 tokens); no line of its start log mentions the request-size bound or the body budget (4) | The last point is gap 43 |
+| A chat body of about 5 MiB (5,242,880 bytes) is answered 200 | Run A: 503 `engine_unavailable` for an enterprise key and a trial key; the engine closed the connection before it answered (`PrematureCloseException ... BEFORE response` in the service's log, for the try and for its one retry). Run B: the same 503. Run C, the simulator's cap raised from 4 to 64 MB: 200, 5,243,110 bytes back in 2.07 s, for both keys (5.1 to 5.3, 6 row 1) | The cause is the simulator's own cap, `--max-request-body-size-mb`, default 4 (`pkg/common/config.go:397` of v0.11.4), and not the service. AM-16: the variable `ENGINE_MAX_REQUEST_BODY_MB` in the engine's command in `docker/compose.yaml` (default 4, the simulator's own, so the default stack does not change in effect), and the matching lines in `compose.models.yaml`, entry 1 of `models.example.yaml`, "Adding a model" and `running.md` |
+| (not in the plan's list) a prose body of 5 MiB | Run A: 200 with an empty body, an `ok` event on the input estimate of 1,310,720 tokens, billed 655,360 micro-BRL (1,310,720 at 0.5, a price derived from the summaries) (5.1 b2, e) | AM-15, `eaa1115`: a non-streamed answer with status 200 that is empty, is not JSON or has no `choices` array is the engine's failure, 502 `engine_error`, with an `error` event that is not billed (usage-service `UsageRepository.java` lines 41 to 44 and 165, billing-service `BillingService.java` lines 185 and 333 to 335, as AM-15's log cites them). The streamed case is not covered: gap 39 |
+| A body of about 17 MiB (17,825,792 bytes) is refused with 413 | Runs A and B: 413 `request_too_large`. Run C: the gateway's own 503 `inference_unavailable` (its connection to inference-service closed before it had read the answer) while inference-service counted its 413 (5.3 c1, 6 row 2) | AM-14, `6ea6265`: a request that declares a body no model takes is read to its end and thrown away before the 413 is sent, up to `carmona.inference.body.drain-up-to` (64MB); a declared length above it is answered at once with `Connection: close`. The failure did not reproduce on the laptop (0 of 109 requests before the change and 0 after), so the change is not shown to cure it: gap 41 |
+| `GET /v1/models` shows `context_window` 1,048,576 and `max_output_tokens` | Met, in the list and by id, identical in the three runs; no `reasoning_efforts` key, the entry lists no level (5.1 a, 6 row 3) | Nothing |
+| The usage summary shows the request, with a `reasoningTokens` field on its rows | Met: the key is on every row, null, since the simulator reports none; in run C the row holds the 5 MiB request with the engine's own counts (6 input, 1 output), not the estimate (5.3 e, 6 row 4) | Nothing |
+| (not in the plan's list) the trial tier's input bucket | The 5 MiB request was admitted for a trial organization whose bucket holds 20,000, and `x-ratelimit-remaining-tokens` read 0 (5.1 b3, 5.3) | By design: `buckets.lua` admits while each bucket holds at least 1 and lets the level go negative, and `Admission.java` clamps the header at 0. Written down in `docs/requests/admission.md`, "Adding a model" and gap 42; the Kimi entry's comment in `models.example.yaml`, which had said such a request "can never pass", now says what happens |
+| (not in the plan's list) a body of exactly the bound, 16,777,216 bytes | 502 `engine_error`; the cause was not shown (5.3 x2) | Said as the likely cause, not as a result: the echo simulator's answer is longer than its prompt (5,243,110 bytes back for 5,242,880 sent) and the service reads an engine's answer up to the same bound. In "Adding a model" and in entry 1 of the example |
+
+Not run (RESULTS.md 7): any real engine; a prose body against an engine that accepts the size; a body between 4 MB and 5 MiB; a streamed request with a large body; a body above the
+gateway's 32 MB cap; several large bodies at once (the `503 server_busy` path: both meters read 0.0 at every scrape, and the scrapes were taken between requests); a heap histogram (the
+one reading is `docker stats` at the end of run A: inference-service 447.5 MiB); what a second request of the trial organization gets; the `up -d --force-recreate inference`
+procedure; entries 2 to 4 of the example; `smoke.sh` against the overlay stack, and with `ENGINE=vllm`, `FLEET=1` or `SIM_STOCK=1`.
+
+| Task | What it did | Commit | Verify, as the builder's log reads it | Critic |
+|---|---|---|---|---|
+| AM-14 | A refused declared length is read to its end and thrown away before its 413, up to `carmona.inference.body.drain-up-to`; above it the answer is at once, with `Connection: close` | inference-service `6ea6265` (branch `kimi-k31-fix`) | 618 unit (1 skipped) + 274 IT, 0 failures | PASS; notes N1 to N7 of its verdict |
+| AM-15 | A non-streamed engine answer with status 200 that is empty, is not JSON or has no `choices` array is the engine's failure: 502 `engine_error`, an `error` event, the slot given back | inference-service `eaa1115` (same branch) | 639 unit (1 skipped) + 280 IT, 0 failures | PASS; the streaming gap and one Netty `LEAK` line in one full run are in its notes |
+| AM-16 | This block, the engine's request-body variable and the pages that say what AM-14 and AM-15 do | `back` (the commit that adds this block) | `docker compose config` before and after the change, `mkdocs build --strict` | a critic redoes them |
+
+Notes for later (none a must-fix). AM-14: the default `drain-up-to` stops covering a model at a window of 4,194,304 tokens (said in "The allowlist" of `inference.md`); a body with no
+declared length is not read to its end (gap 40). AM-15: an answer with `choices: []` is accepted; `carmona_inference_tokens_total` still adds the input estimate of every error
+event, though its comment says it counts what billing charges; one Netty `LEAK` line in one full run, source not shown. AM-16: `compose.fleet.yaml` restates the engine's other
+flags and not the new one (outside this task's list; the fleet is not combined with the overlay).
+
+Correction to earlier text: [inference-plan.md](inference-plan.md), in its dated block of 2026-11-12 (the request-size entry and the AM-11 line, lines 140 and 149) and in step 5 of its section 3 (line 201),
+says that the declared-length check lives in `BodyLimit` and that its `413 request_too_large` comes before the body is read. Since AM-14 the check is in `BodyDrain`, the 413 is sent after the
+body has been read and thrown away (up to `drain-up-to`; above it, at once), and `BodyLimit` still computes the bound. Those lines were left as they stood on their day.
+
 ## Step B (dated block added when its documents are written)
 
 Not yet. `PLAN-B.md` of the work folder holds the plan; its task B-W2 adds a dated block here.

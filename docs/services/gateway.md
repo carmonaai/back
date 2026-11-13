@@ -98,8 +98,10 @@ only the method and the path, and the cap is chosen from those two; a `PUT` or a
 equals the bound inference-service holds a model with a window of 2,097,152 tokens to (2,097,152 × 16 = 33,554,432
 bytes), twice that of the first worked example's 1,048,576 tokens (16,777,216 bytes). It is a flood guard, not a model
 limit: each model's own bound and the budget for bodies in flight are inference-service's, and a body over a small
-model's bound is still streamed to it and refused there. A deployment with a window above 2,097,152 tokens raises
-`chat-max-size`, and a `chat-max-size` below `max-size` stops the gateway at start. Both caps are held twice, on the
+model's bound is still streamed to it and refused there: inference-service reads that body to its end before it sends its
+413, up to its own `body.drain-up-to` (64MB as shipped), which should stay at least `chat-max-size`
+([Inference](inference.md#the-allowlist)). A deployment with a window above 2,097,152 tokens raises
+`chat-max-size`, and `drain-up-to` with it, and a `chat-max-size` below `max-size` stops the gateway at start. Both caps are held twice, on the
 declared `Content-Length`, with no upstream call, and on the bytes actually read. The 413 text states no number,
 because it differs by path.
 

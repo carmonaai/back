@@ -171,7 +171,11 @@ request: 4 MB for everything on `/v1` (a file upload, a batch, the model list), 
 because the prompt for a window of a million tokens is megabytes (1,048,576 tokens × 16 bytes = 16,777,216
 bytes, the bound `inference-service` holds that model to). The gateway cannot read the model list, so the chat
 cap is one number set by hand, a flood guard; each model's own bound and the memory budget for the bodies in
-flight are `inference-service`'s, which no longer has a codec setting that has to agree with the gateway's.
+flight are `inference-service`'s, which no longer has a codec setting that has to agree with the gateway's. One
+setting of `inference-service` does have to stay at or above the gateway's cap: when it refuses a body for its size it
+reads the rest of the body and throws it away before it answers 413, up to `carmona.inference.body.drain-up-to`
+(64MB as shipped, the gateway's 32MB cap with room to spare), so that the client is not still writing when the answer
+arrives. A length above it is answered at once, with `Connection: close`.
 
 **The route's `response-timeout` is 660 000 ms, and it times the wait for headers only.** A streamed answer
 takes as long as it takes; what has to arrive inside a deadline is the response's *start*. inference-service

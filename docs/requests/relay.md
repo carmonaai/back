@@ -138,6 +138,11 @@ whole non-streamed answer.</figcaption>
    event, then `[DONE]`.
 9. **A non-streamed answer gets one whole-answer deadline of 600 s**, because it has no intermediate events
    to prove the engine is still working.
+10. **A non-streamed answer has to be an answer.** With status 200 and an empty body, a body that is not JSON, or a
+    JSON object with no `choices` array, it is the engine's failure: 502 `engine_error`, the lease given back, and an
+    `error` event that nobody is billed for. The check is on the parse the tracker already makes, so the answer is not
+    read twice. A streamed request to an engine that answers 200 and ends with no data line is not caught
+    ([gaps](../reference/gaps.md)).
 
 ## Why it is like this
 

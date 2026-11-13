@@ -229,7 +229,11 @@ inference-service (`up -d --force-recreate inference` with the same `-f` flags):
 `stop_grace_period` being 720 s. The file is read once, at start, and a mistake in it stops the service, naming the model
 and the rule. [Adding a model](../services/inference.md#adding-a-model) says what each key means, what the engine must be
 started with and what to measure before the model serves customers. Prometheus finds its engine jobs by DNS name, so a
-remote engine is not scraped there; the service's own `carmona_engine_*` gauges still show it.
+remote engine is not scraped there; the service's own `carmona_engine_*` gauges still show it. The simulator takes request
+bodies of up to 4 MB, while the service takes the window × 16 bytes: for a simulator entry with a window above 262,144 tokens,
+set `ENGINE_MAX_REQUEST_BODY_MB` (in `docker/.env` or the shell) to the largest body in MB, 16 for 1,048,576 tokens, and
+recreate the engine; unset, the stack is as it was. The live check of 2026-11-13 and what the simulator does with a large
+body are in [Adding a model](../services/inference.md#adding-a-model).
 
 `docker/smoke.sh` checks the new behaviour on the default stack: the listing shows the model's `context_window` and
 `max_output_tokens` as the stack states them, a chat request with a `reasoning_effort` that the stack's model does not list

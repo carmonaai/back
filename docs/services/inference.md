@@ -117,10 +117,22 @@ codecs that read bodies, a non-streamed answer of an engine among them, are give
 Spring's own 256 KiB, which is what the engines' `/metrics` page and usage-service are read with. A model with a
 window of 1,048,576 tokens takes bodies of up to 1,048,576 × 16 = 16,777,216 bytes (16 MiB), and a smaller model
 in the same service is still held to its own bound. The declared `Content-Length` is checked against the largest
-bound first, before a byte of the body is read and before the model is known, so a request over it answers
+bound first, on the head of the request and before the model is known (`BodyDrain`), so a request over it answers
 `request_too_large`, ahead of `context_length_exceeded`, which needs the model and so comes after the parse. A
-body with no declared length is cut by the codecs as it is read, with the same `request_too_large`. A non-streamed
+body with no declared length is cut by the codecs as it is read, with the same `request_too_large`, and the rest of it is not read first (no caller
+sends one, the gateway requires a length: [gaps](../reference/gaps.md)). A non-streamed
 answer of an engine that is longer than the limit is the engine's failure (a 502), no longer a 413.
+
+The answer to a refused length waits for the body. The service reads what is left of it and throws it away, every buffer released as it arrives and nothing
+kept, parsed or reserved, and sends the 413 when the last byte is in, so that no sender is still writing when the answer goes out, whatever a platform does with a
+connection that is closed on bytes nobody read. The reading is
+bounded by `carmona.inference.body.drain-up-to`, 64MB unless set, which should be at least the gateway's `chat-max-size` (32MB as shipped) so that every body the
+gateway lets through is read to its end; a declared length above it is answered at once with `Connection: close`, and its body is never read. The cost is
+bandwidth spent on a body that is thrown away, and the service has no timeout of its own on it: the gateway's body timeouts cut a slow sender. At 64 MiB the
+default leaves something to read only while the biggest window is under 4,194,304 tokens (4,194,304 × 16 = 67,108,864 bytes = 64 MiB); for a model with that window
+or more every refused length is already above the setting, nothing is read and the early answer with the close is what comes back, so raise `drain-up-to` together
+with `chat-max-size`. A refused body reserves nothing from the budget and is not counted by `carmona_inference_body_refused_total`, which is the `503 server_busy`
+count: it is one more 413 in `http_server_requests_seconds_count` ([Observability](../operations/observability.md)).
 
 The bound says how big one body may be, not how many may be in flight. A body is on the heap as text, as a parsed
 tree and as the text sent to the engine, so a burst of large ones could exhaust the heap and take every running
@@ -214,7 +226,7 @@ it is the end of the prefill, where `ttftMs` (first content or tool call) waits 
 the engine or the service could not know it (an engine without a reasoning parser, a non-streamed answer, a stream
 that produced nothing), never 0.
 
-Three details are decisions rather than plumbing:
+Four details are decisions rather than plumbing:
 
 - **The outcome is the event's status.** How a request ends — ok, an error of ours, or cancelled by a client
   that hung up — sets `status`, and `Tracker` follows the request without keeping its text to be able to say
@@ -224,6 +236,14 @@ Three details are decisions rather than plumbing:
 - **A batch line's event id is a name-based UUID of `(batch, line)`, and its `startedAt` is the batch's
   creation time.** So however many times a line is retried or a worker is killed, the event's identity is the
   same and it is stored, and billed, once.
+- **An engine's answer that is no answer is an error of ours.** A non-streamed answer with status 200 whose body is empty, is not JSON or is not an
+  object with a `choices` array is the engine's failure: the caller gets 502 `engine_error`, the event is an `error` one, the slot is given back and
+  the failure is counted as any engine failure is. Nobody is billed for it, because usage-service leaves `error` events out of the window sums that
+  billing charges and out of the customer's summary ([Metering](metering.md)). The check reads the answer the tracker already parses for its usage, so
+  there is no second parse, and nothing the engine sent reaches the caller's answer, the event or a log. An object with an empty `choices` array still
+  passes: the rule is the shape, and the usage says what was spent. Before it, an engine that answered 200 with nothing was passed on as an empty 200 and
+  billed as `ok` on the input estimate, which is what the live check of 2026-11-13 met. A streamed request is not covered: an engine that answers 200 and
+  ends with no data line still gives the caller a 200 with an empty event stream and an `ok` event on the input estimate ([gaps](../reference/gaps.md)).
 
 The event goes to the Valkey stream `usage:events`; a relay delivers batches to usage-service every second and
 deletes them once they are stored. A killed instance loses nothing: the stream is append-only on disk, and an
@@ -286,6 +306,24 @@ changing or removing a model is an edit of the file and a restart of inference-s
 it holds finish, because its `stop_grace_period` is 720 s. A model list that changes while the service runs is not
 built ([gaps](../reference/gaps.md)).
 
+**Keeping the simulator with a large window.** The engine of the default stack is a simulator (`llm-d-inference-sim`, ADR 0002), and it takes request bodies
+of up to 4 MB unless told otherwise: `--max-request-body-size-mb`, its own default, in MB of 1,048,576 bytes, which it accepts from 1 to 512 and refuses to
+start outside. The service takes `context-window` × 16 bytes of body, so any window over 262,144 tokens (262,144 × 16 = 4,194,304) lets through a body that the
+simulator closes the connection on before it answers; the service retries once, and the caller gets 503 `engine_unavailable`. The live check of 2026-11-13
+([progress](https://github.com/carmonaai/back/blob/main/.claude/skills/carmona-architecture/references/any-model-progress.md)) saw this with a body of 5 MiB on an
+entry of 1,048,576 tokens, whether or not the simulator's own window and KV cache were raised to the entry's, and saw the same body answered 200 in 2.07 s with
+the cap at 64. `docker/compose.yaml` therefore takes the cap from a variable: set `ENGINE_MAX_REQUEST_BODY_MB`, in `docker/.env` or in the shell, to at least the
+largest body you will send (16 for a window of 1,048,576 tokens) and recreate the engine. Unset, it is the simulator's own 4 and the stack does not change. The
+variable is in the engine's command in `compose.yaml` and not in the models overlay, which starts no engine and whose override of `command` would replace the
+whole list and so restate every flag of the simulator; it works under the overlay all the same, whose `--profile simulator-off` brings the simulator back.
+`compose.fleet.yaml` restates the other flags and not this one, and its simulators keep the 4.
+
+The simulator is no model of a real engine's limits, and the live check ran no other engine. It answers with its prompt (echo mode), so a body within about 230
+bytes of the bound gets an answer longer than the service reads from an engine (5,243,110 bytes came back for 5,242,880 sent), which is a 502 `engine_error`: a
+body of exactly the bound got one, the cause was not shown, and this is the likely one. In that mode it also refuses a prompt of more than half its
+`--max-model-len` in its own tokens (about one per word), and one longer than `max_tokens`, with a 400. To test the plumbing of a large body, send one unbroken run
+of a single character, as the live check did, and not prose.
+
 **What the engine must be started with.** The backend's contract with a vLLM engine is a launch recipe as much as a
 set of keys. Each line below was read in vLLM's documents on 2026-11-12 (the OpenAI-compatible server and serving pages,
 and the source of its chat serving) and has not yet been checked by us on a real engine. Nothing stops at start when
@@ -320,7 +358,10 @@ nothing here is invented for one. A value that only a run on the model's own har
 - `reasoning.default` is left unset until a run shows which level suits the model.
 - `tiers` are sized from C and q. The global ones are prototype values: the trial tier's input bucket is 20,000
   tokens a minute, so one prompt of 1,048,576 tokens takes about 52 minutes of it (1,048,576 ÷ 20,000), and a bucket
-  that may go negative then keeps that organization waiting for the refill.
+  that may go negative then keeps that organization waiting for the refill. Admission does not refuse a request for its size: it asks that each bucket holds at
+  least 1, charges the whole input estimate, and corrects it to the engine's own prompt count when the request ends ([admission](../requests/admission.md)). So
+  the first request near the window passes for every tier: in the live check of 2026-11-13 a body of 5 MiB (1,310,720 estimated tokens) was admitted for a
+  trial organization, and its `x-ratelimit-remaining-tokens` read 0 of 20,000, a header that never shows below 0.
 - A price row in billing, in the future (the price trigger refuses past dates). Without one the usage is metered, billing
   sets the charge aside, and the first price that appears bills the back log at that price, so the usage of a test can be
   billed after the fact: give a test model an id of its own.

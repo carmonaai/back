@@ -155,7 +155,9 @@ nothing: the engine's own counters are real series today.
 (`carmona.inference.body.budget`, a tenth of the JVM's maximum heap unless set): each chat request reserves the length it
 declares before its body is read and gives it back when its exchange ends, however it ends, so the gauge is 0 when
 nothing is in flight. `carmona_inference_body_refused_total` counts the requests refused with `503 server_busy`
-because the budget had no room. Neither has a tag, because the refusal happens before the request's model is known,
+because the budget had no room. A body refused for its size (`413 request_too_large`) is read to its end and thrown away
+before the reservation, so it reserves nothing and is not in either meter: it is one more 413 in
+`http_server_requests_seconds_count`. Neither has a tag, because the refusal happens before the request's model is known,
 and no alert or panel reads them yet ([gaps](../reference/gaps.md)). The reasoning tokens and the first-output time of
 a request are not metrics: they travel in the usage event ([Metering](../services/metering.md)), and the existing
 `carmona_inference_tokens_total` still counts output tokens as the engine did, with the reasoning inside them.

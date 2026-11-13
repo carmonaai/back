@@ -7,7 +7,9 @@
 # stops the service, naming the model and the rule.
 # This overlay starts no engine: the simulator is switched off as in compose.gpu.yaml, and nothing is added. An engine is whatever the file's url
 # reaches: a rented node, vLLM on the host or in a container of your own, the simulator. To serve the example's first entry from the simulator, add
-# --profile simulator-off to the command: the profile only keeps the simulator out of the other overlays, so naming it brings it back.
+# --profile simulator-off to the command: the profile only keeps the simulator out of the other overlays, so naming it brings it back. A window above 262,144 tokens on
+# that entry also needs ENGINE_MAX_REQUEST_BODY_MB, the simulator's cap on a request body (compose.yaml, the engine's command): the service takes window x 16 bytes of body and
+# the simulator takes 4 MB unless told otherwise. Entry 1 of models.example.yaml says how much to set.
 # Not combined with compose.gpu.yaml or compose.fleet.yaml: listed after either, the `!reset`s below are not applied (checked with Compose 2.39.2), the keys
 # of model 0 stay in the environment, and an environment beats the file. A fleet is the `replicas:` list of an entry. Prometheus finds its engine jobs by DNS
 # name (prometheus/prometheus.yml), so a remote engine is not scraped there; inference-service's own carmona_engine_* gauges still show it.

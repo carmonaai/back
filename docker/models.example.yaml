@@ -13,6 +13,13 @@ carmona:
       #    command). The values are compose.yaml's: the simulator's --model, --max-model-len and --max-num-seqs, and the 2 places inference-service lets wait at it
       #    (the simulator's own queue holds 8, which admission never fills). It has no prefix-cache counters, so the contract check's metrics line stays at 0 for
       #    this entry: a gauge, never a refusal.
+      #    A larger window served by this simulator needs more than the number below. The service then takes bodies of up to window x 16 bytes (16 MB of 1,048,576 bytes for a
+      #    window of 1,048,576 tokens) and the simulator takes 4 MB unless ENGINE_MAX_REQUEST_BODY_MB (compose.yaml, the engine's command) says more: set it to at least that
+      #    many MB, 16 for that window. Left at 4, a body above it, which any window over 262,144 tokens lets in, is closed on by the simulator and the caller gets a 503
+      #    engine_unavailable (the live check of 2026-11-13: a 5 MiB body was answered 200 in 2.07 s once the cap was raised to 64; raising the simulator's --max-model-len and
+      #    KV cache did not change the 503). The simulator answers with its prompt (echo mode): a body within about 230 bytes of the bound gets an answer longer than the service
+      #    reads from an engine, a 502 engine_error (one body of exactly the bound did; the cause was not shown), and a prompt of more than half its --max-model-len in its own
+      #    tokens (about one per word) is refused with a 400, so test a large body as one unbroken run of one character, not as prose.
       - id: carmona/qwen3-4b            # the engine's served model name: what clients send, what billing prices and what is sent to the engine
         created: 2026-10-01T00:00:00Z   # when the model became available; an ISO-8601 instant (a bare number is read as milliseconds), shown by GET /v1/models as Unix seconds
         url: http://engine:8000
@@ -73,4 +80,8 @@ carmona:
       #   prefill:
       #     # ms-per-token is measured on the node: milliseconds of prefill per input token (the service counts bytes / 4), from cold prompts of two or three sizes.
       #     ms-per-token: ${KIMI_PREFILL_MS_PER_TOKEN}
-      #   # tiers is left out: the global limits apply, and a request near the window can never pass the trial tier's 20,000 input tokens a minute (carmona.inference.tiers).
+      #   # tiers is left out: the global limits apply. The trial tier's input bucket is 20,000 tokens a minute, and admission asks only that a bucket holds at least 1 before it
+      #   # charges the whole input estimate (the body's bytes / 4), so a request near the window is not refused for its size: the live check of 2026-11-13 let a 5 MiB body (1,310,720
+      #   # estimated tokens) through for a trial organization. The bucket is then corrected to the engine's own prompt count when the request ends, and a real prompt of
+      #   # 1,048,576 tokens leaves it about 52 minutes in debt (carmona.inference.tiers, which are prototype values; "Adding a model" of docs/services/inference.md). Size this
+      #   # model's own tiers from the bench if its tiers need other limits.
