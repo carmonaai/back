@@ -218,7 +218,7 @@ headers, rate limiting and the Marco Civil access log; accounts, sessions, JWTs 
 rotation; organizations, memberships and tiers; inference on two engines with admission control, tier
 priorities and `cache_salt`; usage metering through a durable Valkey stream with 90-day partitioned events and
 sealed 5-minute windows; billing with an append-only ledger in micro-BRL, balances and the `no_credit` flag;
-the Files and Batch API; erasure and export; Prometheus, Grafana, three dashboards and twenty-one alert rules; and
+the Files and Batch API; erasure and export; Prometheus, Grafana, three dashboards and twenty-three alert rules; and
 the CI workflow.
 
 **Planned, not built.** Hosting and Kubernetes; a payment rail (credit comes from a staff grant); a customer
@@ -250,7 +250,7 @@ changes the thing they describe. Four live examples, all verifiable by opening t
 | The note says | The repository says |
 |---|---|
 | `carmona` calls them "Java 27 microservices" | every `pom.xml` targets Java 25 (`<java.version>25</java.version>`) |
-| `carmona`'s repository map: "`docker/` — compose files (empty today)" | fourteen services in `docker/compose.yaml` |
+| `carmona`'s repository map: "`docker/` — compose files (empty today)" | fifteen services in `docker/compose.yaml` |
 | `carmona`'s status table: "observability, K8s, CI — later" | `ci.yaml` runs; `docker/prometheus` and `docker/grafana` exist |
 | plan §12: the `/rotate` gateway route and the cached-key expiry check are "pending (task C)" | both are in `gateway-service`'s `application.yaml` and `ApiKeyAuthenticationManager` |
 | `observability.md` §Gaps 1–2: the `carmona_inference_*` metrics "do not exist yet" | `Metrics.java` publishes them all, `reconcile_mismatch` included |

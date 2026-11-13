@@ -12,6 +12,8 @@
 # (the simulator by default, vLLM with ENGINE=vllm), checks that inference-service counted their prompt tokens in the prompt cache
 # counter, drains every engine replica through inference-service's management port and
 # puts it back (503 engine_unavailable while drained; a running stream finishes), and greps every log and a database dump for a canary string.
+# Late in the run it registers a model on model-service (the shared secret) on a second simulator that it starts for the purpose (engine-own, removed at the end of that section),
+# calls it with its owner's key, shows that another organization's key cannot, and checks that the owner is not charged for it (ENGINE=sim only).
 # Run it against another compose project with COMPOSE_PROJECT_NAME=... (compose reads it; the stack must run under it).
 # On the two-simulator stack (compose.fleet.yaml) run it with FLEET=1, which adds that file to every compose call and asserts that two replicas are listed.
 # Continue-on-fail: a failed assertion is counted (note_fail) and the run goes on, so one run lists every failure; the
@@ -41,6 +43,8 @@ if [[ $ENGINE == vllm ]]; then DC+=(-f "$(dirname "$0")/compose.gpu.yaml"); ENGI
 # that file too: the crash step's `up -d usage inference` would otherwise recreate inference from compose.yaml alone (one replica, gate off,
 # the default `engine` started again), and the multi-replica branch of the drain section below could never run.
 [[ ${FLEET:-0} == 1 ]] && DC+=(-f "$(dirname "$0")/compose.fleet.yaml")
+# The same, with the profile of the one service that is no part of the stack: engine-own, the second simulator the registered-model section starts and removes.
+DCO=(docker compose --profile own-engine "${DC[@]:2}")
 # G2 of the findings: the simulator's output length is that of the prompt (echo mode), so a long stream needs a long
 # prompt: 900 words = 905 prompt tokens (the chat template adds 5), so 905 output tokens ~ 22 s at 24 ms per token, well past the
 # 10 s the idle check below allows a stream that nobody reads. The prompt must stay under max_tokens (1000): in echo mode the
@@ -576,6 +580,187 @@ rows=$(grep -o '"group":' <<<"$summary" | wc -l | tr -d ' ')
 keyed=$(grep -oE '"reasoningTokens":(null|[0-9]+)' <<<"$summary" | wc -l | tr -d ' ')
 [[ $rows -ge 1 && $rows == "$keyed" ]] && echo "ok   200  the usage summary's $rows row(s) all carry reasoningTokens" \
   || { echo "FAIL $keyed of $rows usage summary rows carry reasoningTokens: $summary"; note_fail; }
+
+## A model registered while the stack runs (round AM, step B). model-service keeps the list behind internal calls (the shared secret, no gateway
+## route), inference-service follows it, a model registered for an organization is listed and callable by that organization's keys only, and what an
+## organization runs on its own model is metered and never charged per token. The engine is the stand-in for a rented GPU: a second simulator
+## (compose.yaml, engine-own) that this section starts, because the simulator answers 404 to a model name it does not serve and the name of an
+## organization's own model holds the organization's id, which exists only now. A run that is killed here leaves it: `docker compose --profile own-engine
+## down` removes it. The two organizations are new, so that the balance asserted is exactly the credit granted. inference-service reads the list every
+## few seconds (carmona.inference.registry.refresh-every, 5 s), so each wait below polls.
+# registry METHOD PATH [JSON]: a call to model-service from the tools container with the shared secret; the status goes to $rcode, the body to $BODY.
+registry() {
+  local out
+  out=$(MSYS_NO_PATHCONV=1 "${DC[@]}" exec -T tools curl -s -w '\n%{http_code}' -H @/run/secrets/internal_token -H 'Content-Type: application/json' -X "$1" ${3:+-d "$3"} "http://model:8080$2")
+  rcode=${out##*$'\n'}
+  printf '%s' "${out%$'\n'*}" > "$BODY"
+}
+# registry_want STATUS METHOD PATH [JSON]: the same call, asserted.
+registry_want() {
+  local want=$1; shift
+  registry "$@"
+  if [[ $rcode == "$want" ]]; then echo "ok   $want  $1 $2 on model-service"; else echo "FAIL want $want got $rcode: $1 $2 on model-service"; head -c 300 "$BODY"; echo; note_fail; fi
+}
+# chat_for MODEL CONTENT MAX_TOKENS: a chat request body for any model.
+chat_for() { echo "{\"model\":\"$1\",\"messages\":[{\"role\":\"user\",\"content\":\"$2\"}],\"max_tokens\":$3}"; }
+# wait_status STATUS KEY_ARRAY_NAME MODEL: polls a chat to MODEL with the key until it answers STATUS, at most 40 s; the last status is left in $code.
+wait_status() {
+  local -n hdr=$2
+  code=""
+  for _ in $(seq 40); do
+    code=$(curl -s -o "$BODY" -w '%{http_code}' "${hdr[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" -d "$(chat_for "$3" 'Say hi.' 8)")
+    [[ $code == "$1" ]] && break
+    sleep 1
+  done
+}
+if [[ $ENGINE != sim ]]; then
+  echo "skip  the registered-model section starts a simulator engine: it runs with ENGINE=sim only"
+else
+  # A new account owns the two organizations: the first one is at the most organizations an account may own (carmona.organization.max-organizations-per-account). account() sets
+  # token, email and rt, which the sections after this one still read as the first account's, so they are put back.
+  saved_token=$token; saved_email=$email; saved_rt=$rt
+  account
+  OT=(-H "Authorization: Bearer $token")
+  token=$saved_token; email=$saved_email; rt=$saved_rt
+  expect 200 "${OT[@]}" "$G/auth/whoami"
+  oid=$(json id)
+  expect 201 "${OT[@]}" "${J[@]}" -X POST "$G/organizations" -d '{"name":"Smoke Owner"}'
+  oa=$(json id)
+  sql "UPDATE organizations.organization SET tier = 'enterprise' WHERE id = '$oa'" >/dev/null   # a short wait for the one slot instead of an instant refusal
+  expect 201 "${OT[@]}" "${J[@]}" -X POST "$G/organizations/$oa/api-keys" -d '{"name":"owner"}'
+  KOA=(-H "Authorization: Bearer $(json key)")
+  expect 201 "${OT[@]}" "${J[@]}" -X POST "$G/organizations" -d '{"name":"Smoke Neighbour"}'
+  ob=$(json id)
+  expect 201 "${OT[@]}" "${J[@]}" -X POST "$G/organizations/$ob/api-keys" -d '{"name":"neighbour"}'
+  KOB=(-H "Authorization: Bearer $(json key)")
+  [[ $(grant "$oa" 5000000 own-owner-start) == 200 && $(grant "$ob" 5000000 own-neighbour-start) == 200 ]] || { echo "FAIL the credit grants of the registered-model section"; note_fail; }
+  OM="org-$oa/smoke-echo"
+  regkey="CANARY-engine-key-$RANDOM$RANDOM$RANDOM"   # the engine's key as the registering tool states it; the simulator takes any
+  entry="{\"modelId\":\"$OM\",\"ownerOrganizationId\":\"$oa\",\"apiKey\":\"$regkey\",\"spec\":{\"contextWindow\":4096,\"maxOutput\":1024,\"replicas\":[{\"url\":\"http://engine-own:8000\"}]}}"
+
+  OWN_ENGINE_MODEL=$OM "${DCO[@]}" up -d --no-deps engine-own >/dev/null 2>&1 || { echo "FAIL the simulator for $OM did not start"; note_fail; }
+  up=""
+  for _ in $(seq 30); do
+    up=$("${DC[@]}" exec -T tools curl -s -m 2 -o /dev/null -w '%{http_code}' http://engine-own:8000/metrics)
+    [[ $up == 200 ]] && break
+    sleep 1
+  done
+  [[ $up == 200 ]] && echo "ok   200  the simulator that serves $OM answers" || { echo "FAIL the simulator that serves $OM answered '$up'"; note_fail; }
+
+  # The secret: without it, or with a made-up one, nothing is registered and nothing is listed (the list holds every engine key).
+  code=$("${DC[@]}" exec -T tools curl -s -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -X POST http://model:8080/models -d "$entry")
+  [[ $code == 401 ]] && echo "ok   401  registering a model without the internal secret is refused" || { echo "FAIL registering without the secret got $code"; note_fail; }
+  code=$("${DC[@]}" exec -T tools curl -s -o /dev/null -w '%{http_code}' -H 'X-Internal-Token: 0000000000000000000000000000000000000000000000000000000000000000' -H 'Content-Type: application/json' -X POST http://model:8080/models -d "$entry")
+  [[ $code == 401 ]] && echo "ok   401  registering a model with a wrong internal secret is refused" || { echo "FAIL registering with a wrong secret got $code"; note_fail; }
+  code=$("${DC[@]}" exec -T tools curl -s -o /dev/null -w '%{http_code}' http://model:8080/models/active)
+  [[ $code == 401 ]] && echo "ok   401  the list of active models, which holds the engine keys, is refused without the internal secret" || { echo "FAIL the list without the secret got $code"; note_fail; }
+
+  # Register: a new entry is 201 and shows the placeholders for a replica that named no slots and no queue (one slot, no queue), and no key.
+  registry_want 201 POST /models "$entry"
+  entry_id=$(json id)
+  if grep -q '"slots":1' "$BODY" && grep -q '"queue":0' "$BODY" && ! grep -q "$regkey" "$BODY"; then
+    echo "ok   the entry shows slots 1 and queue 0 for a replica that named none, and no key"
+  else
+    echo "FAIL the 201 body is not the entry with slots 1, queue 0 and no key"; head -c 400 "$BODY"; echo; note_fail
+  fi
+  registry_want 200 POST /models "$entry"                                              # the same content again: the same entry
+  [[ $(json id) == "$entry_id" ]] && echo "ok   the replay is the same entry" || { echo "FAIL the replay is another entry"; note_fail; }
+  registry_want 422 POST /models "${entry/\"contextWindow\":4096/\"contextWindow\":2048}"   # other content for an active id
+  grep -q '"idempotency_conflict"' "$BODY" || { echo "FAIL the refusal of other content is not idempotency_conflict"; head -c 300 "$BODY"; echo; note_fail; }
+  registry_want 200 GET "/models/$entry_id"
+  if grep -q "\"modelId\":\"$OM\"" "$BODY" && ! grep -qi 'apikey' "$BODY" && ! grep -q "$regkey" "$BODY"; then
+    echo "ok   reading the entry shows its model id and no key"
+  else
+    echo "FAIL reading the entry shows no model id or shows a key"; head -c 300 "$BODY"; echo; note_fail
+  fi
+
+  # Visibility: inference-service follows the list, and only the owner's keys see the model.
+  listed=""
+  for _ in $(seq 40); do
+    curl -s -o "$BODY" "${KOA[@]}" "$G/v1/models"
+    grep -q "\"id\":\"$OM\"" "$BODY" && { listed=1; break; }
+    sleep 1
+  done
+  [[ -n $listed ]] && echo "ok   200  the model is listed for the organization that owns it" || { echo "FAIL $OM is not listed for its owner after 40 s"; head -c 300 "$BODY"; echo; note_fail; }
+  expect 200 "${KOA[@]}" "$G/v1/models/$OM"
+  wait_status 200 KOA "$OM"
+  if [[ $code == 200 ]] && grep -q '"usage"' "$BODY"; then echo "ok   200  the owner's key chats with $OM on its own engine"; else echo "FAIL the owner's chat with $OM got '$code'"; head -c 300 "$BODY"; echo; note_fail; fi
+  expect 200 "${KOB[@]}" "$G/v1/models"
+  if grep -q "$OM" "$BODY"; then echo "FAIL the other organization's listing shows $OM"; note_fail; else echo "ok   the other organization's listing does not show it"; fi
+  expect 404 "${KOB[@]}" "$G/v1/models/$OM"
+  expect 404 "${KOB[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" -d "$(chat_for "$OM" 'Say hi.' 8)"
+  grep -q '"model_not_found"' "$BODY" || { echo "FAIL the other organization's chat is not the unknown-model answer"; head -c 300 "$BODY"; echo; note_fail; }
+
+  # Money: the owner's use is metered and costs nothing. Wait until the usage is sealed into a window and the debit job has gone past it, then read:
+  # no ledger entry besides the grant, the balance as granted, nothing set aside as unpriced, and no "no price" error in billing's log.
+  sealed=""
+  for _ in $(seq 60); do
+    sealed=$(sql "SELECT max(window_start) FROM usage.usage_window WHERE organization_id = '$oa' AND model = '$OM'" | tr -d '\r')
+    [[ -n $sealed ]] && break
+    sleep 1
+  done
+  passed=""
+  for _ in $(seq 60); do
+    [[ -n $sealed ]] && passed=$(sql "SELECT last_window_start >= '$sealed' FROM billing.billing_cursor" | tr -d '\r')
+    [[ $passed == t || -z $sealed ]] && break
+    sleep 1
+  done
+  [[ -n $sealed && $passed == t ]] && echo "ok   the usage of $OM was sealed into a window and the debit job has gone past it" \
+    || { echo "FAIL the usage window of $OM was not sealed or not passed by billing (sealed '$sealed', passed '$passed')"; note_fail; }
+  balance=$(sql "SELECT amount FROM billing.balance WHERE organization_id = '$oa'" | tr -d '\r')
+  charged=$(sql "SELECT count(*) FROM billing.ledger_entry WHERE organization_id = '$oa' AND type <> 'grant'" | tr -d '\r')
+  unpriced=$(sql "SELECT count(*) FROM billing.unpriced_charge WHERE organization_id = '$oa'" | tr -d '\r')
+  noprice=$("${DC[@]}" logs --no-color billing 2>&1 | grep -c "no price for $OM" || true)
+  if [[ $balance == 5000000 && $charged == 0 && $unpriced == 0 && $noprice == 0 ]]; then
+    echo "ok   the owner's own model cost nothing: balance $balance as granted, no ledger entry, nothing set aside, no 'no price' error"
+  else
+    echo "FAIL the owner's own model was charged or set aside: balance '$balance', $charged ledger entries, $unpriced set aside, $noprice 'no price' log lines"; note_fail
+  fi
+  summary=$("${DC[@]}" exec -T tools curl -s -H "id-account: $oid" "http://usage:8080/usage/organizations/$oa/summary?from=$from&to=$to" | tr -d '\r')
+  row=$(grep -o '{[^{}]*}' <<<"$summary" | grep "\"group\":\"$OM\"" || true)
+  if grep -q '"costMicroBrl":0[,}]' <<<"$row" && grep -qE '"outputTokens":[1-9]' <<<"$row"; then
+    echo "ok   200  the usage summary shows $OM with its tokens and cost 0"
+  else
+    echo "FAIL the usage summary row of $OM is '$row'"; note_fail
+  fi
+
+  # No route: the registry's calls are internal, so the gateway answers 404 to a console token on every one of them (with an invented secret as well:
+  # the gateway strips the header and holds no secret).
+  expect 404 "${OT[@]}" "$G/models/active"
+  expect 404 "${OT[@]}" "$G/models/$entry_id"
+  expect 404 "${OT[@]}" "${J[@]}" -H "X-Internal-Token: $(printf '0%.0s' {1..64})" -X POST "$G/models" -d '{}'
+
+  # Retire: the owner's key gets the unknown-model answer within a read, the entry stays as a retired one, and the same id registers again: a GPU rented
+  # for part of the day comes back under its name.
+  registry_want 204 DELETE "/models/$entry_id"
+  registry_want 204 DELETE "/models/$entry_id"                                         # again: still 204, nothing changes
+  wait_status 404 KOA "$OM"
+  [[ $code == 404 ]] && grep -q '"model_not_found"' "$BODY" && echo "ok   404  after the retire the owner's key gets the unknown-model answer" \
+    || { echo "FAIL after the retire the owner's chat got '$code'"; head -c 300 "$BODY"; echo; note_fail; }
+  expect 404 "${KOA[@]}" "$G/v1/models/$OM"
+  registry_want 200 GET "/models/$entry_id"
+  grep -q '"status":"retired"' "$BODY" || { echo "FAIL the entry is not shown as retired"; head -c 300 "$BODY"; echo; note_fail; }
+  registry_want 201 POST /models "$entry"
+  [[ $(json id) == "$entry_id" ]] && echo "ok   the retired id registered again as the same entry" || { echo "FAIL the retired id registered again as another entry"; note_fail; }
+  wait_status 200 KOA "$OM"
+  [[ $code == 200 ]] && echo "ok   200  the owner's key chats with $OM again" || { echo "FAIL the owner's chat after the second registration got '$code'"; head -c 300 "$BODY"; echo; note_fail; }
+
+  # The engine key of the model never reaches a log or the database in clear (the simulator is still up, so its log is read too).
+  leaks=$( { "${DC[@]}" logs --no-color 2>&1; "${DC[@]}" exec -T db sh -c 'pg_dumpall -U "$POSTGRES_USER"'; } | grep -acF -e "$regkey" || true)
+  [[ $leaks == 0 ]] && echo "ok   the engine key of the registered model is in no log and not in the database in clear" || { echo "FAIL $leaks lines hold the engine key of the registered model"; note_fail; }
+
+  # Closing the organization retires the models it owns (the sweep of model-service, 5 s here), so no address or key outlives the customer.
+  expect 204 "${OT[@]}" -X DELETE "$G/organizations/$oa"
+  expect 204 "${OT[@]}" -X DELETE "$G/organizations/$ob"
+  swept=""
+  for _ in $(seq 40); do
+    registry GET "/models/$entry_id"
+    grep -q '"status":"retired"' "$BODY" && { swept=1; break; }
+    sleep 1
+  done
+  [[ -n $swept ]] && echo "ok   closing the organization retired the model it owned" || { echo "FAIL the model of a closed organization is still active after 40 s"; note_fail; }
+  "${DCO[@]}" rm -sf engine-own >/dev/null 2>&1 || true
+fi
 
 ## LGPD access: the account and its organizations, to its owner only
 expect 200 "${A[@]}" "$G/accounts/$id/export"

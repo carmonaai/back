@@ -40,3 +40,9 @@
 [submodule "bench"]
 	path = bench
 	url = https://github.com/carmonaai/bench.git
+[submodule "api/model"]
+	path = api/model
+	url = https://github.com/carmonaai/model.git
+[submodule "api/model-service"]
+	path = api/model-service
+	url = https://github.com/carmonaai/model-service.git

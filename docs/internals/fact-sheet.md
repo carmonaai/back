@@ -16,7 +16,7 @@ GPU.
 
 ## Repository shape
 
-One Git repository per module — the user's decision — so `back` holds 13 git submodules under `api/`:
+One Git repository per module — the user's decision — so `back` holds 15 git submodules under `api/`:
 
 | Submodule | Kind | Owns |
 |---|---|---|
@@ -24,6 +24,7 @@ One Git repository per module — the user's decision — so `back` holds 13 git
 | `api/auth` + `api/auth-service` | library + service | login, JWTs, API keys, console sessions |
 | `api/account` + `api/account-service` | library + service | the person: password, email, export, erasure |
 | `api/organization` + `api/organization-service` | library + service | the tenant: status, tier, memberships |
+| `api/model` + `api/model-service` | library + service | the models registered while the stack runs, and their sealed engine keys |
 | `api/usage` + `api/usage-service` | library + service | what was consumed |
 | `api/billing` + `api/billing-service` | library + service | what it costs, and the ledger |
 | `api/inference-service` | service | the OpenAI-compatible surface and the engines |
@@ -133,7 +134,7 @@ Configuration (`application.yaml`): models come from configuration, one engine U
 
 - `BillingService` pulls the next sealed window (cursor), prices it **at the window's start**, and in one
   transaction writes one ledger entry per (organization, model, mode) and updates the balance in the same
-  transaction. A missing price stops billing **before** anything is written: it never bills at zero.
+  transaction. A charge with no price is set aside in `unpriced_charge` and never billed at zero.
 - The ledger and the price table are **append-only**, enforced by database triggers that refuse UPDATE, DELETE
   and TRUNCATE.
 - `CreditFlags` sets `no_credit:{org}` in Valkey when `balance + credit_limit ≤ 0`; the gateway turns that
@@ -233,7 +234,7 @@ console, and no Kubernetes or second replica. Password resets have a per-IP thro
 **The flood brake is Valkey-backed** (one Lua token bucket, shared by replicas) and answers an OpenAI-shaped
 429 with `retry-after` and `retry-after-ms`; only its fail-open path keeps an in-memory bucket, for the case
 where Valkey itself is unreachable. **Observability exists**: `docker/prometheus/rules.yml` holds the
-recording rules and 21 alerts and `docker/grafana/dashboards/` the three dashboards, built 2026-10-05 and extended since;
+recording rules and 23 alerts and `docker/grafana/dashboards/` the three dashboards, built 2026-10-05 and extended since;
 what is missing is an **Alertmanager destination**, so the rules fire into nothing. Tracing is not wired.
 Per-service p95/p99 needs
 `management.metrics.distribution.percentiles-histogram.http.server.requests: true` in each service. Full list
@@ -264,5 +265,5 @@ code. They are recorded here so that nobody re-derives them:
 1. "The gateway's flood brake is per-replica in memory." It is not any more: `RateLimitFilter` keeps the
    bucket in Valkey through one Lua round trip, with in-memory buckets only on the fail-open path. It answers
    an OpenAI-shaped 429 with `retry-after` and `retry-after-ms`.
-2. "There is no observability." Prometheus and Grafana were added on 2026-10-05; the rule file now holds 21 alert rules and
+2. "There is no observability." Prometheus and Grafana were added on 2026-10-05; the rule file now holds 23 alert rules and
    there are 3 provisioned dashboards. What is genuinely missing is the alerting *destination*.

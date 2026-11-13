@@ -9,11 +9,11 @@ is already running.
 <svg viewBox="0 0 760 280" role="img" aria-labelledby="dops-title" aria-describedby="dops-desc"
      xmlns="http://www.w3.org/2000/svg">
   <title id="dops-title">Building the stack, checking it, and watching it</title>
-  <desc id="dops-desc">Maven verifies every module and its tests, then compose builds and starts the fourteen
+  <desc id="dops-desc">Maven verifies every module and its tests, then compose builds and starts the fifteen
   containers and waits for their health checks. The smoke test drives the whole stack through the gateway.
   Two further checks run against the same stack: a load bench on the GPU and a check of the books. Prometheus
   scrapes every service's management port and the engine's own metrics endpoint every fifteen seconds, Grafana
-  draws the provisioned dashboards, and twenty-one alert rules are evaluated with nowhere to send them.</desc>
+  draws the provisioned dashboards, and twenty-three alert rules are evaluated with nowhere to send them.</desc>
 
   <defs>
     <marker id="dops-arrow-flow" viewBox="0 0 10 10" refX="9" refY="5"
@@ -49,7 +49,7 @@ is already running.
   <g class="cmn-node cmn-node--flow" id="dops-compose" aria-labelledby="dops-compose-label">
     <rect x="176" y="48" width="132" height="56" rx="10"/>
     <text id="dops-compose-label" x="242" y="68">compose up</text>
-    <text class="cmn-sub" x="242" y="86">14 containers</text>
+    <text class="cmn-sub" x="242" y="86">15 containers</text>
   </g>
 
   <g class="cmn-node cmn-node--flow" id="dops-smoke" aria-labelledby="dops-smoke-label">
@@ -85,7 +85,7 @@ is already running.
   <g class="cmn-node cmn-node--accent" id="dops-rules" aria-labelledby="dops-rules-label">
     <rect x="530" y="176" width="110" height="56" rx="10"/>
     <text id="dops-rules-label" x="585" y="196">rules.yml</text>
-    <text class="cmn-sub" x="585" y="214">21 alerts</text>
+    <text class="cmn-sub" x="585" y="214">23 alerts</text>
   </g>
 
   <!-- Payloads -->
@@ -122,11 +122,11 @@ is already running.
 </svg>
 </div>
 <figcaption>Steps 1 and 2 are the build: Maven verifies every module and its tests, then compose builds the
-images, starts the fourteen containers and waits for their health checks before returning. Step 3 is `smoke.sh`
+images, starts the fifteen containers and waits for their health checks before returning. Step 3 is `smoke.sh`
 driving the running stack through the gateway. Steps 4 and 5 are the two checks that need a running stack and
 a reason to run them — the GPU load bench and the books. Step 6 is the metrics flow, which is asynchronous and
 independent of every check: Prometheus scrapes each service's management port and the engine's own `/metrics`
-every 15 s. Step 7 is Grafana drawing the provisioned dashboards, and `rules.yml` evaluating twenty-one alert rules
+every 15 s. Step 7 is Grafana drawing the provisioned dashboards, and `rules.yml` evaluating twenty-three alert rules
 with nowhere to send them.</figcaption>
 </figure>
 
@@ -137,9 +137,9 @@ with nowhere to send them.</figcaption>
   <span><i class="is-accent"></i> the observability stack (teal outline)</span>
 </div>
 
-1. **`mvn -B clean verify` from the repository root** builds all thirteen modules in dependency order and runs
+1. **`mvn -B clean verify` from the repository root** builds all fifteen modules in dependency order and runs
    the unit tests plus one Testcontainers integration test per database service.
-2. **`docker compose up -d --build --wait`** starts fourteen containers and blocks until every health check
+2. **`docker compose up -d --build --wait`** starts fifteen containers and blocks until every health check
    passes. `.env` must exist first; compose refuses to start without it.
 3. **`bash smoke.sh`** drives the stack through the gateway end to end — accounts, sessions, organizations,
    API keys, inference on both engines, usage, billing, the Batch API, erasure and a canary sweep.
@@ -149,7 +149,7 @@ with nowhere to send them.</figcaption>
    any balance differs from the sum of its ledger.
 6. **Prometheus scrapes** every service's `:8081/actuator/prometheus` and the engine's `/metrics` every 15 s.
    Nothing is published: the metrics stay on the internal network, like the port they come from.
-7. **Grafana draws three provisioned dashboards and lists the twenty-one alert rules** Prometheus evaluates. No
+7. **Grafana draws three provisioned dashboards and lists the twenty-three alert rules** Prometheus evaluates. No
    notification leaves the machine, because no destination has been chosen.
 
 ## What it is
@@ -193,7 +193,7 @@ management ports follow, and the only host binding in the whole compose file is 
 
 ## How work ships
 
-One GitHub Actions workflow in `back`, on every pull request and every push to `main`: fetch the thirteen
+One GitHub Actions workflow in `back`, on every pull request and every push to `main`: fetch the fifteen
 private module repositories with `CARMONAI_TOKEN`, `mvn -B verify`, generate a fresh `.env`, bring the stack
 up, run `smoke.sh`, and dump the container logs when something failed. The docs site has its own workflow.
 Both are described in [CI and shipping](ci.md).
@@ -231,5 +231,5 @@ surface to the gateway, at the cost of having to be on the machine to look at a 
 - [CI and shipping](ci.md) — the workflow, the module token and the merge order.
 - [Batch API design](batch-api.md) — how the asynchronous path works and what a crash proved.
 - [Knowledge base](knowledge-base.md) — the project's own notes, and which of them to trust.
-- [compose.yaml](https://github.com/carmonaai/back/blob/main/docker/compose.yaml) — all fourteen services,
+- [compose.yaml](https://github.com/carmonaai/back/blob/main/docker/compose.yaml) — all fifteen services,
   their health checks and their dependencies, in one file.

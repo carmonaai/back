@@ -13,7 +13,7 @@ shape carries a decision rather than a column list.
   <desc id="dsch-desc">Two schemas are drawn as walls, usage on the left and organizations on the right. A
   solid path carries an organization_id from usage_event across both boundaries to organization, and it
   arrives. A second, dotted path starts at the same place and stops short of the second wall, because no
-  foreign key exists between the two schemas. Four further schemas are named below.</desc>
+  foreign key exists between the two schemas. Five further schemas are named below.</desc>
 
   <defs>
     <marker id="dsch-arrow" viewBox="0 0 10 10" refX="9" refY="5"
@@ -55,8 +55,8 @@ shape carries a decision rather than a column list.
 
   <g class="cmn-node cmn-node--soft" id="dsch-rest" aria-labelledby="dsch-rest-label">
     <rect x="200" y="214" width="360" height="48" rx="10"/>
-    <text id="dsch-rest-label" x="380" y="232">the other four schemas</text>
-    <text class="cmn-sub" x="380" y="250">accounts · auth · billing · batch</text>
+    <text id="dsch-rest-label" x="380" y="232">the other five schemas</text>
+    <text class="cmn-sub" x="380" y="250">accounts · auth · billing · batch · models</text>
   </g>
 
   <circle class="cmn-packet cmn-travel" r="5"
@@ -89,12 +89,12 @@ would have done that checking — it stops well short of the second wall.</figca
 4. **It arrives** and resolves to a real organization, because the application wrote a real id.
 5. **The dotted path is the foreign key that would have made step 4 the database's problem** — it stops at the
    boundary, because a constraint across schemas would couple two services' migration histories.
-6. **The other four schemas** (`accounts`, `auth`, `billing`, `batch`) have the same shape: their own tables,
-   their own migrations, and ids from elsewhere that nothing constrains.
+6. **The other five schemas** (`accounts`, `auth`, `billing`, `batch`, `models`) have the same shape: their
+   own tables, their own migrations, and ids from elsewhere that nothing constrains.
 
 ## What it is
 
-Six schemas in one database, each created and migrated by the service that owns it. The schema name is the
+Seven schemas in one database, each created and migrated by the service that owns it. The schema name is the
 service's aggregate, plural. Two services have no schema at all — `inference-service` and `gateway-service` —
 because neither owns a durable fact: inference holds counters in memory and usage in a stream, and the gateway
 holds configuration and the access log.
@@ -106,6 +106,7 @@ holds configuration and the access log.
 | `accounts` | account-service | `account`, `account_token` |
 | `auth` | auth-service | `api_key`, `session` |
 | `organizations` | organization-service | `organization`, `membership` |
+| `models` | model-service | `model`, `model_clock` |
 | `usage` | usage-service | `usage_event`, `usage_window`, `usage_seal` |
 | `billing` | billing-service | `price`, `ledger_entry`, `balance`, `billing_cursor` |
 | `batch` | batch-service | `file`, `batch`, `batch_line` |
@@ -122,7 +123,7 @@ URL instead, so unqualified table names work, and cap every statement at 5 s wit
 Files live in `src/main/resources/db/migration/` of the owning service and are named
 `V<year>.<month>.<day>.<n>__<description>.sql` — `V2026.10.02.001__create_table.sql` in account-service,
 `V2026.10.05.001__api_key_expiry.sql` in auth-service, `V2026.10.03.002__batch_prices.sql` in billing-service.
-Twelve files across the six services today. The date prefix orders migrations by the day they were written,
+Nineteen files across the seven services that have a schema today. The date prefix orders migrations by the day they were written,
 which survives two branches merging in either order; Flyway's own counter would not. Each service keeps its own
 `flyway_schema_history` inside its own schema, so one service's migrations never see another's.
 
@@ -192,7 +193,7 @@ schemas there is nothing — and in `auth` not even inside it: `api_key.organiza
 `session.account_id` are plain strings, because both would point into another service's schema.
 
 What that buys is that a service's migrations are its own, and that services can be split into separate
-databases later by changing a URL. What it costs is that the database will happily store an id that refers to
+databases later by changing a URL. What it costs is that the database will happily hold an id that refers to
 nothing, and no error is raised at write time. The countermeasure is in the reading code:
 `BillingRepository.ledgerBalances()` is a `FULL OUTER JOIN` between `balance` and the sum of `ledger_entry`,
 so an organization with ledger entries and no balance row appears as a disagreement instead of disappearing
@@ -214,8 +215,8 @@ in tension: the seal job reads by `received_at` and needs the separate `usage_ev
 
 ## What would change it
 
-- **Hosting.** Six schemas in one local database become six databases, or one with six roles, when the platform
-  leaves the laptop. The schema split is what makes that a connection string rather than a rewrite.
+- **Hosting.** Seven schemas in one local database become seven databases, or one with seven roles, when the
+  platform leaves the laptop. The schema split is what makes that a connection string rather than a rewrite.
 - **Raw events worth keeping past 90 days.** The retention is `RETENTION_DAYS = 90` in `PartitionJob`; a longer
   window needs storage, not a bigger number.
 - **A second batch worker instance.** The claim query is already correct across instances, but each one opens

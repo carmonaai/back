@@ -1,6 +1,6 @@
 # Data
 
-Carmona keeps every durable fact in one PostgreSQL 17 database, split into six schemas — one per service
+Carmona keeps every durable fact in one PostgreSQL 17 database, split into seven schemas — one per service
 that owns state — plus Valkey for what must be answered on the request path, plus whatever the model engine
 is holding in its own memory right now. This section is where that state lives, how the money in it is kept
 exact, and how one tenant is kept out of another's rows.
@@ -95,7 +95,7 @@ exact, and how one tenant is kept out of another's rows.
   <g class="cmn-node cmn-node--soft" id="dindex-db" aria-labelledby="dindex-db-label">
     <rect x="650" y="200" width="100" height="56" rx="10"/>
     <text id="dindex-db-label" x="700" y="220">Postgres</text>
-    <text class="cmn-sub" x="700" y="238">six schemas</text>
+    <text class="cmn-sub" x="700" y="238">seven schemas</text>
   </g>
 
   <circle class="cmn-packet cmn-travel" r="5"
@@ -157,7 +157,7 @@ third kind of state and the only one nothing can rebuild. Step 8 is the first Po
 
 ## What it is
 
-Three kinds of state. **PostgreSQL** holds everything durable: six schemas, one per service that owns data.
+Three kinds of state. **PostgreSQL** holds everything durable: seven schemas, one per service that owns data.
 **Valkey** holds what must be answered in under a millisecond on the request path, plus the usage stream that
 makes metering survive a crash. The **engine's memory** holds the KV cache, the prefix cache and the queue,
 and it is the only one of the three that cannot be rebuilt.
@@ -165,12 +165,13 @@ and it is the only one of the three that cannot be rebuilt.
 The rule that shapes this whole section: **nothing on the request path reads or writes PostgreSQL.** Not the
 gateway, not the inference service — which has no schema at all — and not the engine.
 
-## The six schemas
+## The seven schemas
 
-`accounts` (account-service), `auth` (auth-service), `organizations` (organization-service), `usage`
-(usage-service), `billing` (billing-service) and `batch` (batch-service). One schema per service, no shared
-tables, and no foreign key across a schema boundary — the full table, the migration convention and the two
-structural decisions inside `usage` and `batch` are in [Schemas](schemas.md).
+`accounts` (account-service), `auth` (auth-service), `organizations` (organization-service),
+`models` (model-service), `usage` (usage-service), `billing` (billing-service) and `batch` (batch-service).
+One schema per service, no shared tables, and no foreign key across a schema boundary — the full table,
+the migration convention and the two structural decisions inside `usage` and `batch` are in
+[Schemas](schemas.md).
 
 ## What is not in PostgreSQL
 
@@ -193,7 +194,7 @@ measured in TTFT rather than in correctness.
 
 ## Why it is like this
 
-**One database, six schemas.** A schema per service means a service can be pointed at its own database later
+**One database, seven schemas.** A schema per service means a service can be pointed at its own database later
 by changing one connection string, and no service can read another's tables by accident. The rejected
 alternative — one shared schema with every service's tables — makes every join a coupling nobody can see in a
 code review. The cost is paid in the code: an id that crosses a schema is a plain `VARCHAR(36)`.

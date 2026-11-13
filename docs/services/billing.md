@@ -90,6 +90,12 @@ bills a window with it, and usage-service explains the charge to the customer wi
 rounded half up exactly once, and `Price.at` picks the latest `effective_from` that is not after the instant
 asked about.
 
+One rule sits ahead of the rows. `Price.at` answers a zero price, `effective_from` the epoch, for any model id that starts with
+`org-` (`Price.ownModel`, the namespace of a model an organization registered for itself; the rule is owned by `ModelId` in
+[model-service](model.md)), whatever the history holds: an organization's own model is metered and never charged per token. It is
+a rule and not rows because a row can be forgotten or superseded, and a rule needs no endpoint and no migration. The debit job and
+the customer's summary both pick their price through `Price.at`, so both see the zero.
+
 Two triggers guard the table. The first refuses `UPDATE`, `DELETE` and `TRUNCATE`. The second,
 `price_starts_in_the_future`, refuses an insert whose `effective_from` is not in the future, so a price can
 never be back-dated onto a window already billed. The batch seed turns that trigger off for its own insert and
@@ -132,15 +138,18 @@ bills at most `MAX_WINDOWS_PER_RUN = 100` windows per run. For each window, `deb
    window after it, stopping if there are none;
 2. sums the tokens per `(organization, model, mode)` **across API keys**, so one organization's window becomes
    one entry per model and mode rather than one per key;
-3. looks up `priceAt(model, mode, windowStart)` for each — and throws `MissingPriceException` if there is none,
-   **before anything has been written**;
+3. looks up `priceAt(model, mode, windowStart)` for each. A charge with no price is not billed, and not billed at zero: it is
+   set aside in `unpriced_charge` with an ERROR, in the same transaction, and the cursor moves on. A cost of zero, an
+   organization's own model included, writes no ledger entry;
 4. opens a transaction, re-reads the cursor `FOR UPDATE` and abandons the window if another instance already
    billed it, then writes every entry, updates every touched balance, and moves the cursor;
 5. re-syncs the credit flag for every balance it touched, after the commit.
 
-The consequence of step 3 is the rule worth remembering: **a missing price stops billing, it never bills at
-zero.** `BillingJobs` logs that as an ERROR to act on, because a missing price is a configuration mistake; any
-other failure is a WARN, and the next run picks up from the same cursor.
+The consequence of step 3 is the rule worth remembering: **a charge with no price is set aside, never billed at zero,
+and never holds the cursor.** One unpriced model must not hold every organization's billing, and a price cannot be added
+for a past instant, so waiting for one would wait forever. The ERROR is the signal to add a price: once a row exists for
+the model and mode, `billUnpriced` bills what was set aside at the model's first price. Any other failure of the job is a
+WARN, and the next run picks up from the same cursor.
 
 Step 4's balance update is a single upsert — `INSERT ... ON CONFLICT (organization_id) DO UPDATE SET
 amount = balance.amount + EXCLUDED.amount` — which creates the row at zero on the first movement and takes the

@@ -90,9 +90,35 @@ Correction to earlier text: [inference-plan.md](inference-plan.md), in its dated
 says that the declared-length check lives in `BodyLimit` and that its `413 request_too_large` comes before the body is read. Since AM-14 the check is in `BodyDrain`, the 413 is sent after the
 body has been read and thrown away (up to `drain-up-to`; above it, at once), and `BodyLimit` still computes the bound. Those lines were left as they stood on their day.
 
-## Step B (dated block added when its documents are written)
+## Step B built 2026-11-13: the model registry
 
-Not yet. `PLAN-B.md` of the work folder holds the plan; its task B-W2 adds a dated block here.
+Step B (`PLAN-B.md` of the work folder, decisions D1 to D12) lets a model be registered while everything runs. A new pair, the library `model` and the service
+`model-service`, keeps the list in Postgres (schema `models`, tables `model` and `model_clock`) behind four internal calls guarded by the shared secret
+(`POST /models`, `DELETE /models/{id}`, `GET /models/{id}`, `GET /models/active`), and inference-service follows the list on a timer of its own and never reads
+it on a request's path. Branch `kimi-k31-registry` in every module it touched; the page is [docs/services/model.md](../../../../docs/services/model.md).
+
+| Lane | What it did | Where |
+|---|---|---|
+| R | The library `model` (records, the Feign interface, no key in any `toString`) and `model-service`: the validation of an entry, the engine key sealed with AES-256-GCM, the registry clock, register, retire, read one, the snapshot list, the cap on active models and the sweep that retires the models of a closed organization | model `6474930`, model-service `d1c6cfb` |
+| I, X, Y | inference-service: the registry settings, `ModelRoster` and `ModelWatcher`, the owner filter (an owned model is found and listed for its owner alone), the leases, engine timeouts, meters, contract check and reconciler follow the roster, and the refresh loop `ModelRosterSync` | inference-service `700d7b3` (the head after the merges of lanes X and Y) |
+| P | An organization's own model, the `org-` namespace, costs nothing: `Price.at` answers a zero price for it | billing `67ca5df`, billing-service `c4b510e`, usage-service `71dce95` |
+| W (B-W1) | The stack runs it: the compose block `model`, the secret `model_key`, `init-secrets.sh`, a Prometheus job and the alerts `ModelListStale` and `ModelEntrySkipped`, a smoke section, and the gateway's test that no route reaches the registry | back `3540133`, gateway-service `7340881` |
+| W (B-W2) | These documents: the page `services/model.md`, the pages that count or describe the services, the money rule, the secret and the key at rest, the stack, the meters and the CI token's repositories | the commit that adds this block |
+
+Verified in B-W1: `mvn -B verify -pl api/model-service,api/gateway-service -am` passed (model library 6 tests; model-service 301 unit and 97 integration;
+gateway-service 186 unit and 142 integration), and `smoke.sh` on the stack passed whole, the new section included (195 ok lines, 0 FAIL, 290 s). Each of the three
+guards (the secret on model-service, the owner filter, the zero price) was removed once in the running stack's build, and the section failed each time. The counts
+and the guards of the other tasks are in `log/B-*.md` of the work folder; no live check with a real engine has been made.
+
+Deviations on purpose from the design notes (the decisions of `PLAN-B.md` win): four calls and no `PUT`, a change being a retire and a register (D1); the list is a
+snapshot of the active entries and not a feed (D2); a retired model id may be registered again as the same entry (D3); any difference of a registered entry is told to
+the watchers as retired and then appeared (D4); an entry carries replicas only (D5) and no roles or control-token patterns (D6); the zero price is a rule in `Price.at`
+and not price rows (D11).
+
+Not built, and said on the pages (D12): a local copy of the list for a cold start; `POST /billing/prices`; roles and patterns of a registered model; dropping the
+per-id objects at a retire ([gaps](../../../../docs/reference/gaps.md), rows 33 and 44 to 46). Owner tasks: the CI token must be able to read the two new repositories
+`carmonaai/model` and `carmonaai/model-service`, and he decides whether an organization with no credit may call its own model (the gateway rule is unchanged). Nothing is
+merged into main without his yes.
 
 ---
 

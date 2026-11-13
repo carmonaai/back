@@ -1702,3 +1702,96 @@ tests:
         eval_time: 32m45s
         exp_samples:
           - {labels: '{model="m1", mode="sync"}', value: 0.29}
+
+  # The model registry (round AM, step B). model-service is one static target like organization, so ServiceDown names it the same way once its job is in
+  # the list; before, `up{job="model"} == 0` matched nothing and a dead registry was silent.
+  - name: ServiceDown names model-service when it stops answering
+    interval: 15s
+    input_series:
+      - {series: 'up{job="model", instance="model:8081"}', values: '1x4 0x30'}
+    alert_rule_test:
+      - {eval_time: 2m, alertname: ServiceDown, exp_alerts: []}
+      - eval_time: 4m
+        alertname: ServiceDown
+        exp_alerts:
+          - exp_labels: {severity: critical, job: model, instance: "model:8081"}
+            exp_annotations:
+              summary: "model model:8081 has not answered a scrape for 2m"
+              description: >-
+                Prometheus cannot reach model:8081/actuator/prometheus (model; one series per
+                replica for inference and gateway, so this names the replica). The container may be down,
+                still starting, or its management port not listening. Check the container's own health status
+                and its logs. No metrics for this service means no SLI either.
+
+  # The age of the list grows by a whole scrape (15 s) between samples while model-service does not answer: over 15 s for a minute is the alert.
+  - name: ModelListStale fires when the registered models have not been read for three refresh intervals
+    interval: 15s
+    input_series:
+      - {series: 'carmona_inference_models_age_seconds{job="inference", instance="10.0.0.2:8081"}', values: '0+15x40'}
+      - {series: 'carmona_inference_models_age_seconds{job="inference", instance="10.0.0.3:8081"}', values: '0 5 0 5 0 5 0 5 0 5 0 5 0 5 0 5 0 5 0 5 0 5 0 5 0 5 0 5 0 5 0 5 0 5'}
+    alert_rule_test:
+      - {eval_time: 1m15s, alertname: ModelListStale, exp_alerts: []}
+      - eval_time: 1m30s
+        alertname: ModelListStale
+        exp_alerts:
+          - exp_labels: {severity: warning, job: inference, instance: "10.0.0.2:8081"}
+            exp_annotations:
+              summary: "inference 10.0.0.2:8081 has not read the registered models for 1m 30s"
+              description: >-
+                This inference-service replica has not read the list of registered models from model-service for over three refresh intervals
+                (15 s at the default of 5 s), and a read that fails is tried again after a longer pause. Everything it serves goes on: a model it
+                has stays served. What does not reach it is a registration or a retire made since, among them the models of an organization that
+                closed, which are retired in model-service and keep running here until the list is read again. Check the model container
+                (`docker compose ps model`, its log) and that the secret in carmona.internal.token-file is the one model-service has: a 401 is
+                logged as "model list refused".
+
+  # A list that is read at the refresh interval has an age of a few seconds at most, and with the registry off there is no series: neither is an alert.
+  - name: ModelListStale stays quiet while the list is read and when the registry is off
+    interval: 15s
+    input_series:
+      - {series: 'carmona_inference_models_age_seconds{job="inference", instance="10.0.0.3:8081"}', values: '0 5 0 5 0 5 0 5 0 5 0 5 0 5 0 5 0 5 0 5 0 5 0 5 0 5 0 5 0 5 0 5 0 5 0 5 0 5 0 5'}
+      - {series: 'up{job="inference", instance="10.0.0.4:8081"}', values: '1x40'}
+    alert_rule_test:
+      - {eval_time: 5m, alertname: ModelListStale, exp_alerts: []}
+      - {eval_time: 9m, alertname: ModelListStale, exp_alerts: []}
+
+  # The age falls back under the line before the minute is over: model-service was away for a restart, not for good.
+  - name: ModelListStale does not fire when the list is read again within the minute
+    interval: 15s
+    input_series:
+      - {series: 'carmona_inference_models_age_seconds{job="inference", instance="10.0.0.2:8081"}', values: '0+15x5 0 5 0 5 0 5 0 5 0 5 0 5 0 5 0 5 0 5 0 5'}
+    alert_rule_test:
+      - {eval_time: 1m30s, alertname: ModelListStale, exp_alerts: []}
+      - {eval_time: 4m, alertname: ModelListStale, exp_alerts: []}
+
+  # One refused entry is a model that is registered and not served. 5 minutes above 0 is the alert; it names the replica, never the entry (the
+  # log line of the pass does, with the rule).
+  - name: ModelEntrySkipped fires after 5m with an entry refused
+    interval: 15s
+    input_series:
+      - {series: 'carmona_inference_models_skipped{job="inference", instance="10.0.0.2:8081"}', values: '0x1 1x60'}
+      - {series: 'carmona_inference_models_skipped{job="inference", instance="10.0.0.3:8081"}', values: '0x62'}
+    alert_rule_test:
+      - {eval_time: 5m15s, alertname: ModelEntrySkipped, exp_alerts: []}
+      - eval_time: 5m30s
+        alertname: ModelEntrySkipped
+        exp_alerts:
+          - exp_labels: {severity: warning, job: inference, instance: "10.0.0.2:8081"}
+            exp_annotations:
+              summary: "inference 10.0.0.2:8081 refuses 1 registered model entries for 5m"
+              description: >-
+                The last read of the registered models found entries this replica cannot serve, so a model that model-service accepted is not
+                being served here (a 404 model_not_found to its callers). The log line of the pass names each entry by its id and the rule it
+                broke, never an address or a key: an id that clashes with a model of the configuration, a window above
+                carmona.inference.registry.max-context-window, more models than carmona.inference.registry.max-models, a number out of range,
+                or a model whose readers could not be prepared. The fix is a retire and a new registration (there is no change in place); a
+                registry with several inference-service replicas reads it the same on each, so one replica alone showing it is a replica on an
+                older build.
+
+  - name: ModelEntrySkipped does not fire when the entry is gone before 5m
+    interval: 15s
+    input_series:
+      - {series: 'carmona_inference_models_skipped{job="inference", instance="10.0.0.2:8081"}', values: '1x10 0x40'}
+    alert_rule_test:
+      - {eval_time: 5m, alertname: ModelEntrySkipped, exp_alerts: []}
+      - {eval_time: 10m, alertname: ModelEntrySkipped, exp_alerts: []}

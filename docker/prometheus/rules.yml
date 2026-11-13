@@ -75,10 +75,10 @@ groups:
 
   - name: availability
     rules:
-      # Any of the eight services. Metrics stop, so this is the alert that turns every other one into a
+      # Any of the nine services. Metrics stop, so this is the alert that turns every other one into a
       # silent failure if it is missing.
       - alert: ServiceDown
-        expr: up{job=~"account|organization|auth|usage|billing|inference|batch|gateway"} == 0
+        expr: up{job=~"account|organization|model|auth|usage|billing|inference|batch|gateway"} == 0
         for: 2m
         labels: {severity: critical}
         annotations:
@@ -384,6 +384,49 @@ groups:
             ratio of the KV cache), prefix_caching (prefix caching is off, and the shared-prefix workload depends on it).
             inference-service logs one WARN with the numbers when a check starts to fail, and looks again every
             recheck-every (10 m), so this clears by itself some minutes after the engine's flags are fixed.
+
+  # The models registered while the service runs (round AM, step B). inference-service reads the list from model-service with a loop of its own and keeps
+  # the last list when it cannot, so a model-service that is away shows here as an age that grows, and an entry it refuses as a count that stays above 0.
+  # Both meters exist only while carmona.inference.registry.url is set: with the registry off there is no series and no alert. The state of model-service
+  # itself is ServiceDown's (job model).
+  - name: model-registry
+    rules:
+      # carmona_inference_models_age_seconds: seconds since the last good read of the list (an answer that nothing changed is a good read); before the first one it
+      # counts from the start of the process, so a model-service that never answered shows as growing, not as missing. A healthy replica reads every refresh-every
+      # (5 s by default, a quarter of jitter either way) and the age falls back to nearly 0; a read that fails is tried again after twice the pause, up to a
+      # minute. 15 s is three refresh intervals: one lost read does not reach it, two in a row do. It is each replica's own opinion, so nothing is aggregated.
+      # ponytail: 15 is typed for the default refresh interval; with another carmona.inference.registry.refresh-every, set three times that here.
+      - alert: ModelListStale
+        expr: carmona_inference_models_age_seconds > 15
+        for: 1m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.job }} {{ $labels.instance }} has not read the registered models for {{ $value | humanizeDuration }}"
+          description: >-
+            This inference-service replica has not read the list of registered models from model-service for over three refresh intervals
+            (15 s at the default of 5 s), and a read that fails is tried again after a longer pause. Everything it serves goes on: a model it
+            has stays served. What does not reach it is a registration or a retire made since, among them the models of an organization that
+            closed, which are retired in model-service and keep running here until the list is read again. Check the model container
+            (`docker compose ps model`, its log) and that the secret in carmona.internal.token-file is the one model-service has: a 401 is
+            logged as "model list refused".
+
+      # carmona_inference_models_skipped: how many entries the last read refused. A refused entry is a model that model-service accepted and this replica does
+      # not serve (a 404 model_not_found for its callers), and the deploy tool that registered it saw a 201. The log line of the pass names the entry and the
+      # rule. A fix is a retire and a new registration, which the next read sees within seconds, so a count that stays for five minutes is nobody's fix in progress.
+      - alert: ModelEntrySkipped
+        expr: carmona_inference_models_skipped > 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.job }} {{ $labels.instance }} refuses {{ $value }} registered model entries for 5m"
+          description: >-
+            The last read of the registered models found entries this replica cannot serve, so a model that model-service accepted is not
+            being served here (a 404 model_not_found to its callers). The log line of the pass names each entry by its id and the rule it
+            broke, never an address or a key: an id that clashes with a model of the configuration, a window above
+            carmona.inference.registry.max-context-window, more models than carmona.inference.registry.max-models, a number out of range,
+            or a model whose readers could not be prepared. The fix is a retire and a new registration (there is no change in place); a
+            registry with several inference-service replicas reads it the same on each, so one replica alone showing it is a replica on an
+            older build.
 
   # The request guard (WP-07). Signals about client behaviour, not about the service: nothing here is a page.
   - name: request-guards

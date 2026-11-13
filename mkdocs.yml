@@ -145,6 +145,7 @@ nav:
       - Auth: services/auth.md
       - Account: services/account.md
       - Organization: services/organization.md
+      - Model: services/model.md
       - Inference: services/inference.md
       - Metering: services/metering.md
       - Billing: services/billing.md

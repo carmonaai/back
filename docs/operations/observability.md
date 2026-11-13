@@ -11,7 +11,7 @@ measured, what the numbers mean, and — with the same weight — what is not me
   <title id="dobs-title">A metric's path from the service to an alert nobody is sent</title>
   <desc id="dobs-desc">inference-service publishes its indicators on the management port; the engine exposes
   its own counters. Prometheus scrapes both every fifteen seconds and evaluates its rule file every sixty
-  seconds, producing recording rules and twenty-one alerts. Grafana draws provisioned dashboards and lists those
+  seconds, producing recording rules and twenty-three alerts. Grafana draws provisioned dashboards and lists those
   alert rules and their firing state. There is no Alertmanager, so a firing rule reaches no destination.</desc>
 
   <defs>
@@ -51,7 +51,7 @@ measured, what the numbers mean, and — with the same weight — what is not me
   <g class="cmn-node cmn-node--accent" id="dobs-rules" aria-labelledby="dobs-rules-label">
     <rect x="350" y="80" width="120" height="58" rx="10"/>
     <text id="dobs-rules-label" x="410" y="100">rules.yml</text>
-    <text class="cmn-sub" x="410" y="118">21 alerts</text>
+    <text class="cmn-sub" x="410" y="118">23 alerts</text>
   </g>
 
   <g class="cmn-node cmn-node--accent" id="dobs-grafana" aria-labelledby="dobs-grafana-label">
@@ -112,7 +112,7 @@ Step 5 is where it stops: a firing rule reaches no destination, because none has
    same port that was never published and never routed before metrics existed.
 2. **Prometheus scrapes every service every 15 s**, one job per service so the `job` label carries the service
    name, plus the engine's own `/metrics` with a bearer token read from a file written at container start.
-3. **`rules.yml` is evaluated every 60 s**: twelve recording rules (three latency, five engine, four prompt cache) and twenty-one alerts.
+3. **`rules.yml` is evaluated every 60 s**: twelve recording rules (three latency, five engine, four prompt cache) and twenty-three alerts.
 4. **Grafana draws three provisioned dashboards** and lists the alert rules and their state, with
    `allowUiUpdates: false`, so a change made in the browser does not survive the next restart.
 5. **Nothing leaves the machine.** There is no Alertmanager and no destination, so a firing rule is a colour on
@@ -150,6 +150,10 @@ nothing: the engine's own counters are real series today.
 | `carmona_inference_prompt_cache_tokens_total` | counter | `model`, `mode`, `result` (`hit`, `miss`) | — |
 | `carmona_inference_body_reserved_bytes` | gauge | none | — |
 | `carmona_inference_body_refused_total` | counter | none | — |
+| `carmona_inference_models_age_seconds` | gauge | none | — |
+| `carmona_inference_models` | gauge | `source` (`configured`, `registered`) | — |
+| `carmona_inference_models_skipped` | gauge | none | — |
+| `carmona_inference_models_refresh_total` | counter | `outcome` (`ok`, `failed`, `inconsistent`) | — |
 
 `carmona_inference_body_reserved_bytes` is the bytes of request bodies the service holds at once, against its budget
 (`carmona.inference.body.budget`, a tenth of the JVM's maximum heap unless set): each chat request reserves the length it
@@ -161,6 +165,13 @@ before the reservation, so it reserves nothing and is not in either meter: it is
 and no alert or panel reads them yet ([gaps](../reference/gaps.md)). The reasoning tokens and the first-output time of
 a request are not metrics: they travel in the usage event ([Metering](../services/metering.md)), and the existing
 `carmona_inference_tokens_total` still counts output tokens as the engine did, with the reasoning inside them.
+
+The four `carmona_inference_models…` meters exist only while the model registry is on (`carmona.inference.registry.url` is set) and carry
+ids and counts only: `…_age_seconds` is the seconds since inference-service last read model-service's list (an "unchanged" answer is a read; before the
+first one it counts from the start of the process, so a model-service that never answered shows as growing and not as missing), `carmona_inference_models`
+the models in the roster by `source`, `…_skipped` the entries the last read refused (a registered model that is not being served; its id is in the log line,
+never a label) and `…_refresh_total` the reads by how they ended, at 0 from the start. `ModelListStale` and `ModelEntrySkipped` read the first and the third
+([Inference](../services/inference.md#models-registered-while-the-service-runs)).
 
 The buckets are not Micrometer's defaults: a default timer stops at 30 seconds, and a TTFT past the last bucket
 is a p99 that reads as the bucket edge — the one number an operator most needs during an incident. `2` is
@@ -236,20 +247,22 @@ mean — plus a gateway row by `routeId`. **Carmona — revenue integrity** has 
 against `/v1` requests served, events rejected in the last hour, and a collapsed row for the four signals no
 service publishes yet.
 
-Twenty-one alert rules, each with its own what-to-do text in `rules.yml`, repeated one row per alert in the
+Twenty-three alert rules, each with its own what-to-do text in `rules.yml`, repeated one row per alert in the
 [observability reference](https://github.com/carmonaai/back/blob/main/.claude/skills/carmona-architecture/references/observability.md).
-They fall in six groups. *Is it up:* `ServiceDown` (2 m), `ReplicatedServiceAbsent` (2 m), `ReplicaMissing`
+They fall in seven groups. *Is it up:* `ServiceDown` (2 m), `ReplicatedServiceAbsent` (2 m), `ReplicaMissing`
 (1 m; the `inference`, `gateway`, `engine` and `vllm` jobs) and `EngineUnreachable` (1 m). *Is it fast enough:*
 `EngineQueueSustained` (2 m with the engine's waiting requests at the queue places inference-service admits — not a
 constant), `QueueWaitHigh` (p95 above 1 s for 10 m), `ErrorShareHigh` (5 % over 5 m) and `PayingTierRefusals` (5 %
 over 5 m on standard and enterprise — trial being refused is by design and is not this alert). *Is the money
 right:* `ReconciliationMismatch` (any occurrence), `UsageIngestionStalled` (5 m), `SealLagHigh` (180 s for 5 m),
-`DebitLagHigh` (300 s for 5 m) and `LagGaugeMissing` (a live service with no lag gauge for 5 m). *Is the cache store
+`DebitLagHigh` (300 s for 5 m) and `LagGaugeMissing` (a live service with no lag gauge for 5 m). *Is the lease cache
 there:* `LeaseStoreDown` (1 m; a warning, because requests are still served on each replica's share). *The engine
 replicas and the request guard:* `ReplicaUnhealthy` (1 m), `ReplicaWentUnhealthy` (any transition in 10 m),
 `ReplicaDrainOverdue` (2 m), `EngineContractMismatch` (5 m), `ControlTokensInContent` (a signal, not a page) and
 `GuardRejections` (ten refusals in ten minutes). The metrics of the replica and guard alerts come from features
-that are off or neutral by default (the health gate is off), and an alert on a metric that does not exist stays silent. *Is the cache doing its job:*
+that are off or neutral by default (the health gate is off), and an alert on a metric that does not exist stays silent. *The registered models:* `ModelListStale` (the last good read of the list is over 15 s old, for 1 m; three of the default 5 s refresh
+intervals) and `ModelEntrySkipped` (the last read refused at least one entry, for 5 m), both on meters that exist only while the registry is on, so with
+the registry off they stay silent too. *Is the cache doing its job:*
 `PromptCacheHitRatioLow` (a signal, not a page): under 30 % of the measured prompt tokens served from the prefix cache over 30 m,
 for 15 m, with at least 300000 tokens behind the ratio. It stays quiet while the counter does not exist, while the traffic is under
 that floor, when no prompt token was measured in the last 5 minutes (the 30 m window remembers a burst for 30 minutes, the alert is about
@@ -337,7 +350,7 @@ which is the goodput definition the benches already use.
 - [Reconciler.java](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Reconciler.java)
   — the tolerance, the engine counter mappings and the mismatch gauge.
 - [rules.yml](https://github.com/carmonaai/back/blob/main/docker/prometheus/rules.yml) — the recording rules and
-  all twenty-one alerts, each with what an operator should do about it.
+  all twenty-three alerts, each with what an operator should do about it.
 - [prometheus.yml](https://github.com/carmonaai/back/blob/main/docker/prometheus/prometheus.yml) — the scrape
   jobs, the 15 s interval and the engine's token file.
 - [observability.md](https://github.com/carmonaai/back/blob/main/.claude/skills/carmona-architecture/references/observability.md)
