@@ -33,6 +33,12 @@ x-valkey: &valkey
 # (then run smoke.sh with SIM_STOCK=1: that engine cannot pass the two assertions below).
 x-engine-image: &engine-image ${ENGINE_IMAGE:-carmona/llm-d-inference-sim:v0.11.4-disconnect.1}
 
+# The largest context window of a model that is registered while the stack runs (round AM, step B), in tokens. One number with two readers, which must
+# agree: model-service refuses a registration above it, and inference-service neither follows a model above it nor reads a request body bigger than
+# it allows (the read limit is the larger of this and the biggest configured window, times 16 bytes; a change takes a restart of both). A value for this
+# harness, not the measurement of any model: an operator sets what their hardware allows, and the simulator's own window is 4096.
+x-registry-ceiling: &registry-ceiling ${REGISTRY_MAX_CONTEXT_WINDOW:-131072}
+
 services:
   db:
     image: postgres:17.11-bookworm@sha256:639ab7ceb90e13123085b741fb31ef493fba25463002f6da665352e7b534b652
@@ -120,6 +126,27 @@ services:
     healthcheck: *readiness
     networks: [internal]
 
+  # The models that are added while everything runs (round AM, step B): a deploy tool registers a model it has started, with the engine's addresses and
+  # key, and inference-service follows the list. All four calls are internal: they carry the shared secret, the gateway has no route to them and no port
+  # is published. Nothing waits for this service: inference-service does not depend on it (it starts without it and keeps the last list it read while it is
+  # down), and no request reads it. model_key seals the engine keys in the database and is mounted here and nowhere else.
+  model:
+    secrets: [internal_token, model_key]
+    build: ../api/model-service
+    environment:
+      <<: *database
+      MODEL_MAX_CONTEXT_WINDOW: *registry-ceiling
+      # Harness only: the engines of this stack are plain http at a service name (engine, engine-own). Registered replicas are https at a public
+      # address unless both are set, which production leaves alone.
+      MODEL_ALLOW_HTTP: "true"
+      MODEL_ALLOW_INTERNAL_HOSTS: "true"
+      MODEL_SWEEP_EVERY: 5s   # the prototype retires the models of a closed organization within seconds (the service's default is 1 m)
+    depends_on:
+      db: { condition: service_healthy }
+      organization: { condition: service_healthy }
+    healthcheck: *readiness
+    networks: [internal]
+
   auth:
     secrets: [internal_token]   # BE-24: the internal-endpoint secret; the gateway has no such line on purpose
     build: ../api/auth-service
@@ -172,6 +199,31 @@ services:
     security_opt: ["no-new-privileges:true"]
     mem_limit: 256m
     stop_grace_period: 35s              # it drains in-flight streams on SIGTERM
+    networks: [internal]
+
+  # The stand-in for a rented GPU in smoke.sh's section on a registered model: a second simulator that serves the one model id of an organization's own
+  # (org-<the organization's uuid>/...), which is known only once that organization exists. The simulator answers 404 to a model name it does not serve and
+  # inference-service sends the registered id as the name, so the engine has to serve exactly that id. No stack starts it (the profile keeps it out of
+  # `up`); smoke.sh names it with OWN_ENGINE_MODEL set, and removes it. The flags are the engine's above, but for two running and two waiting places and
+  # the simulator's own latency (none), so a smoke call does not wait.
+  engine-own:
+    profiles: ["own-engine"]
+    image: *engine-image
+    pull_policy: never
+    command:
+      - --model=carmona/qwen3-4b
+      - --served-model-name=${OWN_ENGINE_MODEL:-org-unset/unset}
+      - --port=8000
+      - --mode=echo
+      - --max-num-seqs=2
+      - --max-waiting-queue-length=2
+      - --max-model-len=4096
+      - --seed=42
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    stop_grace_period: 5s
     networks: [internal]
 
   # fleet profile: STAND-IN for the replica picker, between inference-service and the simulators only (the gateway
@@ -242,6 +294,7 @@ services:
     networks: [internal]
 
   inference:
+    secrets: [internal_token]   # the one internal call this service makes: it reads the registered models from model-service (carmona.internal.token-file)
     build: ../api/inference-service
     # One model, set through the environment (Spring replaces the model of application.yaml). Single simulator: url
     # http://engine:8000 and the simulator's 4 slots + 2 queued; a fleet sets ENGINE_URL, ENGINE_SLOTS and ENGINE_QUEUE
@@ -261,6 +314,11 @@ services:
       CARMONA_INFERENCE_EXPECTEDREPLICAS: ${INFERENCE_REPLICAS:-1}
       CARMONA_INFERENCE_RECONCILEEVERY: ${RECONCILE_EVERY:-1h}
       CARMONA_INFERENCE_USAGECLAIMAFTER: 10s   # a killed instance's unconfirmed usage events go out within seconds (default 60 s)
+      # The models registered while the service runs: read from model-service every refresh-every (5 s by default) by one loop, never on a request's path. A
+      # model-service that is down changes nothing for the models already served; a registered model is a 404 until the first read. The ceiling is the one
+      # of model-service (above, x-registry-ceiling).
+      CARMONA_INFERENCE_REGISTRY_URL: http://model:8080
+      CARMONA_INFERENCE_REGISTRY_MAXCONTEXTWINDOW: *registry-ceiling
       # The engine contract check (WP-03) holds an engine to the metric families vLLM exposes (eight of them, the code default).
       # The simulator exposes four of them from the start and never the prefix-cache ones, so on this stack the check would raise
       # carmona_engine_contract_ok{check="metrics"} = 0 for ever, and EngineContractMismatch with it. These four are what the
@@ -380,10 +438,15 @@ services:
     networks: [internal]
 
 # BE-24 (SEC-04): one shared secret, one line "X-Internal-Token: <64 hex>", created by `bash init-secrets.sh` before the first `up`.
-# billing, organization, account and auth refuse to start without it; the gateway and every other service never see it.
+# billing, organization, account, auth and model refuse to start without it; inference reads it to ask model-service for the registered models, and tools
+# to call the internal endpoints; the gateway and every other service never see it.
+# model_key: the data key of model-service (one line of 64 hex characters, same script), which seals the engine keys of registered models in the
+# database. Mounted in model only; the service refuses to start without it.
 secrets:
   internal_token:
     file: ./secrets/internal_token
+  model_key:
+    file: ./secrets/model_key
 
 networks:
   internal: {}

@@ -19,6 +19,11 @@ scrape_configs:
     metrics_path: /actuator/prometheus
     static_configs: [{targets: ["organization:8081"]}]
 
+  # model-service: the list of models registered while the stack runs. One replica, no replica knob: static, like organization.
+  - job_name: model
+    metrics_path: /actuator/prometheus
+    static_configs: [{targets: ["model:8081"]}]
+
   - job_name: auth
     metrics_path: /actuator/prometheus
     static_configs: [{targets: ["auth:8081"]}]
