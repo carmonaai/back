@@ -16,7 +16,7 @@ GPU.
 
 ## Repository shape
 
-One Git repository per module — the user's decision — so `back` holds 13 git submodules under `api/`:
+One Git repository per module — the user's decision — so `back` holds 15 git submodules under `api/`:
 
 | Submodule | Kind | Owns |
 |---|---|---|
@@ -24,6 +24,7 @@ One Git repository per module — the user's decision — so `back` holds 13 git
 | `api/auth` + `api/auth-service` | library + service | login, JWTs, API keys, console sessions |
 | `api/account` + `api/account-service` | library + service | the person: password, email, export, erasure |
 | `api/organization` + `api/organization-service` | library + service | the tenant: status, tier, memberships |
+| `api/model` + `api/model-service` | library + service | the models registered while the stack runs, and their sealed engine keys |
 | `api/usage` + `api/usage-service` | library + service | what was consumed |
 | `api/billing` + `api/billing-service` | library + service | what it costs, and the ledger |
 | `api/inference-service` | service | the OpenAI-compatible surface and the engines |

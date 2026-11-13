@@ -13,7 +13,7 @@ shape carries a decision rather than a column list.
   <desc id="dsch-desc">Two schemas are drawn as walls, usage on the left and organizations on the right. A
   solid path carries an organization_id from usage_event across both boundaries to organization, and it
   arrives. A second, dotted path starts at the same place and stops short of the second wall, because no
-  foreign key exists between the two schemas. Four further schemas are named below.</desc>
+  foreign key exists between the two schemas. Five further schemas are named below.</desc>
 
   <defs>
     <marker id="dsch-arrow" viewBox="0 0 10 10" refX="9" refY="5"
@@ -55,8 +55,8 @@ shape carries a decision rather than a column list.
 
   <g class="cmn-node cmn-node--soft" id="dsch-rest" aria-labelledby="dsch-rest-label">
     <rect x="200" y="214" width="360" height="48" rx="10"/>
-    <text id="dsch-rest-label" x="380" y="232">the other four schemas</text>
-    <text class="cmn-sub" x="380" y="250">accounts · auth · billing · batch</text>
+    <text id="dsch-rest-label" x="380" y="232">the other five schemas</text>
+    <text class="cmn-sub" x="380" y="250">accounts · auth · billing · batch · models</text>
   </g>
 
   <circle class="cmn-packet cmn-travel" r="5"
@@ -89,8 +89,8 @@ would have done that checking — it stops well short of the second wall.</figca
 4. **It arrives** and resolves to a real organization, because the application wrote a real id.
 5. **The dotted path is the foreign key that would have made step 4 the database's problem** — it stops at the
    boundary, because a constraint across schemas would couple two services' migration histories.
-6. **The other four schemas** (`accounts`, `auth`, `billing`, `batch`) have the same shape: their own tables,
-   their own migrations, and ids from elsewhere that nothing constrains.
+6. **The other five schemas** (`accounts`, `auth`, `billing`, `batch`, `models`) have the same shape: their
+   own tables, their own migrations, and ids from elsewhere that nothing constrains.
 
 ## What it is
 
@@ -215,8 +215,8 @@ in tension: the seal job reads by `received_at` and needs the separate `usage_ev
 
 ## What would change it
 
-- **Hosting.** Six schemas in one local database become six databases, or one with six roles, when the platform
-  leaves the laptop. The schema split is what makes that a connection string rather than a rewrite.
+- **Hosting.** Seven schemas in one local database become seven databases, or one with seven roles, when the
+  platform leaves the laptop. The schema split is what makes that a connection string rather than a rewrite.
 - **Raw events worth keeping past 90 days.** The retention is `RETENTION_DAYS = 90` in `PartitionJob`; a longer
   window needs storage, not a bigger number.
 - **A second batch worker instance.** The claim query is already correct across instances, but each one opens

@@ -30,11 +30,13 @@ at a stub instead of a container.
 | `api/account` | library | `account` | — |
 | `api/auth` | library | `auth` | `account` (because `AuthController.whoami` answers an `AccountOut`) |
 | `api/organization` | library | `organization` | — |
+| `api/model` | library | `model` | — |
 | `api/usage` | library | `usage` | — |
 | `api/billing` | library | `billing` | — |
 | `api/account-service` | service | `account-service` | `account`, `organization`, `auth` |
 | `api/auth-service` | service | `auth-service` | `auth`, `organization` |
 | `api/organization-service` | service | `organization-service` | `organization` |
+| `api/model-service` | service | `model-service` | `model`, `organization` |
 | `api/usage-service` | service | `usage-service` | `usage`, `organization`, `billing` |
 | `api/billing-service` | service | `billing-service` | `billing`, `usage`, `organization` |
 | `api/batch-service` | service | `batch-service` | `organization` |
@@ -48,7 +50,7 @@ A library that needed a database driver would be a sign that behaviour had leake
 ## What an aggregate is here
 
 The schema **is** the aggregate boundary, and it is named after the aggregate in the plural:
-`accounts`, `auth`, `organizations`, `usage`, `billing`, `batch`. Inside a service:
+`accounts`, `auth`, `organizations`, `models`, `usage`, `billing`, `batch`. Inside a service:
 
 - the **domain class** (`Account`) has no persistence annotations;
 - the **JPA model** (`AccountModel`) is built from it (`new AccountModel(domain, hash)`) and converts back
@@ -168,7 +170,7 @@ across it, because there is no transaction that could span it.</figcaption>
 ## What would change it
 
 The rule is enforced by review and by the shape of the code, **not by the database**: one Postgres user
-owns all six schemas, so nothing physically stops a query from joining across two of them. The append-only
+owns all seven schemas, so nothing physically stops a query from joining across two of them. The append-only
 ledger has the same ceiling — it is enforced by triggers, not by a second role. Both are written down as
 shortcuts in the fact sheet's shortcut table, with "separate roles when the DB is shared" as the upgrade
 path. Two other boundaries are waiting on a decision rather than on code: batch files belong in object

@@ -136,9 +136,10 @@ Feign clients carry explicit timeouts, per dependency, in the service that owns 
 
 | Service | Client | connect | read |
 |---|---|---|---|
-| every service with a Feign client: `account`, `auth`, `usage`, `billing`, `batch` | each of its dependencies (`organization-service` has none) | 1000 ms | 3000 ms |
+| every service with a Feign client: `account`, `auth`, `usage`, `billing`, `batch`, `model` | each of its dependencies (`organization-service` has none) | 1000 ms | 3000 ms |
 | `gateway-service` | `auth` (WebClient) | 1000 ms | 2000 ms |
 | `inference-service` | engine (WebClient) | 1000 ms | 30 s first token, 30 s idle, 600 s whole |
+| `inference-service` | `model-service` (WebClient), the list of registered models | 1000 ms | 5 s a page, 30 s a whole read, 2 s for the first read at start |
 
 ```yaml
 resilience4j:

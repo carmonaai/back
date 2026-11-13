@@ -118,7 +118,7 @@ engine, its KV cache and the single database behind it.</figcaption>
    share a budget and two replicas never multiply one.
 6. **`cache_salt` is set to the organization id** on the way to vLLM, so each tenant gets its own prefix cache
    and cannot infer another's prompt by timing a request that shares its prefix.
-7. **What is shared stays shared**: one PostgreSQL database with six schemas, one Valkey, and one engine whose
+7. **What is shared stays shared**: one PostgreSQL database with seven schemas, one Valkey, and one engine whose
    KV cache holds both tenants' conversations at once.
 
 ## What it is
@@ -205,7 +205,7 @@ same tier have exactly the same rights.
 
 ## What isolation does not exist yet
 
-- **One database.** Six schemas, one PostgreSQL instance, one application role. Isolation between tenants is
+- **One database.** Seven schemas, one PostgreSQL instance, one application role. Isolation between tenants is
   `WHERE organization_id = ?` in the read paths plus the membership checks above — no row-level security policy
   and no per-tenant role.
 - **One engine.** vLLM serves both organizations from one KV cache and one queue. `cache_salt` partitions the
