@@ -5,7 +5,7 @@
 One rule carries the whole trust model: **the gateway is the only component that decides who is calling**.
 It strips every inbound identity header and sets its own, so downstream services read `id-organization` and
 never parse a token. Everything else on this page follows from that — the checks that run before any I/O,
-the three gates a `/v1` request passes, and the rules that keep prompts out of every store that is not the
+the three gates a `/v1` request passes, and the rules that keep prompts out of every place that is not the
 engine's own memory.
 
 ## A request refused at three gates
@@ -171,6 +171,22 @@ tokens. `GET /accounts/{id}/export` returns the account and every organization i
 sweep (every minute, 5 s in compose) deletes its files and ends its running batches, and the gateway stops
 its keys within the 60 s cache TTL.
 
+## The engine keys of registered models
+
+A model registered while the stack runs brings the key of its engine, a customer's credential for a machine that is open to the
+internet. [model-service](../services/model.md) seals it with AES-256-GCM (a fresh random IV for every seal, the model id as
+associated data) under a data key kept in a second secret file, `model_key`, which is mounted in that service and nowhere else. The
+key is returned only by the list that inference-service reads, which is behind the shared secret and has no gateway route;
+`GET /models/{id}` never shows it, and no log line, metric, exception message or `toString()` carries it (the tests look for a
+`CANARY-<uuid>` key in the table, the answers and the log, and `smoke.sh` greps every log and a database dump for one). Retiring an
+entry, or closing the organization that owns it, erases the addresses and the key.
+
+**What the sealing does not protect:** someone who holds both the database and the `model_key` file, the key in clear in the memory
+of model-service and of inference-service, and the key on the wire between the two, which is plain `http` inside the compose network
+(TLS between services is a deployment concern, as for every internal call). Losing the file loses every stored key, and the models
+must be registered again. The address of an engine can identify a person when the organization is one, which is why it goes with the
+key.
+
 ## Why it is like this
 
 - **Identity as a header, set once.** The alternative — every service verifying the JWT itself — needs the
@@ -186,7 +202,7 @@ its keys within the 60 s cache TTL.
 
 ## What would change it
 
-The access log is a file in a volume with no access control of its own; production ships it to a store with
+The access log is a file in a volume with no access control of its own; production ships it to a system with
 restricted access, and that is unwritten. Password resets have a per-IP throttle but **no per-email one**, so
 a distributed attacker can still spam one mailbox. There is no DPA gate, no CSAM reporting flow and no
 second factor. TLS in transit is a deployment concern that is not configured anywhere in this repository —

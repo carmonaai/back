@@ -2,8 +2,8 @@
 
 ## What it is
 
-Carmona is one Git repository per module: thirteen Maven modules under `api/`, five of them **libraries**
-that hold a contract and no behaviour, and eight of them **services** that hold a Spring Boot application
+Carmona is one Git repository per module: fifteen Maven modules under `api/`, six of them **libraries**
+that hold a contract and no behaviour, and nine of them **services** that hold a Spring Boot application
 and one Postgres schema. A service may call another service's library and may never read another service's
 tables. Where two services genuinely need each other's data, they call each other — and the page below is
 mostly about what that costs.

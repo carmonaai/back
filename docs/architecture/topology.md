@@ -2,7 +2,7 @@
 
 ## What it is
 
-Eight Spring Boot services, one Postgres, one Valkey and two model engines, all on a single Docker network.
+Nine Spring Boot services, one Postgres, one Valkey and two model engines, all on a single Docker network.
 Exactly one container publishes a port: the gateway. Everything else — including every management port — is
 reachable only from inside, so the topology of this system is mostly the story of what the gateway forwards
 and what it refuses to.
@@ -131,6 +131,7 @@ appears to pass behind a service rather than through it.</figcaption>
 | `auth-service` | `auth` | `api_key`, `session` | `/auth/*`, `/organizations/{id}/api-keys**` |
 | `account-service` | `accounts` | `account`, `account_token` | `/accounts/{id}`, `/accounts/{id}/export`, the public email endpoints |
 | `organization-service` | `organizations` | `organization`, `membership` | `/organizations`, `/organizations/{id}` |
+| `model-service` | `models` | `model`, `model_clock` | none: four internal calls, no gateway route |
 | `usage-service` | `usage` | `usage_event` (daily partitions, 90 days), `usage_window`, `usage_seal` | `/usage/organizations/{id}/summary` |
 | `billing-service` | `billing` | `price`, `ledger_entry`, `balance`, `billing_cursor` | `/billing/organizations/{id}/balance` |
 | `batch-service` | `batch` | `file`, `batch`, `batch_line` | `/v1/files**`, `/v1/batches**` |
@@ -142,7 +143,7 @@ Two hold none — the point of `/v1` is that nothing on the token path reads a d
 
 ## Where the state that is not a table lives
 
-Valkey is a store of things that expire or are rebuilt, on purpose:
+Valkey holds things that expire or are rebuilt, on purpose:
 
 | Key | Written by | TTL |
 |---|---|---|
@@ -153,14 +154,14 @@ Valkey is a store of things that expire or are rebuilt, on purpose:
 
 ## The container set
 
-`docker/compose.yaml` runs fourteen containers; `docker/compose.gpu.yaml` adds a fifteenth.
+`docker/compose.yaml` runs fifteen containers; `docker/compose.gpu.yaml` adds a sixteenth.
 
 | Container | Image or build | Notes |
 |---|---|---|
-| `db` | `postgres:17.11-bookworm` (digest-pinned) | one database, six schemas |
+| `db` | `postgres:17.11-bookworm` (digest-pinned) | one database, seven schemas |
 | `valkey` | `valkey/valkey:9.0.6` (digest-pinned) | `--appendonly yes --appendfsync everysec` |
 | `mailpit` | `axllent/mailpit:v1.31.4` | verification and reset mail, locally |
-| `account`, `organization`, `auth`, `usage`, `billing`, `inference`, `batch`, `gateway` | `build: ../api/<name>/Dockerfile` | one jar per service, non-root, port 8080, management 8081 |
+| `account`, `organization`, `model`, `auth`, `usage`, `billing`, `inference`, `batch`, `gateway` | `build: ../api/<name>/Dockerfile` | one jar per service, non-root, port 8080, management 8081 |
 | `llama`, `vllm` | `ghcr.io/ggml-org/llama.cpp:server`, `vllm/vllm-openai:v0.30.0` | CPU and GPU engines, one model each |
 | `prometheus` | `prom/prometheus:v3.15.0` | scrapes every `:8081/actuator/prometheus`, 15-day retention |
 | `grafana` | `grafana/grafana:13.2.3` | dashboards provisioned from `docker/grafana` — both unpublished |
@@ -180,6 +181,8 @@ greps `/actuator/health/readiness` for `UP`, so `service_healthy` means "answeri
 | `usage-service`, `billing-service` | each other | Feign | sealed windows one way, the price history the other |
 | `billing-service`, `batch-service` | `organization-service` | Feign | the balance endpoint's membership check, and the erasure sweep |
 | `batch-service` | `inference-service` | HTTP | runs each batch line through `/v1/chat/completions` |
+| `model-service` | `organization-service` | Feign `OrganizationController` | `tenant(id)`, to retire the models of a closed organization |
+| `inference-service` | `model-service` | WebClient | `GET /models/active` on a timer, with the shared secret; never on a request's path |
 | `inference-service` | engine | WebClient | the only caller of an engine anywhere |
 
 Two pairs are mutual: account ↔ auth, and usage ↔ billing. Each cycle is deliberate and has its reason

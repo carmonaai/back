@@ -133,7 +133,7 @@ Configuration (`application.yaml`): models come from configuration, one engine U
 
 - `BillingService` pulls the next sealed window (cursor), prices it **at the window's start**, and in one
   transaction writes one ledger entry per (organization, model, mode) and updates the balance in the same
-  transaction. A missing price stops billing **before** anything is written: it never bills at zero.
+  transaction. A charge with no price is set aside in `unpriced_charge` and never billed at zero.
 - The ledger and the price table are **append-only**, enforced by database triggers that refuse UPDATE, DELETE
   and TRUNCATE.
 - `CreditFlags` sets `no_credit:{org}` in Valkey when `balance + credit_limit ≤ 0`; the gateway turns that

@@ -6,7 +6,7 @@ The project's architecture follows a course reference, with six rules that **win
 it**: Argon2id instead of a bare hash, RS256 with a locally verified JWKS instead of a symmetric token
 checked on every request, a timeout plus a breaker plus a bulkhead on every outbound call, paged
 collections with a maximum, pinned and non-root containers, and a management port that is never published
-and never routed. This page is the concrete evidence for each one, in the order a request meets them.
+and never routed. This page is the concrete evidence for each one, in the order a request meets them; a seventh rule, the shared secret of the internal endpoints, is the last section.
 
 ## One request, six overrides
 
@@ -177,7 +177,7 @@ answer with `limit` (1–100 groups, at most 31 days), because a silently trunca
 
 ```yaml
 management:
-  server: { port: 8081 }            # never published, never routed; the comment is in all eight services
+  server: { port: 8081 }            # never published, never routed; the comment is in all nine services
   endpoint: { health: { probes: { enabled: true } } }
   endpoints: { web: { exposure: { include: health,prometheus,reconcile } } }   # reconcile: inference, billing
 ```
@@ -187,6 +187,24 @@ matches an `/actuator` path, so `curl http://gateway:8080/actuator/prometheus` f
 endpoints answer on `:8081` and nowhere else. Prometheus scrapes `:8081/actuator/prometheus` over the internal
 network, including the engine's own `/metrics`, and `AccessLogFilter` skips `/actuator/` so health probes
 never fill the access log.
+
+## 7 · Internal endpoints carry a shared secret (override 7)
+
+The calls that mint credit, change a tier or a status, create verified accounts, end sessions, evict key caches or register a model
+are internal: no gateway route reaches them and the network is split, and each is also marked `@InternalToken.Required`. It answers
+401, before the body is read, unless the request carries exactly one `X-Internal-Token` header equal to the secret in the file named
+by `carmona.internal.token-file` (`/run/secrets/internal_token`, one line `X-Internal-Token: <64 hex>`, read at start; the service
+does not start without it and there is no switch to turn the check off). The gateway never holds the file and strips the header from
+every inbound request; a Feign client adds it only toward a service that guards an endpoint. The secret is a second lock behind "no
+gateway route" and the network split, not a replacement for them.
+
+The services that guard endpoints are account-service, auth-service, billing-service, organization-service and, since the model
+registry, model-service (all four of its calls: register, retire, read one, and the list inference-service follows). inference-service
+holds the same file as a client only: it sends the header on its one internal call, the read of the registered models, and on no
+other client. `docker/init-secrets.sh` creates the file once, and the `tools` container mounts it so that `curl -H
+@/run/secrets/internal_token` sends it without the value on a command line ([Running it locally](../operations/running.md)). Each
+guarded service has a test that lists the exact `METHOD path` pairs that carry the mark, so a new internal endpoint is open until it
+is marked and the test fails until somebody says which.
 
 ## Why it is like this
 
@@ -216,3 +234,5 @@ a library the day a fourth needs it. The K8s manifest, tracing and an Alertmanag
   — the local JWKS decoder and both security chains.
 - [account-service application.yaml](https://github.com/carmonaai/back/blob/main/api/account-service/src/main/resources/application.yaml)
   — the resilience4j block, the Feign timeouts and the management port in one file.
+- [InternalToken.java](https://github.com/carmonaai/back/blob/main/api/model-service/src/main/java/ai/carmona/model/InternalToken.java)
+  — the secret file, the `@InternalToken.Required` mark and the 401 before the body is read.

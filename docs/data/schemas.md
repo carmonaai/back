@@ -94,7 +94,7 @@ would have done that checking — it stops well short of the second wall.</figca
 
 ## What it is
 
-Six schemas in one database, each created and migrated by the service that owns it. The schema name is the
+Seven schemas in one database, each created and migrated by the service that owns it. The schema name is the
 service's aggregate, plural. Two services have no schema at all — `inference-service` and `gateway-service` —
 because neither owns a durable fact: inference holds counters in memory and usage in a stream, and the gateway
 holds configuration and the access log.
@@ -106,6 +106,7 @@ holds configuration and the access log.
 | `accounts` | account-service | `account`, `account_token` |
 | `auth` | auth-service | `api_key`, `session` |
 | `organizations` | organization-service | `organization`, `membership` |
+| `models` | model-service | `model`, `model_clock` |
 | `usage` | usage-service | `usage_event`, `usage_window`, `usage_seal` |
 | `billing` | billing-service | `price`, `ledger_entry`, `balance`, `billing_cursor` |
 | `batch` | batch-service | `file`, `batch`, `batch_line` |
@@ -122,7 +123,7 @@ URL instead, so unqualified table names work, and cap every statement at 5 s wit
 Files live in `src/main/resources/db/migration/` of the owning service and are named
 `V<year>.<month>.<day>.<n>__<description>.sql` — `V2026.10.02.001__create_table.sql` in account-service,
 `V2026.10.05.001__api_key_expiry.sql` in auth-service, `V2026.10.03.002__batch_prices.sql` in billing-service.
-Twelve files across the six services today. The date prefix orders migrations by the day they were written,
+Nineteen files across the seven services that have a schema today. The date prefix orders migrations by the day they were written,
 which survives two branches merging in either order; Flyway's own counter would not. Each service keeps its own
 `flyway_schema_history` inside its own schema, so one service's migrations never see another's.
 
@@ -192,7 +193,7 @@ schemas there is nothing — and in `auth` not even inside it: `api_key.organiza
 `session.account_id` are plain strings, because both would point into another service's schema.
 
 What that buys is that a service's migrations are its own, and that services can be split into separate
-databases later by changing a URL. What it costs is that the database will happily store an id that refers to
+databases later by changing a URL. What it costs is that the database will happily hold an id that refers to
 nothing, and no error is raised at write time. The countermeasure is in the reading code:
 `BillingRepository.ledgerBalances()` is a `FULL OUTER JOIN` between `balance` and the sum of `ledger_entry`,
 so an organization with ledger entries and no balance row appears as a disagreement instead of disappearing

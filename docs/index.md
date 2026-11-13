@@ -181,7 +181,7 @@ other than the gateway is reachable from outside. Those two facts shape most of 
 
 ## The one-paragraph summary
 
-Eight Spring Boot services and five shared libraries front two engines — vLLM on a GPU for the real model,
+Nine Spring Boot services and six shared libraries front two engines — vLLM on a GPU for the real model,
 llama.cpp on CPU for the cheap one. A customer authenticates with an API key, and every request is admitted
 against a rate budget and a share of the engine's slots before it can reach the model. While it runs, its usage
 is written to a durable stream; when it ends, that usage becomes an event, the event becomes a sealed

@@ -140,6 +140,12 @@ that explains the charge. Two triggers keep the history honest: `refuse_change()
 like the ledger, and `refuse_past_price()` refuses an `INSERT` whose `effective_from` is not in the future, so
 a price cannot be back-dated into a window already billed.
 
+One rule sits ahead of the rows: `Price.at` answers a zero price for any model id that starts with `org-`, the namespace of a model
+an organization registered for itself (`Price.ownModel`), whatever the history holds. That model is metered, so its tokens appear
+in the usage summary with a cost of 0 (not null, which would read as "unpriced"), and it is never charged per token: the debit
+writes no ledger entry for it and sets nothing aside. It is a rule and not price rows because a row can be forgotten or
+superseded; the price trigger and the seeded rows are untouched ([Model](../services/model.md)).
+
 The seeded prices are **placeholders, not commercial ones**, in BRL per million tokens (input / cached input /
 output): `carmona/qwen3-0.6b` sync 0.10 / 0.05 / 0.40, `carmona/qwen3-4b` sync 0.50 / 0.25 / 2.00, and half
 of each for the `batch` mode.
@@ -213,10 +219,10 @@ inside the compose network and exits non-zero so cron or CI can fail on drift.
 them. The alternative — a second implementation, or a SQL-shaped one — is how a customer ends up able to
 reproduce every number except the one on the invoice.
 
-**A missing price stops billing rather than billing at zero.** `costs()` throws `MissingPriceException` before
-anything is written and the job logs it at ERROR, so the window stays unbilled and the cursor does not move;
-it is billed correctly the moment a price row exists. Billing at zero and reconciling later turns a
-configuration mistake into revenue that has silently disappeared.
+**A missing price is set aside, never billed at zero.** The charge goes to `unpriced_charge` with an ERROR, in the same
+transaction that moves the cursor, so one unpriced model never holds every organization's billing (a price cannot be added
+for a past instant, so waiting for one would wait forever); it is billed at the model's first price once a row exists.
+Billing at zero and reconciling later turns a configuration mistake into revenue that has silently disappeared.
 
 **The flag, not the balance, is what the gateway reads.** A balance read on the request path would be a
 database round trip per request and would make the 402 depend on the database being up. The cost is that a

@@ -1,7 +1,7 @@
 # Running it locally
 
 This page is meant to be followed top to bottom on a machine that has never run Carmona. Every command is the
-one in the repository, and every file it names is one that exists. When you are done you have fourteen
+one in the repository, and every file it names is one that exists. When you are done you have fifteen
 containers, a passing smoke test, and two model engines — one of them on your GPU, if you have one.
 
 <figure class="cmn-figure">
@@ -117,7 +117,7 @@ its health check has a 600 s start period because the first run downloads the mo
 
 ## What it is
 
-A single-machine deployment of fourteen containers plus, optionally, a fifteenth for the GPU engine. Every
+A single-machine deployment of fifteen containers plus, optionally, a sixteenth for the GPU engine. Every
 service is built from a jar you compile first; every secret comes from `docker/.env`; every container reports
 readiness through `/actuator/health/readiness` on the management port rather than through an HTTP header.
 `docker compose up -d --build --wait` returns only when all of them are healthy.
@@ -160,11 +160,28 @@ PKCS#8 PEM on one line, which is what the `grep -v -- -----` and `tr -d '\r\n'` 
 writes PKCS#8, and some builds write `-outform DER` as PKCS#1 instead, which auth-service will refuse. `.env`
 is untracked, CI generates its own with fresh secrets, and nothing in the repository contains a credential.
 
+## The secret files
+
+Two files in `docker/secrets/` are made by `bash init-secrets.sh`, which you run once before the first `up` and which never
+overwrites a file that exists (CI runs it too). Each is made on its own, so a stack made before the second file existed gets only
+the missing one.
+
+| File | Holds | Mounted in |
+|---|---|---|
+| `internal_token` | one line `X-Internal-Token: <64 hex>`, the shared secret of the internal endpoints, so that `curl -H @/run/secrets/internal_token` sends it without the value on a command line | account, auth, organization, billing, model, inference and tools |
+| `model_key` | one line of 64 hex characters, the data key that seals the engine keys of registered models (AES-256-GCM) | model only |
+
+Mode 0444 is for this local and CI harness only (the services run as uid 10001 and a compose file secret keeps the host owner and
+mode); production sets owner 10001 and mode 0400. To rotate `internal_token`, delete the file, run the script and restart the
+holders together. `model_key` has no rotation: deleting it makes every stored engine key unreadable, and the models must be
+registered again. `bash check-init-secrets.sh` runs the script in a scratch folder and fails if either file is not made on its own.
+
 ## Build, start, check
 
 ```bash
 mvn -B clean verify                      # from the repository root
 cd docker
+bash init-secrets.sh                     # once, before the first up: the two secret files
 docker compose up -d --build --wait
 bash smoke.sh
 ```
@@ -239,6 +256,46 @@ body are in [Adding a model](../services/inference.md#adding-a-model).
 `max_output_tokens` as the stack states them, a chat request with a `reasoning_effort` that the stack's model does not list
 is answered 200 (the level is ignored, so an SDK that sends the field whatever the model does is not broken), and every
 row of the usage summary carries the key `reasoningTokens`, a number or null.
+
+## Registering a model while the stack runs
+
+The stack starts `model` (model-service) and inference-service reads its list every 5 s, so a model that an operator or a deploy tool
+registers is served within a few seconds, with no restart. The calls are internal: they carry the shared secret, so they run from
+the `tools` container, which has it, and the port of `model` is not published. There is no change in place: retire a model and
+register it again, with the new address in the body, to move it.
+
+```bash
+cd docker
+reg() { docker compose exec -T tools curl -s -H @/run/secrets/internal_token -H 'Content-Type: application/json' "$@"; }
+ORG=7d0c4a52-9a3b-4f0e-8c56-1e2d3f4a5b6c   # the organization that rented the machine: its id, a UUID in lower case
+
+# 1. Register. 201 and the entry, which never shows the key; the same body again is 200, other content for the same id is 422.
+reg -X POST http://model:8080/models -d '{
+  "modelId": "org-'"$ORG"'/example",
+  "ownerOrganizationId": "'"$ORG"'",
+  "apiKey": "an-engine-key-of-16-or-more",
+  "spec": { "contextWindow": 4096, "maxOutput": 1024, "replicas": [ { "url": "http://engine-own:8000" } ] }
+}'
+
+# 2. Read it by the id in the answer (the entry's UUID, not the model id). It never shows the key.
+ID=0b9f6c1e-5a1d-4a57-9d3e-2f6f0c7a9e11   # the "id" field of the answer of step 1
+reg http://model:8080/models/$ID
+
+# 3. Retire it. 204, also the second time. Within one read the owner's key gets the 404 of a model that is not there.
+reg -X DELETE http://model:8080/models/$ID
+
+# 4. The same body as step 1 registers it again: 201, the same entry, `created` kept.
+```
+
+Leave `ownerOrganizationId` out, and the model id as `namespace/name` with a namespace that does not start with `org-`, for a public
+model. A replica that names no `slots` or `queue` runs with 1 and 0, the placeholders of an unmeasured model; the answer shows them.
+The address is plain `http` at a service name here because compose sets `MODEL_ALLOW_HTTP` and `MODEL_ALLOW_INTERNAL_HOSTS` to true for
+this harness: a registered replica is otherwise `https` at a public name or address. The engine must serve a model named exactly like
+the `modelId` (`--served-model-name`): the simulator answers 404 to a name it does not serve, which is why `smoke.sh` starts a second
+simulator, `engine-own` (profile `own-engine`), with `OWN_ENGINE_MODEL=org-<the organization's id>/smoke-echo` for its section "A model
+registered while the stack runs". `REGISTRY_MAX_CONTEXT_WINDOW` (131072 in this harness, in `docker/.env` or the shell) is the largest
+window a registration may state, and one variable feeds both services' ceilings; a change takes a restart of `model` and `inference`.
+[Model](../services/model.md) says what each field and each refusal means.
 
 ## The daily GPU window
 
@@ -370,7 +427,7 @@ forgetting one is a startup error with a readable message rather than a service 
 
 ## Where to look
 
-- [compose.yaml](https://github.com/carmonaai/back/blob/main/docker/compose.yaml) — fourteen services, the
+- [compose.yaml](https://github.com/carmonaai/back/blob/main/docker/compose.yaml) — fifteen services, the
   shared `x-readiness` health check, and every `depends_on` condition this page draws.
 - [.env.example](https://github.com/carmonaai/back/blob/main/docker/.env.example) — the six secrets and the
   `openssl` command for each.

@@ -77,9 +77,10 @@ RouterFunctions.route()
     .POST("/v1/chat/completions", chat::chat)
 ```
 
-`GET /v1/models` (and `GET /v1/models/{id}`) is built from `carmona.inference.models` in configuration — the
-model list is configuration, not code, so adding a model is adding a YAML entry
-([Adding a model](#adding-a-model)). Each model object has OpenAI's `id`, `object`, `created` and `owned_by`,
+`GET /v1/models` (and `GET /v1/models/{id}`) is built from `carmona.inference.models` in configuration and from the
+models registered while the service runs — the model list is configuration, not code, so adding a model is adding a YAML entry
+([Adding a model](#adding-a-model)) or registering one ([below](#models-registered-while-the-service-runs)); a model that
+belongs to an organization is listed for that organization's keys only. Each model object has OpenAI's `id`, `object`, `created` and `owned_by`,
 then `context_window` and `max_output_tokens`, the model's own sizes, which a client needs to fit its requests
 to it, and `reasoning_efforts`, only for a model that lists levels of reasoning. `POST /v1/chat/completions` is
 the one that matters. There is no `GET /v1/embeddings`: it is not hidden or unimplemented behind a flag, it does
@@ -99,7 +100,7 @@ levels the model's entry lists ([Reasoning level](#reasoning-level)).
 
 | Condition | Status | `code` |
 |---|---|---|
-| the declared length is over the largest body any configured model takes | 413 | `request_too_large` |
+| the declared length is over the largest body any model takes | 413 | `request_too_large` |
 | the body is not a JSON object | 400 | `invalid_json` |
 | `messages` missing, not an array, or empty | 400 | `invalid_messages` |
 | a content part that is not text | 400 | `unsupported_content` |
@@ -108,11 +109,11 @@ levels the model's entry lists ([Reasoning level](#reasoning-level)).
 | `max_tokens` outside 1…`max-output` | 400 | `invalid_max_tokens` |
 | `reasoning_effort` is not one of the levels the model lists (only for a model that lists some) | 400 | `invalid_reasoning_effort` |
 | the body is larger than `context-window × 16` bytes | 413 | `context_length_exceeded` |
-| `model` is not in configuration | 404 | `model_not_found` |
+| `model` is not one the caller may see: not configured, not registered, or registered for another organization | 404 | `model_not_found` |
 | the bytes of request bodies the service holds at once would pass its budget | 503, with `Retry-After: 5` | `server_busy` |
 
 The request-size limit follows the configured models; it is not a constant. The most the service accepts of any
-request is the biggest `context-window` of its models times 16 bytes (`BodyLimit`, from `maxBodyBytes`), and the
+request is the biggest `context-window` of its models times 16 bytes (`BodyLimit`, from `maxBodyBytes`; with the registry on, the larger of that and `carmona.inference.registry.max-context-window` times 16 bytes, read at start), and the
 codecs that read bodies, a non-streamed answer of an engine among them, are given that figure too, never less than
 Spring's own 256 KiB, which is what the engines' `/metrics` page and usage-service are read with. A model with a
 window of 1,048,576 tokens takes bodies of up to 1,048,576 × 16 = 16,777,216 bytes (16 MiB), and a smaller model
@@ -300,11 +301,11 @@ mounts the file read-only into inference-service as an additional configuration 
 environment away and starts no simulator. Engine keys stay in `docker/.env`, which the file reads as `${NAME}`
 placeholders. The environment form still works (`CARMONA_INFERENCE_MODELS_<n>_ID`, `_URL`, `_SLOTS` and so on, a list as
 one comma-separated value), but an environment that defines any element of the list replaces the whole YAML list, so
-every model must be restated; the file is the way to serve more than one. The list is read once, at start. Adding,
-changing or removing a model is an edit of the file and a restart of inference-service
+every model must be restated; the file is the way to serve more than one. The configured list is read once, at start. Adding,
+changing or removing a configured model is an edit of the file and a restart of inference-service
 (`up -d --force-recreate inference` with the same `-f` flags): only that container is recreated, and it lets the streams
-it holds finish, because its `stop_grace_period` is 720 s. A model list that changes while the service runs is not
-built ([gaps](../reference/gaps.md)).
+it holds finish, because its `stop_grace_period` is 720 s. A model that is added while the service runs is registered,
+not configured ([below](#models-registered-while-the-service-runs)).
 
 **Keeping the simulator with a large window.** The engine of the default stack is a simulator (`llm-d-inference-sim`, ADR 0002), and it takes request bodies
 of up to 4 MB unless told otherwise: `--max-request-body-size-mb`, its own default, in MB of 1,048,576 bytes, which it accepts from 1 to 512 and refuses to
@@ -364,7 +365,8 @@ nothing here is invented for one. A value that only a run on the model's own har
   trial organization, and its `x-ratelimit-remaining-tokens` read 0 of 20,000, a header that never shows below 0.
 - A price row in billing, in the future (the price trigger refuses past dates). Without one the usage is metered, billing
   sets the charge aside, and the first price that appears bills the back log at that price, so the usage of a test can be
-  billed after the fact: give a test model an id of its own.
+  billed after the fact: give a test model an id of its own. A model registered for an organization needs no row: its id
+  starts with `org-` and it is priced zero by rule ([Money](../data/money.md)).
 - Prometheus finds its engine jobs by DNS name, so a remote engine is not scraped there; the service's own
   `carmona_engine_*` gauges still show it.
 
@@ -373,6 +375,70 @@ usage-service's migration `V2026.11.12.001__reasoning_and_first_output.sql` adds
 old one ignores fields it does not know, so nothing breaks the other way round, but the `reasoningTokens` and
 `firstOutputMs` of every event that arrives before it is rolled are lost. A new usage-service takes events without the
 two fields and stores them as null. gateway-service has no order to keep: its caps are settings with defaults.
+
+## Models registered while the service runs
+
+A model need not be in the configuration. [model-service](model.md) keeps a list of registered models in its database and
+inference-service follows it while it runs. Nothing on a request's path calls model-service or waits for it, and the models of the
+configuration stay as they are: always there, and first. The feature is on when `carmona.inference.registry.url` is set (compose:
+`http://model:8080`); blank, it is off, none of the meters below exists and the service is as it was.
+
+| Key | Rule |
+|---|---|
+| `carmona.inference.registry.url` | model-service's address: an http or https url with a host and no user name or password. A refusal names the property and never quotes the url |
+| `carmona.inference.registry.refresh-every` | `5s`: how often the list is read; at least 1s, with its unit |
+| `carmona.inference.registry.max-context-window` | required when `url` is set, no default: the largest `context-window`, in tokens, a registered model may have. It also sizes the request-size limit ([above](#the-allowlist)), so a higher one takes a restart |
+| `carmona.inference.registry.max-models` | `32`, at least 1: the most registered models at once. Each adds a scrape of its replicas and its series to the meters, so this bounds that fan-out; it is no measured limit |
+
+The ceiling is one number with two readers that must agree: model-service refuses a registration above its own
+(`carmona.model.max-context-window`), and inference-service neither follows a model above this one nor reads a body bigger than it
+allows. Compose feeds both from one variable. A configured model may not have an id that starts with `org-`: that namespace
+belongs to the models an organization registers for itself, which are metered and never charged per token.
+
+**How the list is read.** One loop on a timer of its own (`ModelRosterSync`) asks `GET /models/active`, with the secret of
+`carmona.internal.token-file` in the header of this one client and no other, in pages of 100. On its first page it names the version
+it last applied whole, and an answer that nothing changed applies nothing. A list is applied only whole and only of one version: pages
+whose versions differ (the list moved while it was read) drop that pass and count it `inconsistent`, and so do a page that fails, an
+answer that is no page and one that does not come in time, counted `failed`. A dropped pass changes nothing, so **a model-service that
+is down leaves every model that runs as it is**: inference-service keeps the last list it read, and what grows is the age of the list. After a failure the pause doubles up to a
+minute, with a quarter of jitter either way; the loop has no circuit breaker, because this service has no Resilience4j.
+
+**What is applied.** Each entry is read by the rules of a configured model and never taken on trust: an id that breaks the model id
+rule, a namespace that is not its owner's (`org-<owner id>`, and no `org-` for a model without one), an id that is a configured
+model's (the configuration wins), a missing key, more than 16 replicas, a slot count that is absent (none is invented here) and a
+window above the ceiling are all refused. The first `max-models` entries by id are read, and a running model beyond them goes like one
+that left the list. An entry that breaks a rule is skipped alone, with its id and the rule in the log, and counted in
+`carmona_inference_models_skipped`; a model that is running keeps its last good version, because failing closed would stop a
+customer's model for a typo. **A model that changed is retired and then appeared again**, a changed replica list included, in one
+swap: there is no rule that the replicas of a registered model cannot change. The cost is a transient: leases are keyed by a replica's
+place in the list, so after the list changes the leases of the old model's running requests count against the engine now at that
+place until they end, an over-count for as long as the longest of them and never a lost lease.
+
+**Who sees what.** A configured model, and a registered one with no owner, is public. A registered model with an owner is listed by
+`GET /v1/models` and found by a chat request for that organization's keys only. For every other caller, a model of another
+organization, a retired one and an unknown one alike, it is the same `404 model_not_found`, so no request can learn that a model
+exists. The operator's tools (drain, the replica states, the scrape) see every model. The gateway's credit rule is unchanged and
+knows no model: an organization with no credit is refused before any model is looked at, so it cannot call its own model either.
+
+**Retire.** A new request no longer finds the model (404) and the listing drops it within one read. A request that is running holds
+the model it found: its lease is renewed and given back through that model, its stream ends, and its usage event names the model and
+is metered like any other. What goes: the readers of the model's leases, the contract check of its replicas, the health gate's
+opinion of them and the gauges of the model. **What stays until a restart**, a few numbers for each id that was ever registered: the
+lease budgets and the count of what this JVM holds, one engine-timeouts object, the counters and timers of the model, and, in Valkey,
+the replica-state hash, which has no expiry. A model registered again under the same id takes these over.
+
+**Start, and a model-service that is not there.** The first read is part of the start, cut at two seconds, after the replica states
+and before the web server takes a connection. With model-service down the service still starts and serves the configured models, a
+registered model is a 404 until the first read succeeds, and the loop brings it in within a refresh. There is no local copy of the
+list, so a restart while model-service is down forgets every registered model until it is back.
+
+**Meters.** Four exist only while the registry is on, and carry ids and counts, never an organization, a key or an address:
+`carmona_inference_models_age_seconds` (seconds since the last good read, an "unchanged" answer included; from the start of the
+process until the first one, so a model-service that never answered shows as growing and not as missing),
+`carmona_inference_models{source}` (`configured` or `registered`), `carmona_inference_models_skipped` (the entries the last pass
+refused: a registered model that is not being served) and `carmona_inference_models_refresh_total{outcome}` (`ok`, `failed`,
+`inconsistent`, at 0 from the start). The alerts are `ModelListStale` and `ModelEntrySkipped`
+([Observability](../operations/observability.md)).
 
 ## Why it is like this
 
@@ -401,7 +467,7 @@ that is over rather than one in flight.
   across replicas needs more GPUs and a different model of capacity.
 - **In-flight caps live in one JVM's memory.** Admission's per-tier and per-organization caps are a single
   replica's view, so a second replica would double them.
-- **There is no `GET /v1/embeddings`**, and the model list is configuration rather than a catalogue.
+- **There is no `GET /v1/embeddings`**, and the model list is the configuration plus what is registered, not a catalogue of every model an engine could serve.
 - **Tracing is not wired**, so a request id is the only thing joining these logs to the gateway's.
 
 ## Where to look
