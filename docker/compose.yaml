@@ -153,6 +153,12 @@ services:
       - --max-num-seqs=4
       - --max-waiting-queue-length=8
       - --max-model-len=4096
+      # The largest request body the simulator takes, in MB of 1,048,576 bytes (it accepts 1 to 512). Its own default is 4, which is what an unset variable gives, so
+      # the stack is unchanged until ENGINE_MAX_REQUEST_BODY_MB is set. A model entry with a large window lets bodies of up to window x 16 bytes through
+      # inference-service (16 MB for 1,048,576 tokens), and the live check of 2026-11-13 saw this simulator close the connection before answering a 5 MiB body
+      # (a 503 engine_unavailable for the caller). Set the variable to at least the largest body you send, for a models.yaml entry served by this simulator
+      # (docs/services/inference.md, "Adding a model"). compose.fleet.yaml restates the other flags and not this one: its simulators keep the 4.
+      - --max-request-body-size-mb=${ENGINE_MAX_REQUEST_BODY_MB:-4}
       - --latency-calculator=constant
       - --time-to-first-token=600ms
       - --time-to-first-token-std-dev=100ms

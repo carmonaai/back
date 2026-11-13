@@ -151,6 +151,19 @@ job's own comment names the ceiling, which is that a badly wrong clock filling t
 partitions surviving: `usage_window` keeps the sealed 5-minute sums, so dropping a day's raw events after 90
 days loses the ability to re-derive a window, not the window.
 
+Two columns of `usage_event` describe a request without being part of its bill: `reasoning_tokens` (the part of
+`output_tokens` the engine reported as reasoning) and `first_output_ms` (milliseconds from the start of a stream to
+its first content, tool call or reasoning). Both are nullable `BIGINT`, with no default, no `CHECK` and no backfill:
+`NULL` means "not reported", which is not 0, and rows stored before `V2026.11.12.001__reasoning_and_first_output.sql`
+stay `NULL`. There is no `CHECK` because a refused event is dropped by the relay and its tokens are never billed, so the
+service stores a figure that does not fit as `NULL` instead of leaving it to a constraint. `usage_window` is not
+changed. The one `ALTER TABLE` on the partitioned parent adds both columns to every partition, the default one
+included, and the partitions `PartitionJob` makes later get them from the parent; it takes an `ACCESS EXCLUSIVE` lock
+on the parent and on each partition (about a hundred: the days from 90 back to a week ahead, and the default one), so it
+queues behind any reader of the table. The 5 s `statement_timeout` of the JDBC URL would cancel that wait and stop the
+service from starting, so this migration lifts it with `SET LOCAL statement_timeout = 0`, as a migration that needs
+longer must.
+
 ## batch_line uses the row lock itself as the lease
 
 ```sql

@@ -137,6 +137,15 @@ to absorb the gap between two steps without letting the wait run away. Both are 
 With three tiers running at once, the exit check came out at enterprise goodput 98%, TTFT p95 253–351 ms,
 TPOT p95 22 ms, and trial refused in 9–16 ms at p95.
 
+**What is per model.** `slots`, `queue` and the KV budget were always per model, and per replica. A model with
+another window or other hardware has its own `C` and `q`, and its entry no longer starts without them: `slots`,
+`queue`, `context-window` and `max-output` are required, with no default. Since round AM the limits of a tier, the
+timeouts and the prefill allowance can be per model too, each falling back to the global key. A model's
+`tiers.<tier>` replaces that tier's per-minute budgets and `max-in-flight` for that model alone; the tier's
+ceiling is still the global fraction of that model's own `C` and `q`. No number on this page is a number for any
+other model: [Adding a model](../services/inference.md#adding-a-model) says what to set for one that has not been
+benched, and what to measure before it serves customers.
+
 ## Why it is like this
 
 **The tier ceiling is a threshold on the whole model, not a reserved block.** `tierCap(model, tier)` is

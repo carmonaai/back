@@ -177,7 +177,8 @@ request refused after its wait does not give its `max_tokens` back twice.
 
 **An error of ours is not billed, but it is recorded.** The event is written with `status = error`; the window
 counts it in `requests` and in `errors`, and excludes its tokens from the sums. The failure is visible in the
-customer's numbers without appearing on their invoice.
+customer's numbers without appearing on their invoice. An engine that answers a non-streamed request 200 with no answer in it
+(an empty body, something that is not JSON, an object with no `choices` array) ends the same way, as a 502 `engine_error`.
 
 **A cut-short batch line is not reported at all.** Every run of one line shares a single event id and a single
 `started_at`, and usage-service stores the first event it sees for that pair — so a failed run reported first

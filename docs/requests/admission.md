@@ -142,6 +142,10 @@ immediate (trial, flex, batch) or arrives after the 1.5-second wait (standard, e
 5. **The model's share for this tier is checked next**, in memory, not in Valkey: trial and the batch lines
    get `C/2`, standard `0.85·C`, enterprise `C+q`. On `carmona/qwen3-4b` (C = 4, q = 2) that is 2, 3 and 6 —
    and then the organization's own `max-in-flight` (2, 4 and 16) caps what one customer can take of it.
+   The per-minute limits of the three buckets and that `max-in-flight` belong to the tier: the global `tiers`
+   unless the model's own entry has a `tiers.<tier>` of its own, which replaces the four limits for that model
+   alone. Admitting and settling look the limits up the same way, so a request is refunded against the limits
+   that admitted it. The shares `C/2`, `0.85·C` and `C+q` stay global fractions of the model's own `C` and `q`.
 6. **A paying tier that meets a cap waits**, polling every 100 ms for up to `admission-wait`, 1500 ms by
    default. Trial, flex and batch lines are refused at once: they are the traffic meant to be shed first.
 7. **While several organizations wait for one model, the lowest counter goes first.** Each organization has a
@@ -182,6 +186,17 @@ way; a new request still passes through the same `acquire()`, so the counter can
 bucket holds at least 1, so the last request through can push the output bucket to `-max_tokens`. Refusing
 anything that would not fit instead makes a customer's *first* request of the minute fail whenever its
 `max_tokens` exceeds the whole per-minute budget.
+
+**The input estimate overshoots further.** The same rule lets the input bucket take the whole estimate of one request,
+whatever its size: a request is not refused for being larger than a tier's whole per-minute input limit. In the live check
+of 2026-11-13 a body of 5 MiB, 1,310,720 estimated tokens, was admitted for a trial organization, whose bucket holds
+20,000, and its `x-ratelimit-remaining-tokens` read 0: the header is clamped there (`Math.max(0, input)` in `Admission`),
+while `buckets.lua` lets the level go negative. When the request ends, settlement replaces the estimate with the engine's
+own prompt count (the simulator counted 6 tokens for that body), so what stays owed is the real prompt's, about 52 minutes
+of a 20,000-a-minute bucket for a prompt of 1,048,576 tokens. A request that ends in an error is settled on the usage it
+has. What a second request of that organization got was not tried; by the script it is refused with a 429 while the bucket
+is below 1. A model that serves such windows gets `tiers` of its own, sized from the bench
+([Adding a model](../services/inference.md#adding-a-model)).
 
 **Valkey down skips the buckets and keeps the caps.** A GPU that stops serving is worse than a rate limit that
 is briefly not enforced, and the skipped charge is not lost: settlement writes the real counts either way.

@@ -113,7 +113,7 @@ emitted when the request is over — however it ends.
   <rect class="cmn-label-plate" x="279" y="56" width="102" height="16" rx="4"/>
   <text class="cmn-label" x="330" y="68">no key in the URL</text>
   <rect class="cmn-label-plate" x="387" y="56" width="126" height="16" rx="4"/>
-  <text class="cmn-label" x="450" y="68">Content-Length ≤ 4 MB</text>
+  <text class="cmn-label" x="450" y="68">Content-Length ≤ cap</text>
   <rect class="cmn-label-plate" x="628" y="56" width="120" height="16" rx="4"/>
   <text class="cmn-label" x="688" y="68">660 s to headers</text>
   <rect class="cmn-label-plate" x="575" y="152" width="160" height="16" rx="4"/>
@@ -122,7 +122,7 @@ emitted when the request is over — however it ends.
 </div>
 <figcaption>The request crosses three gates in a fixed order and only then reaches the routing chain, where
 the key is resolved. Each gate has its own refusal — a 400 for bad framing or credentials in the URL, a 411
-for a body with no length, a 413 for one over 4 MB — and a refusal is logged like any other request. The id
+for a body with no length, a 413 for one over its cap — and a refusal is logged like any other request. The id
 is minted on the way in, the log line is written on the way out.</figcaption>
 </figure>
 
@@ -139,9 +139,10 @@ is minted on the way in, the log line is written on the way out.</figcaption>
    be readable two different ways.
 3. **The URL must not carry a credential.** A query string matching `cmn_`, `key` or `token` (case
    insensitive) is refused with 400 `credentials_in_url`.
-4. **A POST must state its size.** No `Content-Length` is 411 `length_required`; more than 4 MB is 413
-   `request_too_large`. The same filter that would have streamed a chunked body cannot be trusted to stop
-   one, which is why the length is required rather than measured.
+4. **A POST must state its size.** No `Content-Length` is 411 `length_required`; more than the cap is 413
+   `request_too_large`: 4 MB (`carmona.gateway.request-body.max-size`) for every `/v1` request, 32 MB
+   (`chat-max-size`) for `POST /v1/chat/completions` only. The same filter that would have streamed a chunked
+   body cannot be trusted to stop one, which is why the length is required rather than measured.
 5. **It passes, and the key is resolved** by the API-key security chain — [step 2](identity.md) — and the
    gateway forwards the request to inference-service without the `Authorization` header.
 6. **When the exchange ends, one line is written** to the access log with the request id, method, path
@@ -165,9 +166,16 @@ no query string. A URL is also the one part of a request that is almost always l
 control.
 
 **The size is required rather than measured** because measuring means reading the body, and reading the body
-is the thing being defended against. 4 MB is the ceiling: it is below the gateway's own body limit and well
-below anything a chat request needs, and `inference-service` sets `spring.codec.max-in-memory-size` to the
-same figure so the two agree.
+is the thing being defended against. There are two ceilings because one number does not fit both kinds of
+request: 4 MB for everything on `/v1` (a file upload, a batch, the model list), and 32 MB for a chat completion,
+because the prompt for a window of a million tokens is megabytes (1,048,576 tokens × 16 bytes = 16,777,216
+bytes, the bound `inference-service` holds that model to). The gateway cannot read the model list, so the chat
+cap is one number set by hand, a flood guard; each model's own bound and the memory budget for the bodies in
+flight are `inference-service`'s, which no longer has a codec setting that has to agree with the gateway's. One
+setting of `inference-service` does have to stay at or above the gateway's cap: when it refuses a body for its size it
+reads the rest of the body and throws it away before it answers 413, up to `carmona.inference.body.drain-up-to`
+(64MB as shipped, the gateway's 32MB cap with room to spare), so that the client is not still writing when the answer
+arrives. A length above it is answered at once, with `Connection: close`.
 
 **The route's `response-timeout` is 660 000 ms, and it times the wait for headers only.** A streamed answer
 takes as long as it takes; what has to arrive inside a deadline is the response's *start*. inference-service

@@ -95,7 +95,7 @@ organization whose prepaid balance is spent. What reaches inference (step 4) car
 1. **The client sends `Bearer cmn_…`.** Before any authentication runs, `V1RequestFilter` refuses a
    `Transfer-Encoding` header or HTTP/1.0 (`400 unsupported_framing`), a query string containing `cmn_`,
    `key` or `token` (`400 credentials_in_url`), a POST with no `Content-Length` (`411 length_required`) and
-   a body over 4 MB (`413 request_too_large`).
+   a body over its cap (4 MB, or 32 MB for a chat completion; `413 request_too_large`).
 2. **The key is checked in three steps, cheapest first.** `ApiKeyFormat` matches
    `cmn_(test_)?[0-9A-Za-z]{43}[0-9A-Za-z]{6}` and verifies a CRC32 of the body — no I/O. A malformed key
    is a `401 invalid_api_key` that costs nothing but a regex.

@@ -148,6 +148,19 @@ nothing: the engine's own counters are real series today.
 | `carmona_replica_drain_state`, `…_inflight`, `…_overdue` | gauge | `model`, `replica` | — |
 | `carmona_inference_control_tokens_total`, `carmona_inference_guard_rejected_total` | counter | `model` and a closed set of fixed words | — |
 | `carmona_inference_prompt_cache_tokens_total` | counter | `model`, `mode`, `result` (`hit`, `miss`) | — |
+| `carmona_inference_body_reserved_bytes` | gauge | none | — |
+| `carmona_inference_body_refused_total` | counter | none | — |
+
+`carmona_inference_body_reserved_bytes` is the bytes of request bodies the service holds at once, against its budget
+(`carmona.inference.body.budget`, a tenth of the JVM's maximum heap unless set): each chat request reserves the length it
+declares before its body is read and gives it back when its exchange ends, however it ends, so the gauge is 0 when
+nothing is in flight. `carmona_inference_body_refused_total` counts the requests refused with `503 server_busy`
+because the budget had no room. A body refused for its size (`413 request_too_large`) is read to its end and thrown away
+before the reservation, so it reserves nothing and is not in either meter: it is one more 413 in
+`http_server_requests_seconds_count`. Neither has a tag, because the refusal happens before the request's model is known,
+and no alert or panel reads them yet ([gaps](../reference/gaps.md)). The reasoning tokens and the first-output time of
+a request are not metrics: they travel in the usage event ([Metering](../services/metering.md)), and the existing
+`carmona_inference_tokens_total` still counts output tokens as the engine did, with the reasoning inside them.
 
 The buckets are not Micrometer's defaults: a default timer stops at 30 seconds, and a TTFT past the last bucket
 is a p99 that reads as the bucket edge — the one number an operator most needs during an incident. `2` is

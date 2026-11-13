@@ -106,8 +106,9 @@ a retry would replay tokens the client has — the stream carries the error and 
    written back to the client; the predicate is `WebClientRequestException`, which is what a refused
    connection raises. Both attempts spent, `ApiError.from` maps it to `503 engine_unavailable`.
 3. **The engine goes silent.** The first event must arrive within `ttft-timeout` (30 s) and each next one
-   within `idle-timeout` (30 s). A `TimeoutException` is not retried: an engine that is not answering is busy,
-   so it maps to `503 engine_timeout`.
+   within `idle-timeout` (30 s); these are the global values, and a model's entry may set its own of each, and of
+   `response-timeout`, with the global one as the fallback. A `TimeoutException` is not retried: an engine that is
+   not answering is busy, so it maps to `503 engine_timeout`.
 4. **The engine dies after the first token.** The response is committed, so no status code can be rewritten.
    `ChatHandler` ends the stream with an OpenAI-shaped error event followed by `data: [DONE]`, and the usage
    event records the outcome as `cancelled`.
@@ -122,8 +123,8 @@ a retry would replay tokens the client has — the stream carries the error and 
 |---|---|---|---|
 | gateway → any route | 1000 ms | 15 s default; `/v1` 660 s, files and batches 60 s | `application.yaml`, per-route `metadata` |
 | Feign clients (account, auth, usage, billing, batch services) | 1000 ms | 3 s | `spring.cloud.openfeign.client.config.<name>` |
-| inference → engine, first token | 1000 ms | 30 s (`ttft-timeout`) | `Engine`, `InferenceProperties` |
-| inference → engine, whole non-streamed answer | — | 600 s (`response-timeout`) | same |
+| inference → engine, first token | 1000 ms | 30 s (`ttft-timeout`, global; per model if the entry sets one) | `Engine`, `InferenceProperties` |
+| inference → engine, whole non-streamed answer | — | 600 s (`response-timeout`, global; a model's own is at most this) | same |
 | inference → usage-service (usage relay) | 1000 ms | 5 s | `UsageReporter` |
 | gateway/inference → Valkey | 1 s | 1 s (500 ms in inference) | `spring.data.redis` |
 
@@ -160,7 +161,7 @@ excluded from the count, because a service that answers "no such organization" i
 | `402` | `insufficient_balance` | gateway (`no_credit:{org}`) or inference (batch and flex credit check) | **not** OpenAI's `429 insufficient_quota`, "because SDKs retry 429s, and retrying can't add credit" |
 | `429` | `rate_limit_exceeded`, `model_busy`, `resource_unavailable` | inference admission, gateway flood brake | the caller's own limit: `retry-after` and `retry-after-ms` say when to come back |
 | `503` | `engine_unavailable`, `engine_timeout`, `service_unavailable`, `gateway_busy`, `inference_unavailable` | inference, gateway fallback, `UpstreamFailureHandler` | a dependency, not the caller: `Retry-After: 5` or `30` |
-| `502` | `engine_error` | inference | the engine answered 5xx without an OpenAI-shaped body, or refused our own key |
+| `502` | `engine_error` | inference | the engine answered 5xx without an OpenAI-shaped body, or refused our own key, or answered a non-streamed request 200 with no answer in it (empty, not JSON, no `choices` array) |
 
 Only the 429 and the 503 name a time to come back; the 402 and the 403 do not — which is why the credit gate is a 402.
 

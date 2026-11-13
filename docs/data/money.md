@@ -155,6 +155,13 @@ addition: the formula charges `(input − cached) × input_price + cached × cac
 What keeps the cached share high is the customer's prompt layout, which is on
 [Prompt caching](../inference/prompt-caching.md).
 
+Reasoning tokens are a subset of output in the same way. An engine counts what a model spent thinking in
+`completion_tokens`, so those tokens are already inside `output_tokens` and are billed at the output price; the
+usage event and the customer summary report them as `reasoningTokens` so a customer can see how much of the output
+was thinking, and the formula never reads that figure. Nothing adds it to output, to a price or to the engine
+reconciliation, which compares the engine's generated-token counter with `output_tokens`. A model's reasoning share
+therefore changes what the customer reads, not what the customer pays.
+
 The honest edge is the customer summary, which prices per (model, mode, UTC day) rather than per window,
 because one row per 5-minute window is 267k rows a month at the prototype's window size. Per-day rounding can
 differ from the per-window charge by under one micro-BRL, and a price that changed inside a day misprices that

@@ -556,6 +556,27 @@ code=$(grant "$tiny" 1000000 tiny-topup)
 [[ $code == 200 ]] || { echo "FAIL top-up grant got $code"; note_fail; }
 expect 200 "${K3[@]}" "$G/v1/models"                                 # credit back: allowed at once
 
+## Any model by settings (round AM): the listing tells a client what the model takes, a reasoning level the model does not list is ignored (an SDK
+## sends the field whether or not the model thinks, so a 400 would break it), and the usage summary has a place for the reasoning tokens. The sizes are
+## this stack's own (compose.yaml: CARMONA_INFERENCE_MODELS_0_CONTEXTWINDOW and _MAXOUTPUT); against a model with other settings, say them:
+## MODEL=... CONTEXT_WINDOW=... MAX_OUTPUT=... bash smoke.sh. The model of this stack lists no reasoning level, which the second check needs.
+want_window=${CONTEXT_WINDOW:-4096}
+want_output=${MAX_OUTPUT:-1024}
+expect 200 "${K2[@]}" "$G/v1/models"
+entry=$(grep -o '{[^{}]*}' "$BODY" | grep "\"id\":\"$M\"")   # one object per model, whatever the field order
+if grep -q "\"context_window\":$want_window[,}]" <<<"$entry" && grep -q "\"max_output_tokens\":$want_output[,}]" <<<"$entry"; then
+  echo "ok   the listing shows $M with context_window $want_window and max_output_tokens $want_output"
+else
+  echo "FAIL the listing shows '$entry' for $M, not context_window $want_window and max_output_tokens $want_output"; note_fail
+fi
+expect 200 "${K2[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" -d "$(chat 'Say hi.' 8 ',"reasoning_effort":"high"')"
+# The summary rows of the organization (the window of the money section above): each has the key, a number or null, never left out.
+summary=$("${DC[@]}" exec -T tools curl -s -H "id-account: $id" "http://usage:8080/usage/organizations/$org/summary?from=$from&to=$to" | tr -d '\r')
+rows=$(grep -o '"group":' <<<"$summary" | wc -l | tr -d ' ')
+keyed=$(grep -oE '"reasoningTokens":(null|[0-9]+)' <<<"$summary" | wc -l | tr -d ' ')
+[[ $rows -ge 1 && $rows == "$keyed" ]] && echo "ok   200  the usage summary's $rows row(s) all carry reasoningTokens" \
+  || { echo "FAIL $keyed of $rows usage summary rows carry reasoningTokens: $summary"; note_fail; }
+
 ## LGPD access: the account and its organizations, to its owner only
 expect 200 "${A[@]}" "$G/accounts/$id/export"
 grep -q "\"email\":\"$email\"" "$BODY" && grep -q "\"id\":\"$org\"" "$BODY" && ! grep -qi 'password' "$BODY" \
