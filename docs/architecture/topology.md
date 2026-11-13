@@ -137,7 +137,7 @@ appears to pass behind a service rather than through it.</figcaption>
 | `batch-service` | `batch` | `file`, `batch`, `batch_line` | `/v1/files**`, `/v1/batches**` |
 | `inference-service` | — | nothing durable; usage goes to a Valkey stream | `/v1/chat/completions`, `/v1/models` |
 
-Six services hold a schema in one Postgres, created by Flyway and versioned by date; Hibernate only validates.
+Seven services hold a schema in one Postgres, created by Flyway and versioned by date; Hibernate only validates.
 Two hold none — the point of `/v1` is that nothing on the token path reads a database
 ([schemas](../data/schemas.md), [tenancy](../data/tenancy.md)).
 
@@ -192,7 +192,7 @@ from compose, and a summary taken while billing is down answers tokens with a `n
 
 ## Why it is like this
 
-- **One database, many schemas.** A laptop runs one Postgres comfortably; six would be six more containers for
+- **One database, many schemas.** A laptop runs one Postgres comfortably; seven would be seven more containers for
   no isolation the prototype needs. Schemas keep the boundary enforceable (a query naming another schema's
   table is visible in review) without paying for separate instances; [boundaries](boundaries.md) names the
   rejected alternative.

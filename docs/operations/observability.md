@@ -11,7 +11,7 @@ measured, what the numbers mean, and — with the same weight — what is not me
   <title id="dobs-title">A metric's path from the service to an alert nobody is sent</title>
   <desc id="dobs-desc">inference-service publishes its indicators on the management port; the engine exposes
   its own counters. Prometheus scrapes both every fifteen seconds and evaluates its rule file every sixty
-  seconds, producing recording rules and twenty-one alerts. Grafana draws provisioned dashboards and lists those
+  seconds, producing recording rules and twenty-three alerts. Grafana draws provisioned dashboards and lists those
   alert rules and their firing state. There is no Alertmanager, so a firing rule reaches no destination.</desc>
 
   <defs>
@@ -51,7 +51,7 @@ measured, what the numbers mean, and — with the same weight — what is not me
   <g class="cmn-node cmn-node--accent" id="dobs-rules" aria-labelledby="dobs-rules-label">
     <rect x="350" y="80" width="120" height="58" rx="10"/>
     <text id="dobs-rules-label" x="410" y="100">rules.yml</text>
-    <text class="cmn-sub" x="410" y="118">21 alerts</text>
+    <text class="cmn-sub" x="410" y="118">23 alerts</text>
   </g>
 
   <g class="cmn-node cmn-node--accent" id="dobs-grafana" aria-labelledby="dobs-grafana-label">
@@ -112,7 +112,7 @@ Step 5 is where it stops: a firing rule reaches no destination, because none has
    same port that was never published and never routed before metrics existed.
 2. **Prometheus scrapes every service every 15 s**, one job per service so the `job` label carries the service
    name, plus the engine's own `/metrics` with a bearer token read from a file written at container start.
-3. **`rules.yml` is evaluated every 60 s**: twelve recording rules (three latency, five engine, four prompt cache) and twenty-one alerts.
+3. **`rules.yml` is evaluated every 60 s**: twelve recording rules (three latency, five engine, four prompt cache) and twenty-three alerts.
 4. **Grafana draws three provisioned dashboards** and lists the alert rules and their state, with
    `allowUiUpdates: false`, so a change made in the browser does not survive the next restart.
 5. **Nothing leaves the machine.** There is no Alertmanager and no destination, so a firing rule is a colour on
@@ -350,7 +350,7 @@ which is the goodput definition the benches already use.
 - [Reconciler.java](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Reconciler.java)
   — the tolerance, the engine counter mappings and the mismatch gauge.
 - [rules.yml](https://github.com/carmonaai/back/blob/main/docker/prometheus/rules.yml) — the recording rules and
-  all twenty-one alerts, each with what an operator should do about it.
+  all twenty-three alerts, each with what an operator should do about it.
 - [prometheus.yml](https://github.com/carmonaai/back/blob/main/docker/prometheus/prometheus.yml) — the scrape
   jobs, the 15 s interval and the engine's token file.
 - [observability.md](https://github.com/carmonaai/back/blob/main/.claude/skills/carmona-architecture/references/observability.md)
