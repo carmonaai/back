@@ -52,6 +52,13 @@ jobs:
           git submodule update --init --recursive
           git config --global --remove-section url."https://x-access-token:${TOKEN}@github.com/carmonaai/"
 
+      # The copies of the internal-secret guard, and the names two services must spell alike, are kept equal by hand (a
+      # library holds no behaviour): this fails when they drift. The guards script proves each check can fail.
+      - name: Check the copies agree
+        run: |
+          bash docker/check-copies.sh
+          bash docker/check-copies-guards.sh
+
       - uses: actions/setup-java@v6
         with:
           distribution: temurin

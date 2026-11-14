@@ -171,6 +171,14 @@ its purpose in terms of what it catches: *a broken migration, a Resource/Feign m
 regression in the smoke test fails it.* Those are the three failure modes that are invisible in a code review
 and obvious in a running stack.
 
+One step between the fetch and the build, `bash docker/check-copies.sh` and then `bash docker/check-copies-guards.sh`,
+keeps the copies equal. The guard of the internal endpoints (`InternalToken`) is copied into five services, because a
+library holds a contract and no behaviour, and a few names are spelled in two or more services (the secret header, the
+API key alphabet and prefix, the Valkey keys `apikey:` and `no_credit:`, the identity headers, the model id shape).
+The first script reads source files only (no JDK, no Docker) and fails, naming the file, when a copy differs or a
+spelling moves, so drift shows in seconds and not as a 401 in the smoke test. The second breaks one thing at a time in
+a scratch copy and shows that each check fails on it.
+
 ## Fetching the modules needs a token
 
 `back` holds fifteen git submodules under `api/`, one Git repository per module. They are private, and
@@ -316,7 +324,7 @@ token that cannot write anything.
 
 ## Where to look
 
-- [ci.yaml](https://github.com/carmonaai/back/blob/main/.github/workflows/ci.yaml) — the whole workflow, 80
+- [ci.yaml](https://github.com/carmonaai/back/blob/main/.github/workflows/ci.yaml) — the whole workflow, 125
   lines, including the generated `.env` this page flags.
 - [docs.yaml](https://github.com/carmonaai/back/blob/main/.github/workflows/docs.yaml) — the site build and
   the two repository settings it needs.
