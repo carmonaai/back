@@ -13,7 +13,7 @@ order the merges have to happen in.
   <desc id="dci-desc">The upper lane is the merge order: a library repository is merged first, then the
   service that depends on it, then the commit in back that points at both. CARMONAI_TOKEN is a read-only
   fine-grained token for the fifteen private module repositories. The lower lane is the workflow: checkout,
-  fetch the modules with that token, build and test with Maven, write a fresh environment file, start the
+  fetch the modules with that token, check that the copies agree, build and test with Maven, write a fresh environment file, start the
   stack with compose, and run the smoke test.</desc>
 
   <defs>
@@ -83,7 +83,7 @@ order the merges have to happen in.
   <g class="cmn-node cmn-node--flow" id="dci-verify" aria-labelledby="dci-verify-label">
     <rect x="326" y="176" width="130" height="56" rx="10"/>
     <text id="dci-verify-label" x="391" y="196">mvn -B verify</text>
-    <text class="cmn-sub" x="391" y="214">Temurin 25</text>
+    <text class="cmn-sub" x="391" y="214">after copies check</text>
   </g>
 
   <g class="cmn-node cmn-node--flow" id="dci-compose" aria-labelledby="dci-compose-label">
@@ -139,7 +139,7 @@ order the merges have to happen in.
 before the service that depends on it, and the commit in `back` that points at both is merged last — which is
 what step 3 shows CI doing: reading the pointers. Step 4 is the one credential the workflow needs, a
 fine-grained token with `Contents: read` on the fifteen module repositories. The lower lane is the workflow
-in order: checkout without credentials, fetch the modules, build and test, write a fresh `.env`, start the
+in order: checkout without credentials, fetch the modules, check the copies, build and test, write a fresh `.env`, start the
 stack, run the smoke test.</figcaption>
 </figure>
 
@@ -157,7 +157,7 @@ stack, run the smoke test.</figcaption>
    `Contents: read-only`, on the module repos and not on `back`.
 5. **`actions/checkout@v7` with `persist-credentials: false`** clones `back` with the default `GITHUB_TOKEN`,
    which cannot read the siblings; the fetch step then checks access module by module before initialising.
-6. **`mvn -B verify`** on Temurin 25 builds all fifteen modules in dependency order and runs the unit tests
+6. **`mvn -B verify`** on Temurin 25, after `bash docker/check-copies.sh` has passed, builds all fifteen modules in dependency order and runs the unit tests
    and the Testcontainers integration tests.
 7. **A generated `.env`, `docker compose up -d --build --wait` and `bash smoke.sh`** — the same three commands
    this page's sibling tells a person to run, on the CPU engine, with fresh secrets.

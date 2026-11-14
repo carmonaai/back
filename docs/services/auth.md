@@ -156,7 +156,8 @@ sequenceDiagram
 5. The new secret is in that one response and nowhere else; the response is `no-store`.
 
 Revoking deletes the gateway's cache entry directly (`apikey:{secretHash}`), which is why a revocation takes
-effect immediately while an expiry can lag by up to the cache's 60-second TTL.
+effect at once, bar the two cases listed under *What would change it*. An expiry needs no delete: it travels in the cached value, and the gateway compares it with
+the clock on every request.
 
 ## Why it is like this
 
@@ -188,8 +189,9 @@ integration with them, and the 50-key cap is a property of the tenant.
   with the old one has expired — which the 15-minute TTL makes cheap, and which is not implemented.
 - **The 50-key cap is counted, then enforced.** Two concurrent creates can overshoot by one; locking the
   organization row is the fix if that ever matters.
-- **An expiry is only as precise as the gateway's cache.** A key that expires while its `apikey:{hash}` entry
-  is cached keeps working for the rest of that minute.
+- **A revoked key can still work for up to 60 seconds in two rare cases.** The delete after the commit fails (the
+  call still succeeds and logs a warning), or a lookup that read the key before the commit caches it again after
+  the delete. Either way the entry lives out its 60-second TTL.
 - **Password reset has a per-IP throttle and no per-email one**, so nothing stops many reset mails to one
   address from many addresses.
 
@@ -197,6 +199,6 @@ integration with them, and the 50-key cap is a property of the tenant.
 
 - [AuthController.java](https://github.com/carmonaai/back/blob/main/api/auth/src/main/java/ai/carmona/auth/AuthController.java) — the contract, including the two raw-cookie methods.
 - [JwtService.java](https://github.com/carmonaai/back/blob/main/api/auth-service/src/main/java/ai/carmona/auth/JwtService.java) — RS256, the 15-minute TTL and the JWKS.
-- [SessionService.java](https://github.com/carmonaai/back/blob/main/api/auth-service/src/main/java/ai/carmona/auth/SessionService.java) — the cookie, the rotation and the reuse check.
+- [SessionService.java](https://github.com/carmonaai/back/blob/main/api/auth-service/src/main/java/ai/carmona/auth/SessionService.java) — the rotation, the reuse check and the idle and absolute limits; `AuthResource` builds the `Set-Cookie` from what it returns.
 - [ApiKeyService.java](https://github.com/carmonaai/back/blob/main/api/auth-service/src/main/java/ai/carmona/auth/ApiKeyService.java) — the cap, the expiry rule and the transactional rotate.
 - [ApiKeys.java](https://github.com/carmonaai/back/blob/main/api/auth-service/src/main/java/ai/carmona/auth/ApiKeys.java) — the key's shape, mirrored by the gateway.

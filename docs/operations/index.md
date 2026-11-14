@@ -155,7 +155,7 @@ with nowhere to send them.</figcaption>
 ## What it is
 
 Three things, in the order you meet them. **Running it** is a `.env` file, Maven and one compose command.
-**Checking it** is four shell scripts with pass marks, each of which fails loudly. **Watching it** is a
+**Checking it** is five shell scripts with pass marks, each of which fails loudly. **Watching it** is a
 Prometheus and a Grafana on the internal network, scraping the same management ports the health checks use.
 
 ## What you need
@@ -174,6 +174,7 @@ in [Running it locally](running.md), which is written to be followed top to bott
 | `bash bench.sh` | GPU stack only | enterprise goodput ≥ 95%, every trial 429 under 100 ms, no TTFT timeouts | ~90 s |
 | `bash batch-bench.sh` | GPU stack only | a 10,000-line batch completes with one usage event per line, killed mid-call | ~20 minutes |
 | `bash revenue-check.sh` | either | every balance equals the sum of its ledger | seconds |
+| `bash docker/check-copies.sh` | any, no Docker and no build | the five copies of the internal-secret guard are equal apart from their callee imports and `CALLEES` set, and each name that two or more services spell alike is still in exactly the files that hold it | seconds |
 
 `smoke.sh` is the one that matters most: it is the only check that exercises a real request end to end, and it
 ends by grepping every container log, a `pg_dumpall`, the gateway's access log and Valkey's append-only file
@@ -194,8 +195,9 @@ management ports follow, and the only host binding in the whole compose file is 
 ## How work ships
 
 One GitHub Actions workflow in `back`, on every pull request and every push to `main`: fetch the fifteen
-private module repositories with `CARMONAI_TOKEN`, `mvn -B verify`, generate a fresh `.env`, bring the stack
-up, run `smoke.sh`, and dump the container logs when something failed. The docs site has its own workflow.
+private module repositories with `CARMONAI_TOKEN`, check that the copies agree (`docker/check-copies.sh`), `mvn -B verify`,
+generate a fresh `.env`, bring the stack up, run `smoke.sh`, and dump the container logs when something failed. The docs
+site has its own workflow.
 Both are described in [CI and shipping](ci.md).
 
 ## Why it is like this

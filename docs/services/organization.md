@@ -85,12 +85,14 @@ that touch LGPD, both labelled at the schema level.
 **Status is a word, not a boolean.** `active`, `suspended`, `closed` rather than `is_active`, because the
 readers ask three different questions and a boolean would have to be re-derived at each of them. Worth
 knowing: `suspended` is in the constraint and every reader handles it — the gateway refuses any status that is
-not `active` — but nothing in the code sets it. It is a state with no writer, waiting for the operations that
-would use it.
+not `active` — and only the operator sets it, through the internal `PUT /organizations/{id}/admin`, which
+never sets `closed`. The three words are the `Status` enum of the organization library; its `of(String)` reads a
+word without throwing, and the records keep `String`.
 
 **Tier** is `trial`, `standard` or `enterprise`. It is not enforced here at all: the gateway copies it into the
 `tier` identity header, and inference-service turns it into rate buckets, in-flight caps and a share of the
-engine's slots. This service only remembers it.
+engine's slots. This service only remembers it. The three words are the `Tier` enum of the same library, read
+the same way (`Tier.of`).
 
 ## Memberships and the three roles
 
@@ -102,9 +104,10 @@ engine's slots. This service only remembers it.
 | close it | `DELETE /organizations/{id}` | yes | no | no |
 | manage API keys | `/organizations/{id}/api-keys…` | yes | yes | read only |
 
-The role checks are not made here for API keys: auth-service calls `member(id, idAccount)` and compares the
-role itself, with `MANAGERS = Set.of("owner", "admin")`. Keeping the rule in the caller that needs it means
-one source of truth for "who is a member" and no second copy of "who may manage keys".
+The role checks are not made here for API keys: auth-service calls `member(id, idAccount)` and asks the role
+what it may do, with `Role.managesKeys()` from the organization library. This service answers who is a member
+and the enum holds the rule, so there is one source of truth for "who is a member" and no second copy of "who
+may manage keys".
 
 `POST /organizations` is the only write that creates a membership, and it does both in one transaction:
 `organization` first, then a `membership` row with role `owner`.
@@ -178,8 +181,8 @@ left.
 - **The erasure sweep is one call per organization per run.** It is a poll of every tenant with batch data,
   once a minute. Past a few thousand tenants the answer is an `organization.closed` event, which is the first
   thing in this platform that would justify a broker.
-- **`suspended` has no writer.** The status, the constraint and the gateway's refusal all exist; the operation
-  that would set it does not. If suspension is never wanted, the value should leave the constraint.
+- **`suspended` has one writer, the operator.** `PUT /organizations/{id}/admin` is internal and the gateway
+  never routes it; no route a customer can reach suspends or resumes an organization.
 - **There is no route to reopen or rename an organization.** Closing is one-way through the API, and the name
   is fixed at creation.
 - **Tier is never validated against a payment state**, because there is no payment rail.

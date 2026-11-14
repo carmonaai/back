@@ -105,9 +105,14 @@ A library module contains:
 - **one `@FeignClient` interface**, the `XController`, which the service implements;
 - **the `In`/`Out` records** that interface exchanges — Lombok `@Builder` records, so the wire shape and the
   constructor are the same declaration;
-- **shared value types both sides compute with.** `Price` is the one example: billing-service bills a window
-  with `Price.cost`, and usage-service explains that same charge to the customer with it, so the record and its
-  rounding live in `api/billing` rather than in either service.
+- **shared value types the services compute with.** `Role`, `Status` and `Tier` in `api/organization` are closed
+  enums over the words the column holds. organization-service and auth-service ask a `Role` what a member may
+  do, and organization-, auth-, batch- and model-service read a status through `Status`. Only
+  organization-service reads a tier through `Tier`; batch-service, usage-service and inference-service keep
+  their own set of the three tier words. `Price` is the other kind:
+  billing-service bills a window with `Price.cost`, and usage-service explains that same charge to the customer
+  with it, so the record and its rounding live in `api/billing` rather than in either service. `Overshoot`, in
+  the same library, computes the quoted overshoot bound from the services' own timings.
 
 It contains no entity, no repository, no `@Service` and no `@SpringBootApplication`. Its dependencies are
 `spring-cloud-starter-openfeign` and Lombok, and nothing else.
@@ -116,10 +121,10 @@ It contains no entity, no repository, no `@Service` and no `@SpringBootApplicati
 |---|---|---|
 | `api/account` | `AccountController` | `AccountIn`, `AccountOut`, `AccountExportOut` (with `Membership`), `TokenIn`, `PasswordResetIn`, `PasswordResetConfirmIn` |
 | `api/auth` | `AuthController` | `RegisterIn`, `LoginIn`, `TokenOut`, `ApiKeyIn`, `ApiKeyCreatedOut`, `ApiKeyOut`, `ApiKeyPrincipalOut` |
-| `api/organization` | `OrganizationController` | `OrganizationIn`, `OrganizationOut`, `MemberOut`, `TenantOut` |
+| `api/organization` | `OrganizationController` | `OrganizationIn`, `OrganizationOut`, `MemberOut`, `TenantOut`; the enums `Role`, `Status`, `Tier` |
 | `api/model` | `ModelController` | `ModelIn`, `ModelOut`, `ModelPage`, `ModelLive`, `ModelSpec` (with `ReplicaSpec`, `ReasoningSpec`, `LimitsSpec`, `PrefillSpec`) |
 | `api/usage` | `UsageController` | `UsageEventIn`, `UsageWindowOut`, `UsageTotalOut`, `UsageSummaryOut` |
-| `api/billing` | `BillingController` | `GrantIn`, `BalanceOut`, `Price` |
+| `api/billing` | `BillingController` | `GrantIn`, `BalanceOut`, `Price`, `Overshoot` |
 
 The split between public and internal is visible in the interfaces themselves. `AuthController` carries both
 `POST /auth/login`, which the gateway routes, and `GET /api-keys/{hash}`, which is internal only;
@@ -207,8 +212,10 @@ table, and writing it down in a library is what keeps it a subset.
 
 **One shape, two implementations, deliberately.** The gateway's `ApiKeyFormat` mirrors auth-service's `ApiKeys`
 — prefix, 43 base62 characters, a 6-character CRC32 — and both files say "change both together". The gateway
-cannot depend on auth-service's jar and must validate a key with no I/O, so the shape is written twice; it is
-the one duplication in the arrangement, and it is commented as such.
+cannot depend on auth-service's jar and must validate a key with no I/O, so the shape is written twice, and
+`docker/check-copies.sh` (run by CI) fails
+when the two copies of `checksum` and `sha256`, or the prefix and alphabet literals, stop being equal; the vector
+tests `ApiKeysTest` and `ApiKeyFormatTest` pin the behaviour.
 
 ## What would change it
 

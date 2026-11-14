@@ -134,7 +134,8 @@ second windows and a 2 second grace so billing shows up within seconds of a requ
 The rule is: **every whole window that ended at least `grace` ago is summed once.** In one transaction it locks
 the single row of `usage_seal`, reads `sealed_until` as `from`, computes `to = floor(now - grace)`, writes the
 windows in `[from, to)` and moves `sealed_until` to `to`. Windows are aligned to
-`date_bin(window, t, TIMESTAMPTZ '2000-01-01')`, so they are stable across instances and restarts.
+`date_bin(window, received_at, origin)` with one origin, `2000-01-01T00:00:00Z`, defined once in `SealJob`: the seal's SQL
+takes it as a parameter and the `floor` that computes `to` reads the same constant, so windows are stable across instances and restarts. The migration that seeds the cursor at first start wrote the same date once as a zone-less literal and is frozen.
 
 **By arrival time, not by event time.** The seal reads `received_at`. A late event therefore falls into the
 next open window instead of reopening a closed one — and that matters more than it looks: a sealed window has

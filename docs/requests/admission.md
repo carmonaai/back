@@ -226,7 +226,7 @@ priority 30, behind every interactive tier, and both are priced at half the sync
 - [`buckets.lua`](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/resources/buckets.lua)
   — the three buckets, their linear refill and the exact wait they return.
 - [`ChatRequest.java`](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/ChatRequest.java)
-  — the input estimate, `max_tokens` and the `flex` flag.
+  — the input estimate, `max_tokens` and the lane.
 - [`application.yaml`](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/resources/application.yaml)
   — `admission-wait`, `max-connections`, the three tiers and each model's `slots` and `queue`.
 - [`Metrics.java`](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Metrics.java)

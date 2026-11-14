@@ -175,6 +175,9 @@ Mode 0444 is for this local and CI harness only (the services run as uid 10001 a
 mode); production sets owner 10001 and mode 0400. To rotate `internal_token`, delete the file, run the script and restart the
 holders together. `model_key` has no rotation: deleting it makes every stored engine key unreadable, and the models must be
 registered again. `bash check-init-secrets.sh` runs the script in a scratch folder and fails if either file is not made on its own.
+`bash check-copies.sh` reads source files only, so it needs no stack and no build: it fails, naming the file, when the five
+copies of the internal-secret guard, or a name that two or more services must spell alike (the API key alphabet and prefix,
+the Valkey keys, the identity headers, the model id shape), have drifted; CI runs it before the build.
 
 ## Build, start, check
 

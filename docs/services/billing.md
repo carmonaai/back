@@ -167,7 +167,9 @@ decision off the request path — the gateway reads one Valkey key after resolvi
 is not called at all. The gateway turns its presence into 402 with OpenAI's `insufficient_quota` type and the
 code `insufficient_balance`: deliberate rather than a retryable 429, because retrying cannot add credit. The
 flag and the balance can disagree until the reconciliation re-syncs it, and `BalanceOut.noCredit` reports what
-the gateway will do, not what the arithmetic says.
+the gateway will do, not what the arithmetic says. Where two writers of one organization race, `CreditFlags.converge`
+re-reads the balance after each write and writes again if the balance no longer says what it wrote, up to five rounds,
+so the flag ends up saying what the balance says; the reconciliation re-syncs anything past that.
 
 ## Grants
 

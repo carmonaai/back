@@ -75,7 +75,7 @@ can happen next: the gateway writes a refusal itself, or the request reaches an 
 | 4 | Security chains | `apiKeys` on `/v1/**`, the JWT chain everywhere else |
 | 5 | `RateLimitFilter` | the flood brake, per caller |
 | 6 | `RouteBulkheadFilter` | at most `max-concurrent` calls to this upstream, refused rather than queued |
-| 7 | `CircuitBreaker` | the route's breaker, with `forward:/fallback` as the fallback |
+| 7 | `CircuitBreaker` | the route's breaker; with no fallback route, an open breaker reaches `UpstreamFailureHandler`, which writes the 503 |
 | 8 | `IdentityHeadersFilter` | the headers the upstream is allowed to trust |
 | 9 | `NettyRoutingFilter` | the call itself, with the route's `response-timeout` |
 
@@ -122,9 +122,11 @@ five space-separated fields: `id organizationId status tier expiresAt`.
 
 Three consequences follow from that cache, and they are the interesting part:
 
-- **Revocation is immediate, expiry is not quite.** Revoking a key deletes the cache entry, so it stops
-  working at once. An expiry can only be enforced from the cached value, so a key that expires just after a
-  lookup stays usable for up to the 60 s TTL. The code marks this as a deliberate shortcut.
+- **Revocation and expiry do not wait for the TTL.** Revoking a key deletes the cache entry, so it stops
+  working at once; the exceptions are a delete that fails and a lookup that read the key before the
+  revocation committed and caches it again after the delete, and then the entry lives out its 60 s TTL.
+  The expiry is a field of the cached value and is compared with the clock on every request, so a key
+  that expires inside the 60 s TTL is refused as soon as it expires.
 - **`status` is checked from the cache too.** A key of an organization that is not `active` is refused with
   `DisabledException`, which becomes 403 `organization_not_active`.
 - **Expired and revoked answer the same 401.** Both are `invalid_api_key`, on purpose: the caller learns
@@ -189,17 +191,22 @@ echoed, and `e.getMessage()` is never used.
 | 402 | `insufficient_quota` | `insufficient_balance` | the organization's prepaid balance is used up |
 | 403 | `permission_error` | `organization_not_active` | the key is fine, the organization is not |
 | 429 | `rate_limit_exceeded` | `rate_limit_exceeded` | the caller's bucket is empty |
+| 429 | `rate_limit_error` | `gateway_busy` | a route already holds its `max-concurrent` calls, or the organization is over its `upload-share` on that route |
 | 503 | `api_error` | `service_unavailable` | the key lookup or the credit check is unavailable |
-| 503 | `api_error` | `inference_unavailable`, `batch_unavailable`, `gateway_busy` | breaker, bulkhead, or a shed call |
+| 503 | `api_error` | `inference_unavailable`, `batch_unavailable` | the route's breaker is open, or the connection to the upstream was refused, timed out on connect or closed early |
 
 The 429 carries both `Retry-After` and `Retry-After-Ms`, because inference-service sends the same pair and
 SDKs honour the millisecond one; the 503s carry `Retry-After: 30`. `RouteBulkheadFilter` refuses an
 over-limit call with `gateway_busy` rather than letting it wait, and copies the route's `fallback-code` into
-an exchange attribute — the route and its metadata do not survive the breaker's forward, but attributes do.
+an exchange attribute, because `UpstreamFailureHandler` runs outside the filter chain and gets the original
+exchange, not the route.
 
-`UpstreamFailureHandler` exists because a connect that hangs raises Netty's `ConnectTimeoutException`, which
-escapes the whole filter chain and is therefore never counted by the breaker — measured against the running
-stack, ten calls to a stopped container produced ten Spring error pages and a still-closed breaker.
+`UpstreamFailureHandler` exists because the two `/v1` routes have a circuit breaker and no fallback route (a
+fallback route would make the gateway cache the whole request body in memory). An open breaker, a refused or
+hung connect (Netty's `ConnectTimeoutException`) and an upstream that did not answer in time therefore reach
+it as errors, and it writes the OpenAI-shaped 503 with a `Retry-After`, or the 504 `upstream_timeout` for a
+timeout; a failed connect counts as a breaker failure. The routes with no breaker get the generic
+`service_unavailable` 503 from it: left alone, a connect that hangs would reach an SDK as a Spring error page.
 
 ## The access log
 
@@ -226,8 +233,10 @@ would be a complete authentication bypass. `Cookie` is removed too, except on th
 - **`ApiKeyFormat` accepts the prototype prefix.** The pattern is `cmn_(?:test_)?…`, so a `cmn_test_` key
   keeps working in production. Production refuses it; the pattern and auth-service's `ApiKeys.PREFIX` change
   together.
-- **The cached expiry is up to a minute stale.** A key that expires inside that window keeps working until
-  the entry drains. Shortening the TTL is the fix if it ever matters.
+- **The cached status and tier can be up to a minute old.** auth-service deletes the cached entries of an
+  organization when it is closed or the operator changes its tier or status, and a key's entry when the key
+  is revoked; if that delete fails, the old entry lives out its 60 s TTL. Shortening the TTL is the fix if it
+  ever matters.
 - **`RateLimitFilter` has no shared memory of a Valkey outage.** Its fallback buckets are per-replica and
   reset wholesale past 100,000 keys, so they bound one instance's flood, not a fleet's.
 - **The `/v1` body cap is 4 MB** for everything but a chat completion, so it is also what caps a Batch file upload
