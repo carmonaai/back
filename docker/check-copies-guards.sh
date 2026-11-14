@@ -48,6 +48,8 @@ breaks '"apikey:" is in' 's/"apikey:"/"apikeys:"/' "api/gateway-service/$J/gatew
 breaks '"no_credit:" is in' 's/^package .*/&\nclass Reader { static final String P = "no_credit:"; }/' "api/usage-service/$J/usage/UsageResource.java"
 breaks 'ApiKeys.checksum' 's/value % 62/value % 61/' "api/gateway-service/$J/gateway/ApiKeyFormat.java"
 breaks 'ApiKeys.sha256' 's/"SHA-256"/"SHA-512"/' "api/gateway-service/$J/gateway/ApiKeyFormat.java"
+breaks 'ApiKeys.checksum: nothing is left' 's/static String checksum/static String crc/' "api/auth-service/$J/auth/ApiKeys.java" "api/gateway-service/$J/gateway/ApiKeyFormat.java"
+breaks 'ApiKeys.sha256: nothing is left' 's/static String sha256/static String digest/' "api/auth-service/$J/auth/ApiKeys.java" "api/gateway-service/$J/gateway/ApiKeyFormat.java"
 breaks '"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz" is in' 's/ABCDEFGHIJ/ABCDEFGHIK/' "api/gateway-service/$J/gateway/ApiKeyFormat.java"
 breaks '"cmn_[a-z]+_" is in' 's/cmn_\[a-z\]+_/cmn_[a-z0-9]+_/' "api/auth-service/$J/auth/ApiKeys.java"
 breaks 'carmona.keys.prefix and carmona.gateway.key-prefixes differ' 's/key-prefixes: cmn_live_/key-prefixes: cmn_live_,cmn_test_/' "api/gateway-service/src/main/resources/application-prod.yaml"
@@ -70,7 +72,9 @@ breaks "'org-' is in" "s/'org-'/'org_'/g" "api/model-service/src/main/resources/
 
 # the one thing that may differ: the callees
 f="$work/api/account-service/$J/account/InternalToken.java"
+cp "$f" "$bak/callees"
 sed -i 's/Set.of(AuthController.class, OrganizationController.class)/Set.of(AuthController.class)/' "$f"
+cmp -s "$f" "$bak/callees" && fail "the sed script changed nothing in the CALLEES set of account-service's InternalToken"
 [[ $(run) == *SUCCESS* ]] || fail "a different CALLEES set made the check fail: $(run)"
 
 # no submodules, no check: a checkout without the modules must not pass for lack of copies to compare
