@@ -56,7 +56,7 @@ and the pitfalls list).
 | `AccessLogFilter` | One JSON line per request — refusals included — to its own file: request id, method, path without query, status, duration, client IP, ids. Daily files kept **184 days** (Marco Civil art. 15). Nothing goes to stdout. |
 | `OriginFilter` | Refuses a POST to login/register/refresh/logout from a foreign `Origin` (CSRF defence for the cookie endpoints). |
 | `OpenAiErrors` | The single error writer: `{"error":{"message","type","code"}}`. Messages are fixed strings; nothing from the request is echoed. |
-| `ResilienceConfiguration`, `RouteBulkheadFilter`, `FallbackController`, `UpstreamFailureHandler` | Per-route circuit breaker, bulkhead and timeouts; the OpenAI-shaped 503 when an upstream is open, shed, or hanging. |
+| `ResilienceConfiguration`, `RouteBulkheadFilter`, `UpstreamFailureHandler` | Per-route circuit breaker, bulkhead and timeouts; the OpenAI-shaped 503 when an upstream's breaker is open or it cannot be reached, the 504 `upstream_timeout` when it takes the call and does not answer within the route's `response-timeout`, and the 429 `gateway_busy` when a route's bulkhead sheds a call. |
 
 Routes live in `src/main/resources/application.yaml`. Management port **8081**, never published and never
 routed.
@@ -102,7 +102,7 @@ routed.
 |---|---|
 | `InferenceApplication` | The two routes: `POST /v1/chat/completions`, `GET /v1/models`. |
 | `ChatRequest` | The untrusted body is reduced to an **allowlist**: `messages`, `temperature`, `top_p`, `stop`, `presence_penalty`, `frequency_penalty`, `seed`, `tools`, `tool_choice`, `parallel_tool_calls`. `model`, `n=1`, `max_tokens` and `stream_options` are set by the service. `service_tier: "flex"` selects the half-price spare-capacity lane. |
-| `Admission` | Rate buckets in Valkey (one Lua script, `buckets.lua`, keys `rl:{orgId:modelId}:requests|input|output`), then in-flight caps in memory. **The tier figure is a shed threshold, not a reservation:** `acquire()` compares `tierCap(model, tier)` against the *model's total* in-flight count, so `trial = C/2` means "a trial request is admitted only while the whole model is below C/2". The per-organization `maxInFlight` (2/4/16) is checked *after* that and, on both models today, is always ≥ its tier's ceiling — so it never binds. A paying tier waits up to `admission-wait` (1.5 s) for a slot; trial, flex and batch lines are refused at once. Waiting requests are ordered by their organization's virtual token counter. |
+| `Admission` | Rate buckets in Valkey (one Lua script, `buckets.lua`, keys `rl:{orgId:modelId}:requests|input|output`), then in-flight caps as slot leases in Valkey (`Leases`, ADR 0001), so they hold across every inference-service replica; with Valkey down each replica admits against its share of the slots. **The tier figure is a shed threshold, not a reservation:** `acquire()` compares `tierCap(model, tier)` against the *model's total* in-flight count, so `trial = C/2` means "a trial request is admitted only while the whole model is below C/2". The per-organization `maxInFlight` (2/4/16) is checked *after* that and, on both models today, is always ≥ its tier's ceiling — so it never binds. A paying tier waits up to `admission-wait` (1.5 s) for a slot; trial, flex and batch lines are refused at once. Waiting requests are ordered by their organization's virtual token counter, kept in memory per replica. |
 | `Engine` | The engine client: its own connection pool (**64**), priority per tier, `cache_salt` = organization id, and the time limits — first token 30 s, silence between tokens 30 s, whole non-streamed answer 600 s. One retry, and only before the first byte. A connection failure becomes 503 `engine_unavailable` with `Retry-After: 5`; there is no health poller in this service, so nothing is pre-emptively marked down. |
 | `ChatHandler` | Relays the stream, and *how the request ends* (ok / error / cancelled) decides the usage event; the permit is held with `usingWhen` so it is released however the request ends. Settlement of the buckets happens **before** the usage event, deliberately. |
 | `Tracker` | Follows one request without keeping its text: first token, inter-token gaps, usage reported by the engine, and the outcome. Its `event_id` is a random **UUID v4, minted when the request ends** (not at admission); only a batch line's id is fixed in advance, which is what makes a re-run bill once. |
@@ -111,7 +111,7 @@ routed.
 | `Metrics` | The SLIs: TTFT, inter-token latency, queue wait, whole request, request/token counters, in-flight and capacity gauges, engine saturation gauges, `reconcile_mismatch`. Tagged `model` and `tier` only — never an organization. |
 | `Caller` | Reads the identity headers the gateway set (or the `batch-line` marker batch-service sends). |
 
-**`Retry-After` is not one number.** A 503 raised *inside* inference-service carries `Retry-After: 5`; a 503 raised by the *gateway* for an open breaker, a shed bulkhead or an unreachable upstream carries `Retry-After: 30`. Both are `api_error`. An SDK sees the same status and a different wait, so a page that quotes one value for "the 503" is wrong.
+**`Retry-After` is not one number.** A 503 raised *inside* inference-service carries `Retry-After: 5`; a 503 raised by the *gateway* for an open breaker or an unreachable upstream carries `Retry-After: 30`. Both are `api_error`. An SDK sees the same status and a different wait, so a page that quotes one value for "the 503" is wrong. A bulkhead that sheds a call is not a 503: the gateway answers 429 `gateway_busy` with `Retry-After: 1`.
 
 **Two engine queue numbers disagree.** `docker/compose.gpu.yaml` starts vLLM with `--max-num-seqs 4 --max-num-queued-reqs 8` (an engine backstop of 12), while `application-gpu.yaml` declares `slots: 4, queue: 2` (C+q = 6). Nothing breaks — the service refuses before the engine sees a request — but the engine's stop is looser than the service's and the plan's "C+q as the engine-side backstop" does not hold as written. Recorded as an open item, not silently reconciled.
 
@@ -221,7 +221,6 @@ SIGKILLing batch-service mid-call still billed exactly once.
 | Batch files in Postgres `bytea` | 4 MB, not 200 MB | object storage when hosting is decided |
 | Usage relay is a Valkey stream, not Kafka | one consumer | Kafka when an event gets a second consumer |
 | One engine endpoint per model | one GPU, no replica routing | multi-replica routing with more GPUs |
-| In-flight caps in one JVM's memory | one replica's view | shared counters before a second replica |
 | Per-day pricing in the usage summary | a mid-day price change misprices that day | per-window pricing with a cursor |
 | No Alertmanager destination | alerts are visible, nobody is paged | choose a destination |
 | No maximum API key lifetime | the caller decides | a policy in the console |

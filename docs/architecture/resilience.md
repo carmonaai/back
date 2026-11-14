@@ -144,7 +144,7 @@ At the gateway, only the two routes that can absorb a flood have them:
 
 Both breakers come from one `ResilienceConfiguration`: a sliding window of 20 calls, a minimum of 20 calls,
 a 50% failure rate, 30 s open and 5 half-open probes. `RouteBulkheadFilter` holds a `Semaphore` per route id
-and answers `503 gateway_busy` over the limit rather than letting the call queue: "a flood on one route must
+and answers `429 gateway_busy` over the limit rather than letting the call queue: "a flood on one route must
 not eat the gateway's capacity for the others". Console routes get no breaker on purpose — they are
 interactive, the flood brake already covers them, and a breaker there turns a slow login into a 503.
 
@@ -159,8 +159,8 @@ excluded from the count, because a service that answers "no such organization" i
 | `401` | `invalid_api_key` | gateway | unknown, revoked and expired keys are deliberately indistinguishable |
 | `403` | `organization_not_active` | gateway | the key is real; the tenant is not |
 | `402` | `insufficient_balance` | gateway (`no_credit:{org}`) or inference (batch and flex credit check) | **not** OpenAI's `429 insufficient_quota`, "because SDKs retry 429s, and retrying can't add credit" |
-| `429` | `rate_limit_exceeded`, `model_busy`, `resource_unavailable` | inference admission, gateway flood brake | the caller's own limit: `retry-after` and `retry-after-ms` say when to come back |
-| `503` | `engine_unavailable`, `engine_timeout`, `service_unavailable`, `gateway_busy`, `inference_unavailable` | inference, gateway fallback, `UpstreamFailureHandler` | a dependency, not the caller: `Retry-After: 5` or `30` |
+| `429` | `rate_limit_exceeded`, `model_busy`, `resource_unavailable`, `gateway_busy` | inference admission, gateway flood brake, gateway bulkhead | the caller's own limit: `retry-after` and `retry-after-ms` say when to come back; `gateway_busy` is a route's capacity, not a fault |
+| `503` | `engine_unavailable`, `engine_timeout`, `service_unavailable`, `inference_unavailable` | inference, `UpstreamFailureHandler` (the gateway) | a dependency, not the caller: `Retry-After: 5` or `30` |
 | `502` | `engine_error` | inference | the engine answered 5xx without an OpenAI-shaped body, or refused our own key, or answered a non-streamed request 200 with no answer in it (empty, not JSON, no `choices` array) |
 
 Only the 429 and the 503 name a time to come back; the 402 and the 403 do not — which is why the credit gate is a 402.
@@ -194,10 +194,13 @@ Valkey failure logs `rate buckets unavailable, admitting on in-flight caps only`
   travels inside the stream instead.
 - **The time limiter is disabled at the gateway**, because the route's own `response-timeout` is the deadline
   and a second one with a different value would race it.
-- **`UpstreamFailureHandler` exists because a connect timeout escaped the breaker.** A Netty
-  `ConnectTimeoutException` never reaches the CircuitBreaker filter's `onErrorResume`, so it was not counted
-  as a failure and the SDK got Spring's own error page — measured at ten calls, ten error pages, breaker
-  still closed. The handler runs outside the chain and writes the same 503.
+- **`UpstreamFailureHandler` exists because the two `/v1` routes have a breaker and no fallback route.** A
+  fallback route would make the gateway cache the whole request body in memory, so an open breaker, a failed
+  connect and a timeout reach the handler as errors, and it writes them as the OpenAI-shaped 503 with a
+  `Retry-After` (a timeout as the 504 `upstream_timeout`). A failed connect counts as a breaker failure on
+  those routes. On the routes with no breaker the handler writes the same 503 for an unreachable upstream:
+  left alone, a connect that hangs would reach an SDK as Spring's own error page. The handler runs outside
+  the filter chain.
 
 ## What would change it
 

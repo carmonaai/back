@@ -214,8 +214,9 @@ same tier have exactly the same rights.
   them, with no per-tenant database or ACL.
 - **The network is the trust boundary.** `id-organization` is trusted because only the gateway is reachable
   from outside. A shared network or a second published port makes the headers forgeable.
-- **A revoked key reaches the gateway within 60 s.** Revocation deletes the `apikey:{sha256}` entry, and a
-  closed or suspended organization is refused within the lookup's cache TTL. Bounded and named, not zero.
+- **A revoked key, a closed or suspended organization and a changed tier reach the gateway at once, unless a delete
+  fails.** auth-service deletes the `apikey:{sha256}` entries in those cases; a failed delete, or a lookup that races
+  it, leaves the old entry to live out its 60 s TTL. Bounded and named, not zero.
 - **Batch lines keep the batch's identity**, not the caller's, so a key revoked after a batch was created does
   not stop it. Only credit is checked per line, in `Admission`.
 

@@ -3,16 +3,17 @@
 ## What it is
 
 Carmona is one Git repository per module: fifteen Maven modules under `api/`, six of them **libraries**
-that hold a contract and no behaviour, and nine of them **services** that hold a Spring Boot application
+that hold a contract (and, in two of them, a value type both sides compute with), and nine of them **services** that hold a Spring Boot application
 and one Postgres schema. A service may call another service's library and may never read another service's
 tables. Where two services genuinely need each other's data, they call each other — and the page below is
 mostly about what that costs.
 
 ## The module rule
 
-A **library** is a Feign interface plus its `In`/`Out` records. It has no service, no controller and no
-repository; it is the shape of a call, published so that the caller and the callee compile against one
-definition.
+A **library** is a Feign interface plus its `In`/`Out` records and, in `organization` and `billing`, the
+shared types both sides compute with (`Role`, `Status` and `Tier`; `Price` and `Overshoot`). It has no
+service, no controller and no repository; it is the shape of a call, published so that the caller and the
+callee compile against one definition.
 
 ```java
 @FeignClient(
@@ -45,7 +46,7 @@ at a stub instead of a container.
 
 Apart from that one library-to-library edge, every library's dependency list is the same two entries:
 `spring-cloud-starter-openfeign` and `lombok`.
-A library that needed a database driver would be a sign that behaviour had leaked into it.
+A library that needed a database driver would be a sign that a service had leaked into it.
 
 ## What an aggregate is here
 
@@ -159,10 +160,11 @@ across it, because there is no transaction that could span it.</figcaption>
   `batch-line` header, and the gateway routes to inference without a Feign client, so neither has a Java
   caller to publish a contract for. The moment one exists — a console that streams tokens, an eval runner —
   is the moment a library gets written.
-- **`Price` in the library, not in the service.** The one piece of real logic that two services share is
-  money arithmetic, so the record and its `cost` live in `api/billing` and usage-service depends on that
-  library rather than on a copy. It did not remove the call between the two services: the price *table* is
-  still billing's schema, and no design that keeps the summary in usage-service can change that.
+- **`Price` in the library, not in the service.** Money arithmetic is the shared logic that has to agree to
+  the last micro-BRL, so the record and its `cost` live in `api/billing` and usage-service depends on that
+  library rather than on a copy; `Role`, `Status` and `Tier` in `api/organization` are the other shared
+  types. It did not remove the call between the two services: the price *table* is still billing's schema,
+  and no design that keeps the summary in usage-service can change that.
 - **The domain/model split costs a mapper.** `new AccountModel(account)` and `model.to()` are boilerplate,
   and they buy a service whose domain objects cannot be lazily loaded by accident and whose tests need no
   database.

@@ -169,11 +169,12 @@ are.
 auth-service call, which makes the cache a load amplifier rather than a shield. The `none` value costs one
 string and closes that hole.
 
-**Sixty seconds is the price of not calling auth-service.** Every request pays up to a minute of staleness:
-an organization suspended, closed, or a key revoked has to wait out the TTL unless the delete reaches
-Valkey first — which it does for revocation, because auth-service deletes the entry. The alternative,
-asking auth-service per request, puts a database read in front of every token and is the thing this design
-exists to avoid.
+**Sixty seconds is the price of not calling auth-service.** Every request pays up to a minute of staleness: a key
+revoked, an organization suspended or closed, or a tier changed would all wait out the TTL if nothing deleted the
+entry. Something does: auth-service deletes the entry of a revoked key, and the entries of an organization's keys
+when organization-service closes the organization or the operator changes its tier or status. A failed delete, or a
+lookup that races it, leaves the old entry to live out its 60 s. The alternative, asking auth-service per request,
+puts a database read in front of every token and is the thing this design exists to avoid.
 
 **Valkey down is 503, not 401 — fail closed.** If the lookup cannot be done, the gateway cannot know the
 caller is legitimate, and answering 401 would tell a paying customer their key is broken. A 503 with
@@ -192,8 +193,9 @@ found was once real.
 
 - **A production environment has to refuse `cmn_test_` keys.** Today `ApiKeyFormat` accepts both prefixes;
   the plan is that production refuses the test prefix before any lookup, and today it does not.
-- **The cache TTL is the staleness budget.** Shortening it trades auth-service load for faster suspension;
-  a suspension that has to bite immediately needs a push to Valkey, not a shorter TTL.
+- **The cache TTL bounds a failed delete.** A revoked key, a closed organization and the operator's change of tier or
+  status delete the cached entries at once; when that delete fails, the old entry lives out the 60 s. Shortening
+  the TTL trades auth-service load for a smaller window there.
 - **`last_used_at` on a key** is not written. It needs either a write on the request path or a throttled
   writer fed by usage events, and neither exists yet.
 - **A second resolution path** — an OAuth client, a service account — would need its own filter, because

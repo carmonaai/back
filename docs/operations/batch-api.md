@@ -226,7 +226,7 @@ batch row with `FOR UPDATE SKIP LOCKED` — one finisher at a time — and asks 
 locked and skipped by both statements, so they finish normally. If anything is still pending the finisher
 returns and tries again next tick. Otherwise it writes the output and error files —
 `string_agg(result, E'\n' ORDER BY line)` into a new `file` row, so a large result never passes through the
-JVM — stores the counts, sets the final status and `finished_at`, and deletes the lines, all in one transaction.
+JVM — stores the counts, sets the final status and `finished_at`, and deletes the lines, all in one transaction. The statuses are the constants of `BatchStatus` and `LineStatus`; `BatchServiceIT` keeps them equal to the `CHECK`s of the schema.
 
 Two more sweeps live in the same class. `expireFiles()` (cron `0 17 * * * *`) deletes files past their 30 days.
 `eraseClosed()` runs every `carmona.batch.erase-every` (1 minute; 5 s in compose), asks organization-service's
