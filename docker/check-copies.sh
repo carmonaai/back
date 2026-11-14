@@ -7,12 +7,17 @@ cd "${1:-$(dirname "$0")/..}"
 bad=0
 fail() { echo "FAIL: $1"; bad=1; }
 
+# ponytail: two ceilings, no code for them. `spelled` does not see a rename inside a file that keeps another occurrence of the literal (count the occurrences per file if
+# that bites), and in the InternalToken copies the CALLEES range and the `import ai.carmona.*` lines may differ in anything (compare their shape if one drifts).
+
 # same <label> <sed script> <file>...: each file, once the sed script has run on it, must equal the first. Fewer than two files means the submodules are not
 # checked out. `cat -s` squeezes the blank line that a deleted import group leaves behind.
+# A script that leaves nothing of the first file (a range whose start was renamed) would compare empty with empty, so that fails too.
 same() {
   local label=$1 script=$2 first f; shift 2
   (( $# >= 2 )) || { fail "$label: found $# file, expected at least two (are the submodules checked out?)"; return 0; }
   first=$1
+  [[ -n $(sed "$script" "$first" | tr -d '[:space:]') ]] || fail "$label: nothing is left of $first to compare"
   for f in "$@"; do
     cmp -s <(sed "$script" "$first" | tr -d '\015' | cat -s) <(sed "$script" "$f" | tr -d '\015' | cat -s) || fail "$label: $f differs from $first in more than it is allowed to"
   done
