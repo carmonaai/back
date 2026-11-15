@@ -147,6 +147,18 @@ services:
     healthcheck: *readiness
     networks: [internal]
 
+  # The deployments of an organization (round OB): an engine connected as a deployment. The gateway's route `deployments` calls http://deployment:8080, so the name is part of the contract.
+  deployment:
+    secrets: [internal_token]
+    build: ../api/deployment-service
+    environment: *database
+    depends_on:
+      db: { condition: service_healthy }
+      organization: { condition: service_healthy }
+      model: { condition: service_healthy }
+    healthcheck: *readiness
+    networks: [internal]
+
   auth:
     secrets: [internal_token]   # BE-24: the internal-endpoint secret; the gateway has no such line on purpose
     build: ../api/auth-service
@@ -438,7 +450,7 @@ services:
     networks: [internal]
 
 # BE-24 (SEC-04): one shared secret, one line "X-Internal-Token: <64 hex>", created by `bash init-secrets.sh` before the first `up`.
-# billing, organization, account, auth and model refuse to start without it; inference reads it to ask model-service for the registered models, and tools
+# billing, organization, account, auth, model and deployment refuse to start without it; inference reads it to ask model-service for the registered models, and tools
 # to call the internal endpoints; the gateway and every other service never see it.
 # model_key: the data key of model-service (one line of 64 hex characters, same script), which seals the engine keys of registered models in the
 # database. Mounted in model only; the service refuses to start without it.

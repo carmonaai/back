@@ -39,7 +39,7 @@ AUTH=api/auth-service/$J/auth
 INF=api/inference-service/$J/inference
 BATCH=api/batch-service/$J/batch
 
-# 1. The internal-secret guard. The five copies differ in the imports of the callees and in the CALLEES set with the comment above it, and in nothing else.
+# 1. The internal-secret guard. The six copies differ in the imports of the callees and in the CALLEES set with the comment above it, and in nothing else.
 guards=(api/*-service/$J/*/InternalToken.java)
 same InternalToken '/^package /d;/^import ai\.carmona\./d;/^    \/\/ The Feign clients of this service/,/);$/d' "${guards[@]}"
 for f in "${guards[@]}"; do   # a script that deleted everything would make the copies equal
@@ -47,7 +47,7 @@ for f in "${guards[@]}"; do   # a script that deleted everything would make the 
 done
 same InternalTokenTest '/^package /d' api/*-service/src/test/java/ai/carmona/*/InternalTokenTest.java
 same TestInternalToken '/^package /d;/^ *\/\//d' api/*-service/src/test/java/ai/carmona/*/TestInternalToken.java
-# the sixth reader (inference-service reads the file to send the header and checks nothing) spells the same header, line and fixed texts
+# the seventh reader (inference-service reads the file to send the header and checks nothing) spells the same header, line and fixed texts
 spelled only '"X-Internal-Token"' "${guards[@]}" $INF/InternalSecret.java
 spelled has '": *([0-9a-fA-F]{64})"' "${guards[@]}" $INF/InternalSecret.java
 spelled has "' is missing or unreadable\"" "${guards[@]}" $INF/InternalSecret.java
@@ -68,18 +68,19 @@ minted=$(pre auth-service prefix application) accepted=$(pre gateway-service key
 spelled only '"apikey:"' $AUTH/ApiKeyService.java $GW/ApiKeyAuthenticationManager.java
 spelled only '"no_credit:"' api/billing-service/$J/billing/CreditFlags.java $GW/ApiKeyAuthenticationManager.java $INF/Admission.java
 
-# 3. The identity headers: set and stripped by the gateway, read by inference-service and batch-service, sent by the batch worker, read by the controllers.
-spelled only '"id-account"' $GW/IdentityHeadersFilter.java api/{account,auth,billing,organization,usage}/$J/*/*Controller.java
+# 3. The identity headers: set and stripped by the gateway, read by inference-service and batch-service, sent by the batch worker, read by the controllers. gateway-held-ms (how long the gateway held the request) is set and stripped by the gateway and read by inference-service alone.
+spelled only '"id-account"' $GW/IdentityHeadersFilter.java api/{account,auth,billing,deployment,organization,usage}/$J/*/*Controller.java
 spelled only '"id-organization"' $GW/IdentityHeadersFilter.java $INF/Caller.java $BATCH/Caller.java $BATCH/BatchWorker.java
 spelled only '"id-api-key"' $GW/IdentityHeadersFilter.java $INF/Caller.java $BATCH/Caller.java $BATCH/BatchWorker.java
 spelled only '"batch-line"' $GW/IdentityHeadersFilter.java $INF/Caller.java $BATCH/BatchWorker.java
 spelled has '"tier"' $GW/IdentityHeadersFilter.java $INF/Caller.java $BATCH/Caller.java $BATCH/BatchWorker.java
+spelled only '"gateway-held-ms"' $GW/IdentityHeadersFilter.java $INF/ChatHandler.java
 
 # 4. The model id: the shape, and the org- namespace of the models an organization registers for itself.
 shape='[a-z0-9][a-z0-9._-]{0,62}/[a-z0-9][a-z0-9._-]{0,63}'
 spelled only "$shape" api/model-service/$J/model/ModelId.java api/model-service/src/main/resources/db/migration/V2026.11.12.001__create_tables.sql $INF/ModelRoster.java
 spelled only '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' api/model-service/$J/model/ModelId.java $INF/ModelRoster.java
-spelled only '"org-"' api/billing/$J/billing/Price.java api/model-service/$J/model/ModelId.java $INF/InferenceProperties.java
+spelled only '"org-"' api/billing/$J/billing/Price.java api/deployment-service/$J/deployment/Deployment.java api/model-service/$J/model/ModelId.java $INF/InferenceProperties.java api/usage-service/$J/usage/UsageService.java
 spelled has "'org-'" api/model-service/src/main/resources/db/migration/V2026.11.12.001__create_tables.sql
 
 (( bad == 0 )) || exit 1

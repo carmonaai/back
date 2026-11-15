@@ -46,3 +46,9 @@
 [submodule "api/model-service"]
 	path = api/model-service
 	url = https://github.com/carmonaai/model-service.git
+[submodule "api/deployment"]
+	path = api/deployment
+	url = https://github.com/carmonaai/deployment.git
+[submodule "api/deployment-service"]
+	path = api/deployment-service
+	url = https://github.com/carmonaai/deployment-service.git

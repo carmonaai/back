@@ -92,7 +92,7 @@ jobs:
           echo "STORAGE_SECRET_KEY=$(openssl rand -hex 24)"
           } > .env
 
-      # BE-24: billing, organization, account and auth refuse to start without the internal secret file.
+      # BE-24: billing, organization, account, auth, model and deployment refuse to start without the internal secret file.
       - name: Create the internal secret
         working-directory: docker
         run: bash init-secrets.sh

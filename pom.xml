@@ -17,6 +17,8 @@
 		<module>api/organization-service</module>
 		<module>api/model</module>
 		<module>api/model-service</module>
+		<module>api/deployment</module>
+		<module>api/deployment-service</module>
 		<module>api/usage</module>
 		<module>api/usage-service</module>
 		<module>api/inference-service</module>
