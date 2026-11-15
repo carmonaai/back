@@ -29,7 +29,7 @@ breaks() {
   for f in "$@"; do cp "$bak/${f//\//_}" "$work/$f"; done
 }
 
-# 1. The internal-secret guard: the copies, their tests, and the sixth reader.
+# 1. The internal-secret guard: the copies, their tests, and the seventh reader.
 breaks 'InternalToken: ' 's/presented.size() == 1/presented.size() >= 1/' "api/model-service/$J/model/InternalToken.java"
 breaks 'InternalToken: ' 's/^\/\/ BE-24 (SEC-04)/\/\/ BE-24/' "api/account-service/$J/account/InternalToken.java"
 breaks 'InternalToken: ' 's/shared library would need/shared library needs/' "api/billing-service/$J/billing/InternalToken.java"
