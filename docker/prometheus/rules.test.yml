@@ -1723,6 +1723,26 @@ tests:
                 still starting, or its management port not listening. Check the container's own health status
                 and its logs. No metrics for this service means no SLI either.
 
+  # The deployments (round OB). deployment-service is one static target like organization, so ServiceDown names it the same way once its job is in the
+  # list; before, `up{job="deployment"} == 0` matched nothing and a dead deployment service was silent.
+  - name: ServiceDown names deployment-service when it stops answering
+    interval: 15s
+    input_series:
+      - {series: 'up{job="deployment", instance="deployment:8081"}', values: '1x4 0x30'}
+    alert_rule_test:
+      - {eval_time: 2m, alertname: ServiceDown, exp_alerts: []}
+      - eval_time: 4m
+        alertname: ServiceDown
+        exp_alerts:
+          - exp_labels: {severity: critical, job: deployment, instance: "deployment:8081"}
+            exp_annotations:
+              summary: "deployment deployment:8081 has not answered a scrape for 2m"
+              description: >-
+                Prometheus cannot reach deployment:8081/actuator/prometheus (deployment; one series per
+                replica for inference and gateway, so this names the replica). The container may be down,
+                still starting, or its management port not listening. Check the container's own health status
+                and its logs. No metrics for this service means no SLI either.
+
   # The age of the list grows by a whole scrape (15 s) between samples while model-service does not answer: over 15 s for a minute is the alert.
   - name: ModelListStale fires when the registered models have not been read for three refresh intervals
     interval: 15s

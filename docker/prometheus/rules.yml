@@ -75,10 +75,10 @@ groups:
 
   - name: availability
     rules:
-      # Any of the nine services. Metrics stop, so this is the alert that turns every other one into a
+      # Any of the ten services. Metrics stop, so this is the alert that turns every other one into a
       # silent failure if it is missing.
       - alert: ServiceDown
-        expr: up{job=~"account|organization|model|auth|usage|billing|inference|batch|gateway"} == 0
+        expr: up{job=~"account|organization|model|deployment|auth|usage|billing|inference|batch|gateway"} == 0
         for: 2m
         labels: {severity: critical}
         annotations:

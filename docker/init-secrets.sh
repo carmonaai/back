@@ -2,7 +2,7 @@
 # Makes the two secret files of the stack when they are missing, each on its own: a file that exists is never overwritten, and one that exists never
 # keeps the other from being made (rotation = delete the file, run this, restart the services that hold it).
 #   secrets/internal_token (BE-24, SEC-04): one line "X-Internal-Token: <64 hex>", so that `curl -H @/run/secrets/internal_token` sends it without the
-#     value ever appearing on a command line. Held by billing, organization, account, auth, model, inference and tools.
+#     value ever appearing on a command line. Held by billing, organization, account, auth, model, deployment, inference and tools.
 #   secrets/model_key: one line of 64 hex characters, the data key model-service seals the engine keys of registered models with (AES-256-GCM). Held by
 #     model only. Losing it loses every stored key: the models must be registered again, and a database restored without it holds keys nobody can open.
 # Run it once before the first `docker compose up`. The values are random, stored in no repo file and shared by no other secret.

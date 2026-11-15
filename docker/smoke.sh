@@ -172,6 +172,7 @@ code=$(grant "$org" 10000000 smoke-start)
 [[ $code == 200 ]] && echo "ok   200  R\$10 of credit granted (internal)" || { echo "FAIL credit grant got $code"; note_fail; }
 expect 200 "${A[@]}" "$G/organizations"
 expect 200 "${A[@]}" "$G/organizations/$org"
+expect 200 "${A[@]}" "$G/organizations/$org/deployments"            # deployment-service: the gateway's route, the service name, the membership check and its schema
 expect 404 "${A[@]}" "$G/organizations/$org/tenant"                 # internal
 expect 404 "${A[@]}" "$G/organizations/$org/members/$id"            # internal
 

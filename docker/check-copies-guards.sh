@@ -63,6 +63,7 @@ breaks '"id-organization" is in' 's/"id-organization"/"id-organisation"/g' "api/
 breaks '"id-api-key" is in' 's/"id-api-key"/"id-api-keys"/g' "api/gateway-service/$J/gateway/IdentityHeadersFilter.java"
 breaks '"batch-line" is in' 's/"batch-line"/"batch-lines"/g' "api/inference-service/$J/inference/Caller.java"
 breaks '"tier" is in' 's/"tier"/"tiers"/g' "api/batch-service/$J/batch/Caller.java"
+breaks '"gateway-held-ms" is in' 's/^package .*/&\nclass Reader { static final String H = "gateway-held-ms"; }/' "api/usage-service/$J/usage/UsageResource.java"
 
 # 4. The model id.
 breaks '[a-z0-9][a-z0-9._-]{0,62}/' 's/{0,63}/{0,64}/' "api/inference-service/$J/inference/ModelRoster.java"
