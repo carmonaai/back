@@ -1,6 +1,6 @@
 # CI and shipping
 
-Work reaches `main` through pull requests against fifteen repositories, and one GitHub Actions workflow in
+Work reaches `main` through pull requests against seventeen repositories, and one GitHub Actions workflow in
 `back` decides whether any of them is shippable: it fetches the private modules, builds and tests everything,
 starts the stack and runs the smoke test against it. This page is that workflow, the token it needs, and the
 order the merges have to happen in.
@@ -12,7 +12,7 @@ order the merges have to happen in.
   <title id="dci-title">The workflow, and the merge order it depends on</title>
   <desc id="dci-desc">The upper lane is the merge order: a library repository is merged first, then the
   service that depends on it, then the commit in back that points at both. CARMONAI_TOKEN is a read-only
-  fine-grained token for the fifteen private module repositories. The lower lane is the workflow: checkout,
+  fine-grained token for the seventeen private module repositories. The lower lane is the workflow: checkout,
   fetch the modules with that token, check that the copies agree, build and test with Maven, write a fresh environment file, start the
   stack with compose, and run the smoke test.</desc>
 
@@ -138,7 +138,7 @@ order the merges have to happen in.
 <figcaption>The upper lane is the merge order and the token, not a workflow. A library repository is merged
 before the service that depends on it, and the commit in `back` that points at both is merged last — which is
 what step 3 shows CI doing: reading the pointers. Step 4 is the one credential the workflow needs, a
-fine-grained token with `Contents: read` on the fifteen module repositories. The lower lane is the workflow
+fine-grained token with `Contents: read` on the seventeen module repositories. The lower lane is the workflow
 in order: checkout without credentials, fetch the modules, check the copies, build and test, write a fresh `.env`, start the
 stack, run the smoke test.</figcaption>
 </figure>
@@ -153,11 +153,11 @@ stack, run the smoke test.</figcaption>
 2. **Then the service repository**, which depends on that library at `${project.version}`.
 3. **Then the commit in `back`** that moves the submodule pointers. CI's `git submodule update` reads exactly
    those SHAs, so a pointer merged before its target exists makes a fresh clone unbuildable.
-4. **`CARMONAI_TOKEN` is the read credential** for the fifteen private module repositories —
+4. **`CARMONAI_TOKEN` is the read credential** for the seventeen private module repositories —
    `Contents: read-only`, on the module repos and not on `back`.
 5. **`actions/checkout@v7` with `persist-credentials: false`** clones `back` with the default `GITHUB_TOKEN`,
    which cannot read the siblings; the fetch step then checks access module by module before initialising.
-6. **`mvn -B verify`** on Temurin 25, after `bash docker/check-copies.sh` has passed, builds all fifteen modules in dependency order and runs the unit tests
+6. **`mvn -B verify`** on Temurin 25, after `bash docker/check-copies.sh` and the step that runs `docker/check-prometheus.sh` and `docker/check-dashboards.sh` (the alert rules' tests and the dashboards, [Observability](observability.md#what-checks-the-rules-and-the-dashboards)) have passed, builds all seventeen modules in dependency order and runs the unit tests
    and the Testcontainers integration tests.
 7. **A generated `.env`, `docker compose up -d --build --wait` and `bash smoke.sh`** — the same three commands
    this page's sibling tells a person to run, on the CPU engine, with fresh secrets.
@@ -181,7 +181,7 @@ a scratch copy and shows that each check fails on it.
 
 ## Fetching the modules needs a token
 
-`back` holds fifteen git submodules under `api/`, one Git repository per module. They are private, and
+`back` holds seventeen git submodules under `api/`, one Git repository per module. They are private, and
 `GITHUB_TOKEN` — the token Actions issues automatically — is scoped to the repository the workflow runs in. It
 cannot read a sibling, so `git submodule update --init --recursive` would fail on the first module.
 `CARMONAI_TOKEN` is a fine-grained personal access token with `Contents: read-only`, granted on the module
@@ -219,7 +219,7 @@ done in the token's settings on GitHub, not in this repository.
 ## Build, test, and start the stack
 
 `actions/setup-java@v6` installs Temurin **25** with `cache: maven`, then `mvn -B verify` runs. Temurin 25 is
-the LTS the project targets and the same JDK the runtime images use; `verify` builds the fifteen modules in
+the LTS the project targets and the same JDK the runtime images use; `verify` builds the seventeen modules in
 the order the aggregator's `pom.xml` declares, runs the unit tests on branchy logic, and runs one Testcontainers
 integration test per database service against a pinned Postgres image. There is no `mvn install` and no package
 registry — each service resolves its library from the reactor in the same run.
@@ -269,7 +269,7 @@ its own branch while the combination is still broken.
 2. **The service repository** (`api/account-service`, and so on) — it depends on the library at
    `${project.version}`.
 3. **`back`'s pointer commit** — the submodule gitlinks. Nothing else in `back` changes when a module changes;
-   the whole repository is an aggregator `pom.xml`, `docker/`, `.github/` and fifteen pointers.
+   the whole repository is an aggregator `pom.xml`, `docker/`, `.github/` and seventeen pointers.
 
 The reason is mechanical. `git submodule update` checks out the exact commit a pointer names, and Maven
 resolves `ai.carmona:account:1.0.0` from the reactor. A `back` pointer naming a service commit whose library
@@ -297,11 +297,11 @@ refused, and **Settings → Pages → Source** must be *Deploy from a branch*, b
 
 ## Why it is like this
 
-**One workflow, not one per module.** Fifteen repositories with fifteen workflows would be fifteen places to
+**One workflow, not one per module.** Seventeen repositories with seventeen workflows would be seventeen places to
 keep a Java version in step. The integration test is what actually needs to run, and only `back` can run it —
-it is the only repository that sees all fifteen modules at once.
+it is the only repository that sees all seventeen modules at once.
 
-**The full stack, on every pull request.** Starting fifteen containers and running about 800 lines of smoke test
+**The full stack, on every pull request.** Starting sixteen containers and running about 800 lines of smoke test
 takes minutes, and it is the only check that catches a broken migration, a route predicate that no longer
 matches its path, or a filter that stopped stripping a header.
 
@@ -328,7 +328,7 @@ token that cannot write anything.
   lines, including the generated `.env` this page flags.
 - [docs.yaml](https://github.com/carmonaai/back/blob/main/.github/workflows/docs.yaml) — the site build and
   the two repository settings it needs.
-- [pom.xml](https://github.com/carmonaai/back/blob/main/pom.xml) — the fifteen modules in dependency order,
+- [pom.xml](https://github.com/carmonaai/back/blob/main/pom.xml) — the seventeen modules in dependency order,
   which is the merge order written down.
 - [.gitmodules](https://github.com/carmonaai/back/blob/main/.gitmodules) — the repositories the token has to
   be able to read.

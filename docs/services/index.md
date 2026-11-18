@@ -2,9 +2,9 @@
 
 ## What it is
 
-Carmona is nine Spring Boot applications and six contract libraries, in fifteen Git repositories under
+Carmona is ten Spring Boot applications and seven contract libraries, in seventeen Git repositories under
 `api/`. Each service owns one Postgres schema, exposes a small HTTP surface, and talks to the others over
-Feign or not at all. This page is the key to the other nine: what a service is here, what a library is, and
+Feign or not at all. This page is the key to the other pages of this section: what a service is here, what a library is, and
 which schema belongs to whom.
 
 <figure class="cmn-figure">
@@ -86,7 +86,7 @@ the one place where a contract is written down.
 ## One schema per service
 
 A service writes its own schema and reads nobody else's. `accounts` belongs to account-service, `auth` to
-auth-service, `organizations` to organization-service, `models` to model-service, `usage` to usage-service, `billing` to
+auth-service, `organizations` to organization-service, `models` to model-service, `deployments` to deployment-service, `usage` to usage-service, `billing` to
 billing-service, `batch` to batch-service. Two services have no schema at all — gateway-service holds no
 data, and inference-service deliberately holds none.
 
@@ -103,27 +103,28 @@ That single rule buys three things:
 Every service also connects with `logServerErrorDetail=false`, so row values never reach an exception message
 or a log, and the JDBC-only services add `currentSchema` and a 5 s `statement_timeout` in the URL itself.
 
-## The nine services
+## The ten services
 
 | Service | Schema | Migrations | What it owns | Page |
 |---|---|---|---|---|
 | `gateway-service` | none | — | the only published port, authentication, rate limiting, the access log | [Gateway](gateway.md) |
 | `auth-service` | `auth` | 3 | login, JWTs, sessions, API keys | [Auth](auth.md) |
-| `account-service` | `accounts` | 2 | the person: password, email, export, erasure | [Account](account.md) |
+| `account-service` | `accounts` | 5 | the person: password, email, export, erasure | [Account](account.md) |
 | `organization-service` | `organizations` | 1 | the tenant: status, tier, memberships | [Organization](organization.md) |
 | `model-service` | `models` | 1 | the models registered while the stack runs: entries and their sealed engine keys | [Model](model.md) |
+| `deployment-service` | `deployments` | 2 | an organization's serving units: name, state, machines, what was loaded | [Deployment](deployment.md) |
 | `inference-service` | none | — | the OpenAI-compatible surface and the engines | [Inference](inference.md) |
-| `usage-service` | `usage` | 2 | what was consumed: events, partitions, sealed windows | [Metering](metering.md) |
-| `billing-service` | `billing` | 2 | what it costs: prices, ledger, balance, credit flags | [Billing](billing.md) |
-| `batch-service` | `batch` | 2 | Files and the Batch API | Batch (its own page) |
+| `usage-service` | `usage` | 5 | what was consumed: events and the request record, refusal records, partitions, sealed windows, and a deployment's numbers | [Metering](metering.md) |
+| `billing-service` | `billing` | 3 | what it costs: prices, ledger, balance, credit flags | [Billing](billing.md) |
+| `batch-service` | `batch` | 3 | Files and the Batch API | Batch (its own page) |
 
 A migration count is a fair proxy for how settled a service is: organization-service has one file because one
 table pair has been enough, while auth-service and billing-service each needed a second pass — to add key
 expiry, and to add batch prices.
 
-## The six libraries
+## The seven libraries
 
-`api/auth`, `api/account`, `api/organization`, `api/model`, `api/usage` and `api/billing`. Each is named after the service
+`api/auth`, `api/account`, `api/organization`, `api/model`, `api/deployment`, `api/usage` and `api/billing`. Each is named after the service
 that implements it, minus the `-service` suffix — so `api/billing` is the contract and `api/billing-service`
 is the thing behind it. Reading a library is the fastest way to learn a service's public shape: the interface
 lists every operation, and the records list every field that crosses the wire.
@@ -131,7 +132,7 @@ lists every operation, and the records list every field that crosses the wire.
 ## Why it is like this
 
 **One Git repository per module** is the decision that shapes everything else. `back` is an aggregator:
-fifteen submodules pinned by commit in `.gitmodules`, and a root `pom.xml` whose only content is the module
+seventeen submodules pinned by commit in `.gitmodules`, and a root `pom.xml` whose only content is the module
 list. The upside is that a module's history is its own; the cost is that a contract change is a commit in the
 library's repository before any service can build against it, which [Libraries](libraries.md) spells out.
 
@@ -160,7 +161,7 @@ first customer.
 
 ## Where to look
 
-- [pom.xml](https://github.com/carmonaai/back/blob/main/pom.xml) — the fifteen modules in dependency order.
+- [pom.xml](https://github.com/carmonaai/back/blob/main/pom.xml) — the seventeen modules in dependency order.
 - [.gitmodules](https://github.com/carmonaai/back/blob/main/.gitmodules) — each module is its own repository.
 - [organization/pom.xml](https://github.com/carmonaai/back/blob/main/api/organization/pom.xml) — what a library module actually contains.
 - [auth-service application.yaml](https://github.com/carmonaai/back/blob/main/api/auth-service/src/main/resources/application.yaml) — one schema, one datasource, one service.
@@ -220,6 +221,6 @@ first customer.
 
     ---
 
-    The six shared Feign contracts, the `url` convention, and what changing one costs.
+    The seven shared Feign contracts, the `url` convention, and what changing one costs.
 
 </div>

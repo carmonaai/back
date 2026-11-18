@@ -215,17 +215,29 @@ batch prices.
 ## The usage event it produces
 
 `UsageEvent` is usage-service's `UsageEventIn` shape: `eventId`, `requestId`, `organizationId`, `apiKeyId`,
-`model`, `mode`, `tier`, `inputTokens`, `cachedInputTokens`, `outputTokens`, `status`, `startedAt`, `ttftMs`,
-`durationMs`, `reasoningTokens`, `firstOutputMs`. Ids and counts — never the prompt, the answer, or the caller's
-address.
+`model`, `mode`, `tier`, `inputTokens`, `cachedInputTokens`, `outputTokens`, `status`, `startedAt`, `durationMs`,
+`reasoningTokens`, and the thirteen fields of the request record: `passedOnMs`, `understoodMs`, `engineCallMs`,
+`firstTokenMs`, `firstAnswerTokenMs`, `lastTokenMs`, `streamed`, `httpStatus`, `errorCode`, `finishReason`, `engineQueueMs`,
+`enginePrefillMs` and `engineGenerationMs`. Ids, counts and moments — never the prompt, the answer, or the caller's address.
 
-The last two describe the request and are no part of the bill. `reasoningTokens` is what the engine reported in
+The fields after `outputTokens` describe the request and are no part of the bill. `reasoningTokens` is what the engine reported in
 `completion_tokens_details.reasoning_tokens`, the last value it reported, never more than `outputTokens`; it is
-a part of `outputTokens` and is never added to it, to a price or to the engine reconciliation. `firstOutputMs` is
-the time from the start to the first content, tool call or reasoning of a stream, so for a model that thinks first
-it is the end of the prefill, where `ttftMs` (first content or tool call) waits for the answer. Each is null when
-the engine or the service could not know it (an engine without a reasoning parser, a non-streamed answer, a stream
-that produced nothing), never 0.
+a part of `outputTokens` and is never added to it, to a price or to the engine reconciliation. `ttftMs` and `firstOutputMs` are no longer sent: `firstTokenMs` (first token of any kind, reasoning included)
+and `firstAnswerTokenMs` (first content or tool call) replace them, and usage-service still accepts the two old fields from an older
+instance. Each of the new ones is null when the engine or the service could not know it (an engine without a reasoning parser, a
+non-streamed answer, a stream that produced nothing), never 0.
+
+The moments are whole milliseconds from the start of the request's clock, which is the **gateway accepting it**, not this
+service receiving it. The gateway tells this service how long it held the request in the header `gateway-held-ms`
+([Gateway](gateway.md#the-chain-in-the-order-it-runs)); the service adds its own clock to it and never subtracts one machine's time from
+another's. A header that is absent, not whole digits or over ten minutes counts as none, and a batch line, which did not pass the
+gateway, starts its clock when it reaches this service. So `carmona_inference_ttft_seconds` is the time from the gateway's
+acceptance to the first token of any kind of a streamed request, the gateway's own time and the queue wait included. A request that
+was not streamed has no sample in it. `carmona_inference_first_output_seconds` is shorter on purpose: it runs from the engine call to that same
+first token, so it measures the engine's prefill and not the wait.
+
+The engine's own timing report (`engineQueueMs`, `enginePrefillMs`, `engineGenerationMs`) is on the engine's clock and is
+never added to or taken from the moments; the stack's simulated engine is started with `--enable-per-request-metrics`, and the report it sends is the one the app shows.
 
 Four details are decisions rather than plumbing:
 
@@ -250,6 +262,32 @@ The event goes to the Valkey stream `usage:events`; a relay delivers batches to 
 deletes them once they are stored. A killed instance loses nothing: the stream is append-only on disk, and an
 entry that was never confirmed is claimed again after `carmona.inference.usage-claim-after` (60 s).
 [Metering](metering.md) takes it from there.
+
+## Refusal records and the request id in the logs
+
+A request refused for an organization's own deployment is no usage event. If the refusal came after
+the model was found, the model is the caller's own, and the code is one of fifteen (`unsupported_n`, `unsupported_parameter`,
+`invalid_messages`, `unsupported_content`, `invalid_max_tokens`, `unsupported_service_tier`, `invalid_reasoning_effort`,
+`context_length_exceeded`, `control_token_in_content`, `invalid_role`, `nesting_too_deep`, `rate_limit_exceeded`, `model_busy`,
+`resource_unavailable`, `engine_unavailable`), `RefusalRecords` leaves a record. A refusal of a public model, of a batch line, before the
+model is found or by the gateway leaves none.
+
+The record is best effort, the opposite of a usage event, because money is charged from the event and nothing from a refusal. On the
+request's path it does memory alone and never waits or throws: it takes the allowance of the deployment's clock minute
+(`carmona.inference.refusal-records.per-minute`, 60, counted by each replica) and offers the record to a bounded buffer of 10,000. A
+timer posts the buffer to `POST /usage/refusals` once a second, in batches of at most 1000, and the last post is made at shutdown. A record
+that is not made or not delivered is counted and never kept, in `carmona_inference_refusal_records_left_out_total{model,reason}`, where
+the reason is `cap` (above the minute's allowance), `buffer_full` (the new record is the one dropped) or `post_failed` (a batch that
+usage-service did not take is not posted again, so a service that is down cannot keep old records ahead of fresh ones). Nothing goes
+through Valkey. The three series start at 0 for each model of an organization's own, so the first loss is an increase of 1.
+The record holds ids, the status and code that were answered and the moments the request reached, no text of the request. The
+replica's memory is the ceiling: a restart without its last post loses what the buffer held.
+
+The service writes no line for each request, but it writes one when a request failed, and the line carries `request_id`, the key of the gateway's
+access line. A request that ended as `error` leaves a WARN `request failed` with the id, the model, the code, the HTTP status when it has one and
+the duration, and never a message. A failure **before the first byte**, for a request that got as far as the engine, leaves one WARN line (`request failed`) when the engine refused it with a 4xx, and two with the same request id when the answer is a 5xx: that line, and
+`chat request failed` with the code and the exception's class, written when the 5xx answer is built. A failure after the first byte of a stream leaves
+the first only, since the stream is no HTTP error.
 
 ## Adding a model
 

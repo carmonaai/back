@@ -2,16 +2,16 @@
 
 ## What it is
 
-Six of the fifteen modules under `api/` are libraries: `auth`, `account`, `organization`, `model`, `usage` and
+Seven of the seventeen modules under `api/` are libraries: `auth`, `account`, `organization`, `model`, `deployment`, `usage` and
 `billing`. Each one holds a single `XController` Feign interface and the `In`/`Out` records that cross the
 wire, so that a caller and the service implementing it compile against one definition of the contract.
 
 <figure class="cmn-figure">
 <div class="cmn-flow" markdown="0">
-<svg viewBox="0 0 760 312" role="img" aria-labelledby="lib-title" aria-describedby="lib-desc"
+<svg viewBox="0 0 760 346" role="img" aria-labelledby="lib-title" aria-describedby="lib-desc"
      xmlns="http://www.w3.org/2000/svg">
-  <title id="lib-title">The six contract libraries and every service that depends on them</title>
-  <desc id="lib-desc">Six libraries on the left, nine services on the right, with one line per dependency
+  <title id="lib-title">The seven contract libraries and every service that depends on them</title>
+  <desc id="lib-desc">Seven libraries on the left, ten services on the right, with one line per dependency
   and no line running back from a service to a library it does not use. The only library-to-library
   dependency is the auth contract using the account contract.</desc>
   <defs>
@@ -36,6 +36,7 @@ wire, so that a caller and the service implementing it compile against one defin
     <path id="lib-hop14" class="cmn-link cmn-link--flow cmn-dash" d="M230 76 H205 V108 H230" marker-end="url(#lib-arrow)"/>
     <path id="lib-hop15" class="cmn-link cmn-link--flow cmn-dash" d="M380 140 H530 V294 H540" marker-end="url(#lib-arrow)"/>
     <path id="lib-hop16" class="cmn-link cmn-link--flow cmn-dash" d="M380 236 H520 V294 H540" marker-end="url(#lib-arrow)"/>
+    <path id="lib-hop17" class="cmn-link cmn-link--flow cmn-dash" d="M380 268 H535 V326 H540" marker-end="url(#lib-arrow)"/>
   </g>
   <g class="cmn-node cmn-node--entry cmn-node--flow" id="lib-auth" aria-labelledby="lib-auth-label"><rect x="230" y="62" width="150" height="28" rx="10"/><text id="lib-auth-label" x="305" y="76">api/auth</text></g>
   <g class="cmn-node cmn-node--flow" id="lib-account" aria-labelledby="lib-account-label"><rect x="230" y="94" width="150" height="28" rx="10"/><text id="lib-account-label" x="305" y="108">api/account</text></g>
@@ -43,6 +44,7 @@ wire, so that a caller and the service implementing it compile against one defin
   <g class="cmn-node cmn-node--flow" id="lib-usage" aria-labelledby="lib-usage-label"><rect x="230" y="158" width="150" height="28" rx="10"/><text id="lib-usage-label" x="305" y="172">api/usage</text></g>
   <g class="cmn-node cmn-node--flow" id="lib-billing" aria-labelledby="lib-billing-label"><rect x="230" y="190" width="150" height="28" rx="10"/><text id="lib-billing-label" x="305" y="204">api/billing</text></g>
   <g class="cmn-node cmn-node--flow" id="lib-model" aria-labelledby="lib-model-label"><rect x="230" y="222" width="150" height="28" rx="10"/><text id="lib-model-label" x="305" y="236">api/model</text></g>
+  <g class="cmn-node cmn-node--flow" id="lib-deployment" aria-labelledby="lib-deployment-label"><rect x="230" y="254" width="150" height="28" rx="10"/><text id="lib-deployment-label" x="305" y="268">api/deployment</text></g>
   <g class="cmn-node cmn-node--soft" id="lib-gateway" aria-labelledby="lib-gateway-label"><rect x="540" y="24" width="170" height="28" rx="10"/><text id="lib-gateway-label" x="625" y="38">gateway-service</text></g>
   <g class="cmn-node cmn-node--soft" id="lib-inference" aria-labelledby="lib-inference-label"><rect x="540" y="56" width="170" height="28" rx="10"/><text id="lib-inference-label" x="625" y="70">inference-service</text></g>
   <g class="cmn-node cmn-node--flow" id="lib-auth-service" aria-labelledby="lib-auth-service-label"><rect x="540" y="88" width="170" height="28" rx="10"/><text id="lib-auth-service-label" x="625" y="102">auth-service</text></g>
@@ -52,6 +54,7 @@ wire, so that a caller and the service implementing it compile against one defin
   <g class="cmn-node cmn-node--flow" id="lib-billing-service" aria-labelledby="lib-billing-service-label"><rect x="540" y="216" width="170" height="28" rx="10"/><text id="lib-billing-service-label" x="625" y="230">billing-service</text></g>
   <g class="cmn-node cmn-node--flow" id="lib-batch-service" aria-labelledby="lib-batch-service-label"><rect x="540" y="248" width="170" height="28" rx="10"/><text id="lib-batch-service-label" x="625" y="262">batch-service</text></g>
   <g class="cmn-node cmn-node--flow" id="lib-model-service" aria-labelledby="lib-model-service-label"><rect x="540" y="280" width="170" height="28" rx="10"/><text id="lib-model-service-label" x="625" y="294">model-service</text></g>
+  <g class="cmn-node cmn-node--flow" id="lib-deployment-service" aria-labelledby="lib-deployment-service-label"><rect x="540" y="312" width="170" height="28" rx="10"/><text id="lib-deployment-service-label" x="625" y="326">deployment-service</text></g>
   <!-- One packet per library, on the edge to the service that implements it. -->
   <circle class="cmn-packet cmn-travel" r="4.5" style="offset-path: path('M380 76 H390 V98 H540'); --cmn-travel: 1.2s; --cmn-delay: 0s;"></circle>
   <circle class="cmn-packet cmn-travel" r="4.5" style="offset-path: path('M380 108 H410 V134 H540'); --cmn-travel: 1.2s; --cmn-delay: 0.3s;"></circle>
@@ -59,6 +62,7 @@ wire, so that a caller and the service implementing it compile against one defin
   <circle class="cmn-packet cmn-travel" r="4.5" style="offset-path: path('M380 172 H480 V198 H540'); --cmn-travel: 1.2s; --cmn-delay: 0.9s;"></circle>
   <circle class="cmn-packet cmn-travel" r="4.5" style="offset-path: path('M380 204 H500 V236 H540'); --cmn-travel: 1.2s; --cmn-delay: 1.2s;"></circle>
   <circle class="cmn-packet cmn-travel" r="4.5" style="offset-path: path('M380 236 H520 V294 H540'); --cmn-travel: 1.2s; --cmn-delay: 1.5s;"></circle>
+  <circle class="cmn-packet cmn-travel" r="4.5" style="offset-path: path('M380 268 H535 V326 H540'); --cmn-travel: 1.2s; --cmn-delay: 1.8s;"></circle>
   <rect class="cmn-label-plate" x="230" y="2" width="150" height="16" rx="4"/><text class="cmn-label" x="305" y="14">start here: the contract</text>
   <rect class="cmn-label-plate" x="540" y="2" width="170" height="16" rx="4"/><text class="cmn-label" x="625" y="14">and who depends on it</text>
   <rect class="cmn-label-plate" x="168" y="84" width="36" height="16" rx="4"/><text class="cmn-label" x="186" y="96">uses</text>
@@ -85,7 +89,7 @@ the one short edge on the left is the only place where a library uses another li
 5. **`gateway-service` and `inference-service` have no line at all.** Neither has a library, because no Java
    caller needs its types.
 6. **Each packet travels the line from a library to the service that implements it** — `api/auth` to
-   auth-service, `api/organization` to organization-service, and so on for the other four.
+   auth-service, `api/organization` to organization-service, and so on for the other five.
 7. **`api/model` has one consumer, model-service, which implements it.** inference-service reads the registry with a client
    and records of its own, so no line runs from `api/model` to it.
 
@@ -123,6 +127,7 @@ It contains no entity, no repository, no `@Service` and no `@SpringBootApplicati
 | `api/auth` | `AuthController` | `RegisterIn`, `LoginIn`, `TokenOut`, `ApiKeyIn`, `ApiKeyCreatedOut`, `ApiKeyOut`, `ApiKeyPrincipalOut` |
 | `api/organization` | `OrganizationController` | `OrganizationIn`, `OrganizationOut`, `MemberOut`, `TenantOut`; the enums `Role`, `Status`, `Tier` |
 | `api/model` | `ModelController` | `ModelIn`, `ModelOut`, `ModelPage`, `ModelLive`, `ModelSpec` (with `ReplicaSpec`, `ReasoningSpec`, `LimitsSpec`, `PrefillSpec`) |
+| `api/deployment` | `DeploymentController` | `DeploymentOut`, `LoadedModelOut`, `MachineOut` |
 | `api/usage` | `UsageController` | `UsageEventIn`, `UsageWindowOut`, `UsageTotalOut`, `UsageSummaryOut` |
 | `api/billing` | `BillingController` | `GrantIn`, `BalanceOut`, `Price`, `Overshoot` |
 
@@ -177,7 +182,7 @@ their types.**
   has nothing to gain from a typed client.
 
 The rule that falls out: a library exists where a Java caller and a Java implementation share types, and
-nowhere else. Six services, six libraries. `api/model` is the loosest fit: its Java callers today are the tests of model-service,
+nowhere else. Seven services, seven libraries. `api/model` is the loosest fit: its Java callers today are the tests of model-service,
 which build a Feign client from the interface so that a drift between `ModelResource` and `ModelController` fails the build.
 inference-service, the reader of the list, does not use it: it reads the registry with a `WebClient` and records of its own
 (`RegisteredModel`), as it reads usage-service's contract with its own `UsageEvent`. The pair follows the shape of the others, so that
@@ -191,7 +196,7 @@ update the submodule pointer in `back`, then rebuild the implementing service an
 either compiles or does not.
 
 That last step is where the arrangement pays for itself. CI runs `mvn -B verify` at the root, and the
-aggregator `pom.xml` lists all fifteen modules so the reactor builds them in dependency order: `api/account`
+aggregator `pom.xml` lists all seventeen modules so the reactor builds them in dependency order: `api/account`
 before `api/auth`, `api/organization` before the seven services that call it. A contract change that breaks a
 caller fails the build rather than a request.
 
@@ -205,7 +210,7 @@ them together, so there is no released-version negotiation to fall back on.
 tempt the implementer to change it unilaterally. A separate repository makes a contract change a visible event
 in its own history.
 
-**Records, not entities.** No `Out` record in any of the six libraries has a password field, a token hash or a
+**Records, not entities.** No `Out` record in any of the seven libraries has a password field, a token hash or a
 secret — `AccountOut` is `(id, name, email)`, `ApiKeyOut` carries a four-character `hint` and never the key
 itself, and `TenantOut` is `(id, status, tier)` with no name, and `ModelOut` never has the engine key (only the entries of the list that inference-service reads do). The wire shape is a deliberate subset of the
 table, and writing it down in a library is what keeps it a subset.
@@ -219,10 +224,10 @@ tests `ApiKeysTest` and `ApiKeyFormatTest` pin the behaviour.
 
 ## What would change it
 
-- **The key format is duplicated between `ApiKeys` and `ApiKeyFormat`.** Moving it into a sixth library would
+- **The key format is duplicated between `ApiKeys` and `ApiKeyFormat`.** Moving it into an eighth library would
   remove the duplication and give the gateway a dependency on a module whose only other purpose is to be
   implemented by a service it must not call synchronously.
-- **The libraries are unversioned and built from one reactor.** Fifteen modules in one build means a contract
+- **The libraries are unversioned and built from one reactor.** Seventeen modules in one build means a contract
   change rebuilds everything, which is safe and slow. Publishing them as versioned artifacts would make the
   upgrade explicit per consumer, at the cost of tracking which service is on which version.
 - **`url` placeholders are per-service configuration.** A service registry or discovery would replace them, and
@@ -236,4 +241,4 @@ tests `ApiKeysTest` and `ApiKeyFormatTest` pin the behaviour.
 - [OrganizationController.java](https://github.com/carmonaai/back/blob/main/api/organization/src/main/java/ai/carmona/organization/OrganizationController.java) — the six-consumer contract, in full.
 - [Price.java](https://github.com/carmonaai/back/blob/main/api/billing/src/main/java/ai/carmona/billing/Price.java) — the one type both sides of the money compute with.
 - [organization/pom.xml](https://github.com/carmonaai/back/blob/main/api/organization/pom.xml) — everything a library module is allowed to depend on.
-- [pom.xml](https://github.com/carmonaai/back/blob/main/pom.xml) — the fifteen modules the reactor builds in order.
+- [pom.xml](https://github.com/carmonaai/back/blob/main/pom.xml) — the seventeen modules the reactor builds in order.

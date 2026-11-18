@@ -2,8 +2,8 @@
 
 ## What it is
 
-Carmona is nine Spring Boot services behind a single gateway, one Postgres holding one schema per
-service, one Valkey holding the three checks that must not touch a database, and two model engines. Six of
+Carmona is ten Spring Boot services behind a single gateway, one Postgres holding one schema per
+service, one Valkey holding the three checks that must not touch a database, and two model engines. Seven of
 the services publish a contract library — a Feign interface and its `In`/`Out` records — that other services
 call. Nothing else is shared: no shared tables, no shared cache keys owned by two services, no Java model
 crossing a service boundary.

@@ -61,7 +61,8 @@ can happen next: the gateway writes a refusal itself, or the request reaches an 
 4. **`RateLimitFilter` charges a token bucket** keyed by the account or the API key, or by client IP when
    nobody is authenticated yet — one Lua script in Valkey, so replicas share the rate.
 5. **`IdentityHeadersFilter` removes every inbound identity header** and sets its own: `id-account`, or
-   `id-organization` + `id-api-key` + `tier`.
+   `id-organization` + `id-api-key` + `tier`. It also sets `gateway-held-ms`, the whole milliseconds since
+   `AccessLogFilter` accepted the request, and drops a client's copy of it like the rest.
 6. **The route is chosen and the call is placed** inside a per-route bulkhead and circuit breaker: a refusal
    here is the gateway's own response, and anything else goes to the upstream the route names.
 
@@ -69,14 +70,14 @@ can happen next: the gateway writes a refusal itself, or the request reaches an 
 
 | Order | Component | What it decides |
 |---|---|---|
-| 1 | `AccessLogFilter` | the request id, and the access line written on the way out |
+| 1 | `AccessLogFilter` | the request id, the moment the request was accepted (the start of the request's clock), and the access line written on the way out |
 | 2 | `V1RequestFilter` | framing, body size and credentials-in-URL, for `/v1/` only |
 | 3 | `OriginFilter` | a browser `POST` to the four cookie endpoints must come from a console origin |
 | 4 | Security chains | `apiKeys` on `/v1/**`, the JWT chain everywhere else |
 | 5 | `RateLimitFilter` | the flood brake, per caller |
 | 6 | `RouteBulkheadFilter` | at most `max-concurrent` calls to this upstream, refused rather than queued |
 | 7 | `CircuitBreaker` | the route's breaker; with no fallback route, an open breaker reaches `UpstreamFailureHandler`, which writes the 503 |
-| 8 | `IdentityHeadersFilter` | the headers the upstream is allowed to trust |
+| 8 | `IdentityHeadersFilter` | the headers the upstream is allowed to trust, and `gateway-held-ms` |
 | 9 | `NettyRoutingFilter` | the call itself, with the route's `response-timeout` |
 
 `AccessLogFilter`, `V1RequestFilter` and `OriginFilter` are `WebFilter`s, outside the gateway's routing
@@ -160,8 +161,17 @@ Routes live in `src/main/resources/application.yaml`; there is no `lb://` anywhe
 | `api-keys` | three API-key paths, `{id}` and `{id}/rotate` separately | `http://auth:8080` | 15 s | — |
 | `billing-balance` | `GET /billing/organizations/{id}/balance` | `http://billing:8080` | 15 s | — |
 | `usage-summary` | `GET /usage/organizations/{id}/summary` | `http://usage:8080` | 15 s | — |
+| `deployments` | `GET` `/organizations/{organization}/deployments` and `.../deployments/{name}` | `http://deployment:8080` | 15 s | — |
+| `usage-deployment` | `GET` of a deployment's `.../requests`, `.../requests/{requestId}` and `.../window`, under `/usage/organizations/{organization}/deployments/{name}` | `http://usage:8080` | 30 s | — |
 | `inference` | `/v1/chat/completions`, `/v1/models` | `http://inference:8080` | 660 s | 64 |
 | `batch` | the Files and Batch paths | `http://batch:8080` | 60 s | 16 |
+
+The two deployment routes are reads only, for any member of the organization. `deployments` has `Method=GET` and no path below
+the deployment, so the operator's calls on deployment-service (create, connect or replace the engine, stop, end) have no
+route and no way in from outside. `usage-deployment` names its three paths one by one rather than `/**`, and its 30 s is the one
+route above 15 s that is not a `/v1` route: a window read runs its statements one after the other, and usage-service
+stops starting new ones 20 s after the call reached it ([Metering](metering.md#the-window-read)). Neither route has a
+bulkhead or a breaker of its own.
 
 Every route sets `connect-timeout: 1000`; the global `httpclient.response-timeout` of 15 s is the floor for a
 route that forgot to declare one. The two `/v1` routes also carry `RemoveRequestHeader=Authorization` — the
@@ -214,7 +224,9 @@ timeout; a failed connect counts as a breaker failure. The routes with no breake
 to its own file and nothing to stdout: logger `access`, `/var/log/carmona/access.log`, daily, gzipped,
 `maxHistory` 184 days. Marco Civil da Internet art. 15 requires six months, and 184 days satisfies it. The
 line carries `request_id`, `method`, `path` (no query string), `status`, `duration_ms`, `client_ip`,
-`client_closed` when the caller hung up, and whichever ids the request had; `/actuator/**` is skipped.
+`client_closed` when the caller hung up, and whichever ids the request had; `/actuator/**` is skipped. The `request_id` is the one on the request's record in
+usage-service and on inference-service's own log lines for it (a failed request leaves a line there with the same key), so
+one search finds all three.
 
 ## Why it is like this
 

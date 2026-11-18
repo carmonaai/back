@@ -2,7 +2,7 @@
 
 ## What it is
 
-Nine Spring Boot services, one Postgres, one Valkey and two model engines, all on a single Docker network.
+Ten Spring Boot services, one Postgres, one Valkey and two model engines, all on a single Docker network.
 Exactly one container publishes a port: the gateway. Everything else — including every management port — is
 reachable only from inside, so the topology of this system is mostly the story of what the gateway forwards
 and what it refuses to.
@@ -137,7 +137,7 @@ appears to pass behind a service rather than through it.</figcaption>
 | `batch-service` | `batch` | `file`, `batch`, `batch_line` | `/v1/files**`, `/v1/batches**` |
 | `inference-service` | — | nothing durable; usage goes to a Valkey stream | `/v1/chat/completions`, `/v1/models` |
 
-Seven services hold a schema in one Postgres, created by Flyway and versioned by date; Hibernate only validates.
+Eight services hold a schema in one Postgres, created by Flyway and versioned by date; Hibernate only validates.
 Two hold none — the point of `/v1` is that nothing on the token path reads a database
 ([schemas](../data/schemas.md), [tenancy](../data/tenancy.md)).
 
@@ -154,14 +154,14 @@ Valkey holds things that expire or are rebuilt, on purpose:
 
 ## The container set
 
-`docker/compose.yaml` runs fifteen containers; `docker/compose.gpu.yaml` adds a sixteenth.
+`docker/compose.yaml` runs sixteen containers; `docker/compose.gpu.yaml` adds a seventeenth.
 
 | Container | Image or build | Notes |
 |---|---|---|
-| `db` | `postgres:17.11-bookworm` (digest-pinned) | one database, seven schemas |
+| `db` | `postgres:17.11-bookworm` (digest-pinned) | one database, eight schemas |
 | `valkey` | `valkey/valkey:9.0.6` (digest-pinned) | `--appendonly yes --appendfsync everysec` |
 | `mailpit` | `axllent/mailpit:v1.31.4` | verification and reset mail, locally |
-| `account`, `organization`, `model`, `auth`, `usage`, `billing`, `inference`, `batch`, `gateway` | `build: ../api/<name>/Dockerfile` | one jar per service, non-root, port 8080, management 8081 |
+| `account`, `organization`, `model`, `deployment`, `auth`, `usage`, `billing`, `inference`, `batch`, `gateway` | `build: ../api/<name>/Dockerfile` | one jar per service, non-root, port 8080, management 8081 |
 | `llama`, `vllm` | `ghcr.io/ggml-org/llama.cpp:server`, `vllm/vllm-openai:v0.30.0` | CPU and GPU engines, one model each |
 | `prometheus` | `prom/prometheus:v3.15.0` | scrapes every `:8081/actuator/prometheus`, 15-day retention |
 | `grafana` | `grafana/grafana:13.2.3` | dashboards provisioned from `docker/grafana` — both unpublished |
@@ -192,7 +192,7 @@ from compose, and a summary taken while billing is down answers tokens with a `n
 
 ## Why it is like this
 
-- **One database, many schemas.** A laptop runs one Postgres comfortably; seven would be seven more containers for
+- **One database, many schemas.** A laptop runs one Postgres comfortably; eight would be eight more containers for
   no isolation the prototype needs. Schemas keep the boundary enforceable (a query naming another schema's
   table is visible in review) without paying for separate instances; [boundaries](boundaries.md) names the
   rejected alternative.

@@ -1,7 +1,7 @@
 {
   "uid": "carmona-slo",
   "title": "Carmona — SLO & golden signals",
-  "description": "Availability, traffic, errors and the inference latency SLOs (TTFT p95 <= 2 s, ITL p95 <= 100 ms; inference-plan.md §8). Panels reading carmona_inference_* are empty until task A publishes those metrics (see references/observability.md §gaps).",
+  "description": "Availability, traffic, errors and the inference latency SLOs (TTFT p95 <= 2 s, ITL p95 <= 100 ms; inference-plan.md §8). The carmona_inference_* metrics are published by inference-service.",
   "tags": ["carmona", "slo"],
   "timezone": "browser",
   "editable": false,
@@ -158,7 +158,7 @@
       "id": 8,
       "type": "timeseries",
       "title": "Inter-token latency p95",
-      "description": "SLO: p95 at or below 100 ms (TPOT; phase-3 bench measured 24 ms at C = 4, and 100 ms is what the goodput definition allows). The line on the panel is 0.1 s. Needs carmona_inference_itl_seconds — NOT PUBLISHED YET (task A).",
+      "description": "SLO: p95 at or below 100 ms (TPOT; phase-3 bench measured 24 ms at C = 4, and 100 ms is what the goodput definition allows). The line on the panel is 0.1 s. Reads the record itl:p95_5m, over carmona_inference_itl_seconds.",
       "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"h": 7, "w": 8, "x": 0, "y": 16},
       "fieldConfig": {
@@ -233,7 +233,7 @@
       "id": 12,
       "type": "timeseries",
       "title": "In-flight vs capacity",
-      "description": "How close each model is to what admission allows. The gap between the two lines is the reserved share of the other tiers: trial C/2, standard 85%, enterprise C + q (plan §7). Needs carmona_inference_inflight / _capacity — NOT PUBLISHED YET (task A).",
+      "description": "How close each model is to what admission allows. The gap between the two lines is the reserved share of the other tiers: trial C/2, standard 85%, enterprise C + q (plan §7). Reads carmona_inference_inflight and carmona_inference_capacity.",
       "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"h": 7, "w": 8, "x": 0, "y": 24},
       "fieldConfig": {
@@ -303,7 +303,7 @@
       "id": 15,
       "type": "timeseries",
       "title": "Tokens/s by mode and kind",
-      "description": "What the platform is actually selling: output tokens are the billable ones, input tokens are the cached prompt work. mode sync|batch comes from the contract. Needs carmona_inference_tokens_total — NOT PUBLISHED YET (task A).",
+      "description": "What the platform is actually selling: output tokens are the billable ones, input tokens are the cached prompt work. mode sync|batch comes from the contract. Reads carmona_inference_tokens_total and carmona_inference_requests_total.",
       "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"h": 7, "w": 12, "x": 0, "y": 31},
       "fieldConfig": {
