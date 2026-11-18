@@ -157,7 +157,7 @@ stack, run the smoke test.</figcaption>
    `Contents: read-only`, on the module repos and not on `back`.
 5. **`actions/checkout@v7` with `persist-credentials: false`** clones `back` with the default `GITHUB_TOKEN`,
    which cannot read the siblings; the fetch step then checks access module by module before initialising.
-6. **`mvn -B verify`** on Temurin 25, after `bash docker/check-copies.sh` has passed, builds all fifteen modules in dependency order and runs the unit tests
+6. **`mvn -B verify`** on Temurin 25, after `bash docker/check-copies.sh` and the step that runs `docker/check-prometheus.sh` and `docker/check-dashboards.sh` (the alert rules' tests and the dashboards, [Observability](observability.md#what-checks-the-rules-and-the-dashboards)) have passed, builds all fifteen modules in dependency order and runs the unit tests
    and the Testcontainers integration tests.
 7. **A generated `.env`, `docker compose up -d --build --wait` and `bash smoke.sh`** — the same three commands
    this page's sibling tells a person to run, on the CPU engine, with fresh secrets.

@@ -11,7 +11,7 @@ measured, what the numbers mean, and — with the same weight — what is not me
   <title id="dobs-title">A metric's path from the service to an alert nobody is sent</title>
   <desc id="dobs-desc">inference-service publishes its indicators on the management port; the engine exposes
   its own counters. Prometheus scrapes both every fifteen seconds and evaluates its rule file every sixty
-  seconds, producing recording rules and twenty-three alerts. Grafana draws provisioned dashboards and lists those
+  seconds, producing recording rules and twenty-four alerts. Grafana draws provisioned dashboards and lists those
   alert rules and their firing state. There is no Alertmanager, so a firing rule reaches no destination.</desc>
 
   <defs>
@@ -51,7 +51,7 @@ measured, what the numbers mean, and — with the same weight — what is not me
   <g class="cmn-node cmn-node--accent" id="dobs-rules" aria-labelledby="dobs-rules-label">
     <rect x="350" y="80" width="120" height="58" rx="10"/>
     <text id="dobs-rules-label" x="410" y="100">rules.yml</text>
-    <text class="cmn-sub" x="410" y="118">23 alerts</text>
+    <text class="cmn-sub" x="410" y="118">24 alerts</text>
   </g>
 
   <g class="cmn-node cmn-node--accent" id="dobs-grafana" aria-labelledby="dobs-grafana-label">
@@ -112,7 +112,7 @@ Step 5 is where it stops: a firing rule reaches no destination, because none has
    same port that was never published and never routed before metrics existed.
 2. **Prometheus scrapes every service every 15 s**, one job per service so the `job` label carries the service
    name, plus the engine's own `/metrics` with a bearer token read from a file written at container start.
-3. **`rules.yml` is evaluated every 60 s**: twelve recording rules (three latency, five engine, four prompt cache) and twenty-three alerts.
+3. **`rules.yml` is evaluated every 60 s**: thirteen recording rules (four latency, five engine, four prompt cache) and twenty-four alerts.
 4. **Grafana draws three provisioned dashboards** and lists the alert rules and their state, with
    `allowUiUpdates: false`, so a change made in the browser does not survive the next restart.
 5. **Nothing leaves the machine.** There is no Alertmanager and no destination, so a firing rule is a colour on
@@ -162,9 +162,22 @@ nothing is in flight. `carmona_inference_body_refused_total` counts the requests
 because the budget had no room. A body refused for its size (`413 request_too_large`) is read to its end and thrown away
 before the reservation, so it reserves nothing and is not in either meter: it is one more 413 in
 `http_server_requests_seconds_count`. Neither has a tag, because the refusal happens before the request's model is known,
-and no alert or panel reads them yet ([gaps](../reference/gaps.md)). The reasoning tokens and the first-output time of
-a request are not metrics: they travel in the usage event ([Metering](../services/metering.md)), and the existing
+and no alert or panel reads them yet ([gaps](../reference/gaps.md)). The reasoning tokens of a request are not a metric: they travel in the usage event ([Metering](../services/metering.md)), and the existing
 `carmona_inference_tokens_total` still counts output tokens as the engine did, with the reasoning inside them.
+
+The three timers that follow a request take the same values the request's record stores, so a number read here and the one the app shows
+for the same request agree, and all three count from the same moment, the gateway accepting the request ([Inference](../services/inference.md#the-usage-event-it-produces)):
+
+- **`carmona_inference_ttft_seconds`** runs from the gateway's acceptance to the first token of any kind, reasoning included, and only for a streamed request: a
+  whole answer has no first token and leaves no sample. The gateway's own time and the receiving of the body are inside it, so it reads longer than before this change, and
+  a model that thinks first reads shorter than its first answer token. The buckets are the same (0.05 to 30 s).
+- **`carmona_inference_first_output_seconds`** runs from the start of the engine call to that same first token, by `cache`. It no longer holds the queue wait, so a warm
+  prefill may land in the first bucket (under 0.1 s); the first measured GPU day says whether a finer bucket is needed.
+- **`carmona_inference_request_seconds`** runs from the gateway's acceptance to the end of every request that reached the engine, whatever its end.
+
+The counter `carmona_inference_refusal_records_left_out_total{model,reason}` counts the refusal records the service did not keep, by `cap`, `buffer_full` or
+`post_failed` ([Inference](../services/inference.md#refusal-records-and-the-request-id-in-the-logs)). Its three series for each organization's own model start at 0, so the first loss is
+an increase of 1 for `increase()` and not the series' first sample. `RefusalRecordsLost` reads the last two reasons; `cap` is the designed limit and is drawn on the dashboard instead.
 
 The four `carmona_inference_models…` meters exist only while the model registry is on (`carmona.inference.registry.url` is set) and carry
 ids and counts only: `…_age_seconds` is the seconds since inference-service last read model-service's list (an "unchanged" answer is a read; before the
@@ -175,7 +188,7 @@ never a label) and `…_refresh_total` the reads by how they ended, at 0 from th
 
 The buckets are not Micrometer's defaults: a default timer stops at 30 seconds, and a TTFT past the last bucket
 is a p99 that reads as the bucket edge — the one number an operator most needs during an incident. `2` is
-present explicitly because the SLO is "TTFT ≤ 2 s". The timers publish buckets rather than client-side
+present explicitly because the SLO is "TTFT ≤ 2 s"; the exposition writes it `2.0`, which is how a rule selects it. The timers publish buckets rather than client-side
 quantiles because Micrometer's Prometheus registry stops publishing `publishPercentiles` as soon as a timer
 carries histogram boundaries, and client-side quantiles do not aggregate across replicas anyway;
 `histogram_quantile()` over the buckets is what the dashboards and rules compute.
@@ -198,6 +211,10 @@ counted under and is not in these numbers at all; the ordinary HTTP metrics stil
 This is a rule, not a convention, and `Metrics` states it in its own class comment: *ids and counts only: an
 organization, account, API key, request id or prompt never becomes a tag.* Per-organization numbers live in
 usage data, where they already exist, are already scoped by a membership check, and are already billed from.
+
+One thing the rule has to say precisely. The `model` label of an organization's own deployment is `org-<organization id>/<name>`, so an
+organization's **id**, never its name, is part of that label and reaches a metric that way. What never becomes a label is an account, a key, a request id or any
+text of a request.
 
 Two reasons. Cardinality: an organization id on a latency timer multiplies every series by the customer count,
 which is how a 512 MB Prometheus falls over. And privacy: a metric label is the hardest thing in a system to
@@ -237,19 +254,24 @@ Both are in `docker/compose.yaml`, pinned by digest, on the internal network, wi
 local TSDB, capped at 512m/0.5 cpu. `grafana` (`grafana/grafana:13.2.3`) provisions its datasource, three
 dashboards and the Prometheus alert list from files, capped at 384m/0.5 cpu.
 
-**Carmona — SLO & golden signals** has availability, request rate and error share; TTFT p50/p95/p99 against
-the 2 s line and TTFT goodput; ITL p95 against 100 ms; queue wait; whole-request p95/p99; in-flight against
+**Carmona — SLO & golden signals** has availability, request rate and error share; TTFT p50/p95/p99 (gateway acceptance to first token) against
+the 2 s line and TTFT goodput, the share of streamed requests whose first token came within 2 s (`ttft:goodput_5m`, the bucket `le="2.0"`); ITL p95 against 100 ms; queue wait; whole-request p95/p99; in-flight against
 capacity; engine running/waiting and KV cache; tokens per second by mode and kind; engine preemptions; and, in a row of its own, the
-prompt cache hit ratio (30 m and 15 m, against the 0.30 line of the alert) and the prompt tokens per second split into hit and miss.
+prompt cache hit ratio (30 m and 15 m, against the 0.30 line of the alert) and the prompt tokens per second split into hit and miss. Three panels came with the request record: panel 20, the first output p95 by cache
+(`first_output:p95_5m`, engine call to first token), and, in a row of its own, "Refusal records (best effort: a missing row is not an outage)" (row 21), panel 22,
+the records left out by reason, and panel 23, the records lost in the last hour (`buffer_full` and `post_failed` only: zero is healthy, and `cap` is not counted
+because it is the designed limit). Panels 6, 7 and 10 say in their titles and descriptions what they measure now; panels 8, 12 and 15 still carry their
+"NOT PUBLISHED YET" mark in their descriptions, and the dashboard's own description still speaks of `carmona_inference_*` panels that are empty until their metrics
+are published, which is no longer true of most of them.
 **Carmona — service
 RED** has one repeated row per service — rate by route, error share against the 5 % line, duration max and
 mean — plus a gateway row by `routeId`. **Carmona — revenue integrity** has 402s served, usage events received
 against `/v1` requests served, events rejected in the last hour, and a collapsed row for the four signals no
 service publishes yet.
 
-Twenty-three alert rules, each with its own what-to-do text in `rules.yml`, repeated one row per alert in the
+Twenty-four alert rules (37 rules with the thirteen recording rules), each with its own what-to-do text in `rules.yml`, repeated one row per alert in the
 [observability reference](https://github.com/carmonaai/back/blob/main/.claude/skills/carmona-architecture/references/observability.md).
-They fall in seven groups. *Is it up:* `ServiceDown` (2 m), `ReplicatedServiceAbsent` (2 m), `ReplicaMissing`
+They fall in eight groups. *Is it up:* `ServiceDown` (2 m), `ReplicatedServiceAbsent` (2 m), `ReplicaMissing`
 (1 m; the `inference`, `gateway`, `engine` and `vllm` jobs) and `EngineUnreachable` (1 m). *Is it fast enough:*
 `EngineQueueSustained` (2 m with the engine's waiting requests at the queue places inference-service admits — not a
 constant), `QueueWaitHigh` (p95 above 1 s for 10 m), `ErrorShareHigh` (5 % over 5 m) and `PayingTierRefusals` (5 %
@@ -259,7 +281,7 @@ right:* `ReconciliationMismatch` (any occurrence), `UsageIngestionStalled` (5 m)
 there:* `LeaseStoreDown` (1 m; a warning, because requests are still served on each replica's share). *The engine
 replicas and the request guard:* `ReplicaUnhealthy` (1 m), `ReplicaWentUnhealthy` (any transition in 10 m),
 `ReplicaDrainOverdue` (2 m), `EngineContractMismatch` (5 m), `ControlTokensInContent` (a signal, not a page) and
-`GuardRejections` (ten refusals in ten minutes). The metrics of the replica and guard alerts come from features
+`GuardRejections` (ten refusals in ten minutes). *The refusal records:* `RefusalRecordsLost` (an `info` alert with no `for`: one record lost in the last 10 minutes, by `buffer_full` or `post_failed`, summed per model and reason over the replicas; a loss means a customer's list of requests misses rows and is not told, and the refusal itself was answered as always). The metrics of the replica and guard alerts come from features
 that are off or neutral by default (the health gate is off), and an alert on a metric that does not exist stays silent. *The registered models:* `ModelListStale` (the last good read of the list is over 15 s old, for 1 m; three of the default 5 s refresh
 intervals) and `ModelEntrySkipped` (the last read refused at least one entry, for 5 m), both on meters that exist only while the registry is on, so with
 the registry off they stay silent too. *Is the cache doing its job:*
@@ -280,6 +302,21 @@ The engine's `/metrics` takes the engine key on llama.cpp, and Prometheus expand
 scrape config. The container's entrypoint therefore writes the key from the environment to `/tmp/engine-key`
 and then `exec`s Prometheus, which reads it through `bearer_token_file`. The key is never in a repo file.
 
+## What checks the rules and the dashboards
+
+Two scripts in `docker/` prove the files without a running stack, and CI runs both in one step, "Check the rules, their tests and the dashboards", after "Check the copies agree" and
+after the modules are fetched (the second needs the Java):
+
+- `docker/check-prometheus.sh` checks the config, runs `promtool test rules` on `rules.test.yml` in the pinned Prometheus image (111 cases against the 37 rules) and checks
+  the DNS-discovered jobs. The cases for the refusal records cover the alert (it fires on a loss of either reason, including the first loss of a series that starts at 0, resolves ten minutes after the last loss,
+  stays quiet for a counter that is not moving and while only the cap is reached) and the two records `first_output:p95_5m` and `ttft:goodput_5m`.
+- `docker/check-dashboards.sh` checks each file in `grafana/dashboards`: valid JSON, a uid, unique panel ids, every panel on the `prometheus` datasource with an expression, every expression parsed by
+  `promtool` in the pinned image, and every `carmona_` name a panel or `rules.yml` uses found as a string literal in the Java of `api/*/src/main`. A metric renamed in Java therefore fails
+  here and not on the operator's screen. It needs `jq` and Docker, writes no file and starts no stack. A name that ends in `_` (`carmona_billing_`, `carmona_engine_`, `carmona_inference_`,
+  `carmona_usage_`) is taken for a family named in prose and passes, so a truncated name inside an expression would pass both promtool and this check.
+
+What neither proves is that a panel draws in Grafana: none of the new ones has been seen drawn, because the admin password lives in `docker/.env`.
+
 ## The access log is a separate concern
 
 It is deliberately not a metric and not an event. `AccessLogFilter` is a `WebFilter` at
@@ -297,6 +334,9 @@ exists.
 Named rather than papered over. An empty panel that says so is a finding; a substitute metric that animates is
 a lie.
 
+- **A window read after a database restart.** The first count at the record limit (1,500,000 records) took 6.44 s under a generic plan, measured once on a database restarted with
+  empty buffers: past the 5 s cap of every statement, so it would be named `timeout`, and a read that passes the cap or the deadline is named `timeout` in the parts that needed it and never answered wrong
+  ([Metering](../services/metering.md#the-window-read)). The same count warm took 0.83 s (measured at 3,000,000). Nothing was changed for it. If the proof run meets `timeout` on the first window read after a restart, this is the first place to look.
 - **Tracing.** `spring-boot-starter-opentelemetry` is not on any classpath. `trace_id`/`span_id` in the JSON
   logs remain the only correlation between services, and the gateway strips `traceparent`, `tracestate` and
   `baggage` from inbound requests. A real gap with a real cost: an agent, a collector, a backend, a sampling
@@ -329,7 +369,7 @@ rules live in `docker/prometheus/rules.yml`. A replaced container loses nothing,
 rather than a click.
 
 **Buckets, not quantiles.** Explicit `le` boundaries make `histogram_quantile()` possible in PromQL, aggregate
-across replicas, and let an alert read a share — `ttft:goodput_5m` is the `le="2"` bucket divided by the count,
+across replicas, and let an alert read a share — `ttft:goodput_5m` is the `le="2.0"` bucket (Prometheus stores a whole-number bound with a decimal, and the old selector `le="2"` returns nothing) divided by the count,
 which is the goodput definition the benches already use.
 
 ## What would change it
@@ -350,7 +390,7 @@ which is the goodput definition the benches already use.
 - [Reconciler.java](https://github.com/carmonaai/back/blob/main/api/inference-service/src/main/java/ai/carmona/inference/Reconciler.java)
   — the tolerance, the engine counter mappings and the mismatch gauge.
 - [rules.yml](https://github.com/carmonaai/back/blob/main/docker/prometheus/rules.yml) — the recording rules and
-  all twenty-three alerts, each with what an operator should do about it.
+  all twenty-four alerts, each with what an operator should do about it.
 - [prometheus.yml](https://github.com/carmonaai/back/blob/main/docker/prometheus/prometheus.yml) — the scrape
   jobs, the 15 s interval and the engine's token file.
 - [observability.md](https://github.com/carmonaai/back/blob/main/.claude/skills/carmona-architecture/references/observability.md)

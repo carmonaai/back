@@ -233,7 +233,7 @@ console, and no Kubernetes or second replica. Password resets have a per-IP thro
 **The flood brake is Valkey-backed** (one Lua token bucket, shared by replicas) and answers an OpenAI-shaped
 429 with `retry-after` and `retry-after-ms`; only its fail-open path keeps an in-memory bucket, for the case
 where Valkey itself is unreachable. **Observability exists**: `docker/prometheus/rules.yml` holds the
-recording rules and 23 alerts and `docker/grafana/dashboards/` the three dashboards, built 2026-10-05 and extended since;
+recording rules and 24 alerts and `docker/grafana/dashboards/` the three dashboards, built 2026-10-05 and extended since;
 what is missing is an **Alertmanager destination**, so the rules fire into nothing. Tracing is not wired.
 Per-service p95/p99 needs
 `management.metrics.distribution.percentiles-histogram.http.server.requests: true` in each service. Full list
