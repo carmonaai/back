@@ -14,6 +14,11 @@
 # puts it back (503 engine_unavailable while drained; a running stream finishes), and greps every log and a database dump for a canary string.
 # Late in the run it registers a model on model-service (the shared secret) on a second simulator that it starts for the purpose (engine-own, removed at the end of that section),
 # calls it with its owner's key, shows that another organization's key cannot, and checks that the owner is not charged for it (ENGINE=sim only).
+# Before the admission section it also connects that same simulator as a deployment of the first organization (round OB, ENGINE=sim only):
+# the operator's calls make and connect it (the shared secret), the reads of the deployment, of its requests and of its refusals are
+# asserted through the gateway (the window read is not: its block comes with its milestone), as are the new columns of its usage rows, and
+# closing the organization ends it. It starts engine-own for that model name first and removes it at the end of the section, so `docker
+# compose --profile own-engine down` cleans a killed run, as for the next section.
 # Run it against another compose project with COMPOSE_PROJECT_NAME=... (compose reads it; the stack must run under it).
 # On the two-simulator stack (compose.fleet.yaml) run it with FLEET=1, which adds that file to every compose call and asserts that two replicas are listed.
 # Continue-on-fail: a failed assertion is counted (note_fail) and the run goes on, so one run lists every failure; the
@@ -22,9 +27,10 @@
 # The simulator is the patched one (docker/sim/build.sh builds the image compose.yaml uses): it notices a client that hangs
 # up (G1 of work/prototype-sim/FINDINGS-contract.md) and reports usage on every chunk (G3), so the engine-idle-after-a-
 # hang-up and cancelled-stream-billed assertions run on it as on vLLM. Against upstream's own simulator image
-# (ENGINE_IMAGE=ghcr.io/llm-d/llm-d-inference-sim:v0.11.4@sha256:d60f0fb0... when the stack was started) run with SIM_STOCK=1:
-# the two are then printed as `skip-sim` with their reason and counted, and without it they fail, which is how this script
-# shows the patch matters.
+# (ENGINE_IMAGE=ghcr.io/llm-d/llm-d-inference-sim:v0.11.4@sha256:d60f0fb0... when the stack was started) run with SIM_STOCK=1, after taking
+# --enable-per-request-metrics out of the commands of `engine` and `engine-own` in compose.yaml (the stock image does not start with it, and
+# compose.yaml says so beside the flag): the two are then printed as `skip-sim` with their reason and counted, as are the engine-report
+# assertions of the deployments section, and without it they fail, which is how this script shows the patch matters.
 set -uo pipefail
 NFAIL=0
 NSKIP=0
@@ -197,6 +203,7 @@ expect 401 "${K[@]}" "$G/v1/models"                                  # revoked: 
 ## API-key lookups fail closed when valkey is down
 expect 201 "${A[@]}" "${J[@]}" -X POST "$G/organizations/$org/api-keys" -d '{"name":"smoke-2"}'
 key2=$(json key)
+key2_id=$(json id)
 "${DC[@]}" stop valkey >/dev/null 2>&1
 expect 503 -H "Authorization: Bearer $key2" "$G/v1/models"
 "${DC[@]}" up -d --wait valkey >/dev/null 2>&1
@@ -319,6 +326,316 @@ rid=$(curl -s -D - -o /dev/null "${K2[@]}" "${J[@]}" -H 'X-Request-Id: client-ch
   | sed -nE 's/^x-request-id: ([0-9a-f-]{36}).*/\1/ip' | head -1)
 [[ -n $rid ]] && echo "ok   200  X-Request-Id $rid (the gateway's)" || { echo "FAIL no gateway request id"; note_fail; }
 
+# Names of the deployments section, of the stranger's reads and of the canary below. engkey is the engine's key as the operator states it:
+# no log, no table and no answer may hold it. rfrom is a start of range that every request of this run is after. The four reads of a
+# deployment that a console account has: the list, one deployment, the list of its requests and one request (the window read has no block
+# here: it comes with its milestone).
+dep=smoke-dep
+DM="org-$org/$dep"
+engkey="CANARY-engine-key-$RANDOM$RANDOM$RANDOM"
+rfrom=$(date -u -d '-2 hours' +%Y-%m-%dT%H:%M:%SZ)
+nil=00000000-0000-0000-0000-000000000000
+RQ="$G/usage/organizations/$org/deployments/$dep/requests"
+reads=("$G/organizations/$org/deployments" "$G/organizations/$org/deployments/$dep" "$RQ?from=$rfrom" "$RQ/$nil")
+# chat_for MODEL CONTENT MAX_TOKENS [EXTRA JSON]: a chat request body for any model.
+chat_for() { echo "{\"model\":\"$1\",\"messages\":[{\"role\":\"user\",\"content\":\"$2\"}],\"max_tokens\":$3${4:-}}"; }
+# The states of the drain live in Valkey and outlive this script. However it ends from here on (a Ctrl-C, a killed run, a docker call that
+# fails), the replicas it drained are put back, or every client of the stack and the next run of this script are answered 503
+# engine_unavailable. The deployments section drains the one replica of its own model (dep_drained), the drain section after it those of $M
+# (drained_by_smoke); the trap is set before both.
+drained_by_smoke=0
+dep_drained=0
+undrain() {
+  local r
+  [[ $dep_drained == 1 ]] && "${DC[@]}" exec -T tools curl -s -o /dev/null -X POST -H 'Content-Type: application/json' \
+    -d "{\"model\":\"$DM\",\"replica\":0,\"state\":\"READY\"}" http://inference:8081/actuator/drain || true
+  [[ $drained_by_smoke == 1 ]] || return 0
+  for r in $(seq 0 $((${replicas:-1} - 1))); do
+    "${DC[@]}" exec -T tools curl -s -o /dev/null -X POST -H 'Content-Type: application/json' \
+      -d "{\"model\":\"$M\",\"replica\":$r,\"state\":\"READY\"}" http://inference:8081/actuator/drain || true
+  done
+}
+longout=$(mktemp)
+trap 'undrain; rm -f "$BODY" "$HDRS" "$longout"' EXIT
+
+## Deployments (round OB): an engine connected as a deployment of $org, and what its organization reads about it: the deployment (the list
+## and one), its requests (the list and one) with their refusals, and the columns the usage rows have now. The operator's calls (create,
+## connect) have no gateway route, as the registry's have none; the reads go through the gateway with the console account. Before the
+## This section sits before the Admission one on purpose: this one calls its model until the rate limit, and the usage of $org is counted and billed by the sections
+## after it. The engine is engine-own, started here for the deployment's model name and removed at the end (the registered-model section
+## starts it again for its own name); a run that is killed here leaves it.
+if [[ $ENGINE != sim ]]; then
+  echo "skip  the deployments section starts a simulator engine: it runs with ENGINE=sim only"
+else
+  # dep_call METHOD PATH [JSON]: a call to deployment-service from the tools container with the shared secret; the status goes to $depcode
+  # and the answer to $BODY. dep_want STATUS METHOD PATH [JSON] asserts the status and prints the method and the path, never the body (the
+  # connect's holds an engine key).
+  dep_call() {
+    local out
+    out=$(MSYS_NO_PATHCONV=1 "${DC[@]}" exec -T tools curl -s -w '\n%{http_code}' -H @/run/secrets/internal_token \
+      -H 'Content-Type: application/json' -X "$1" ${3:+-d "$3"} "http://deployment:8080$2")
+    depcode=${out##*$'\n'}
+    printf '%s' "${out%$'\n'*}" > "$BODY"
+  }
+  dep_want() {
+    local want=$1; shift
+    dep_call "$@"
+    if [[ $depcode == "$want" ]]; then echo "ok   $want  $1 $2 on deployment-service"
+    else echo "FAIL want $want got $depcode: $1 $2 on deployment-service"; head -c 300 "$BODY"; echo; note_fail; fi
+  }
+  # body_has WHAT PATTERN...: the last answer ($BODY) matches every extended pattern, or one FAIL names WHAT and the first that it does not
+  # match.
+  body_has() {
+    local what=$1 p; shift
+    for p in "$@"; do
+      grep -qE -- "$p" "$BODY" || { echo "FAIL $what: the answer lacks $p"; head -c 400 "$BODY"; echo; note_fail; return 0; }
+    done
+    echo "ok   $what"
+  }
+  # The names of the stages of the last answer, in order; and stage_numbers WHAT STAGE FIELD...: that stage holds each FIELD as a number (0
+  # is one, null is not): the engine's own report reached the record. The stock simulator has no report.
+  stage_names() { grep -o '"stage":"[a-z_]*"' "$BODY" | cut -d'"' -f4 | paste -sd, -; }
+  stages_are() {   # stages_are LIST: the stages of the last answer are exactly these, in order
+    [[ $(stage_names) == "$1" ]] && echo "ok   its stages: $1" || { echo "FAIL its stages are '$(stage_names)', want $1"; note_fail; }
+  }
+  stage_numbers() {
+    local what=$1 obj f; shift
+    [[ ${SIM_STOCK:-0} == 1 ]] && { skip_sim "$what" "the stock simulator sends no engine report"; return 0; }
+    obj=$(grep -o "{\"stage\":\"$1\"[^}]*}" "$BODY"); shift
+    for f in "$@"; do grep -qE "\"$f\":[0-9]" <<<"$obj" || { echo "FAIL $what: no number for $f in {$obj}"; note_fail; return 0; }; done
+    echo "ok   $what"
+  }
+  # lookup ID WAIT: GET the request of the deployment, its status to $code and the answer to $BODY, for up to WAIT seconds while it is not a
+  # 200 (the usage event and the refusal record leave inference-service once a second).
+  lookup() {
+    local until=$((SECONDS + $2))
+    while :; do
+      code=$(curl -s -o "$BODY" -w '%{http_code}' "${A[@]}" "$RQ/$1")
+      [[ $code == 200 || $SECONDS -ge $until ]] && break
+      sleep 0.5
+    done
+  }
+  # dsend CURL-ARGS...: a chat with the key (the body is in the arguments); the status to $got, the request id to $rid_last, the code of the
+  # error to $got_code. drefused STATUS CODE: that answer must be this refusal (or one FAIL says what came back, the answer is not printed);
+  # the id and what was sent are kept.
+  dsend() {
+    got=$(curl -s -o "$BODY" -D "$HDRS" -w '%{http_code}' "${K2[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" "$@")
+    rid_last=$(sed -nE 's/^x-request-id: ([0-9a-f-]{36}).*/\1/ip' "$HDRS" | tr -d '\r' | head -1)
+    got_code=$(grep -o '"code":"[a-z_]*"' "$BODY" | head -1 | cut -d'"' -f4)
+  }
+  drefused() {
+    rr_id+=("$rid_last"); rr_status+=("$1"); rr_code+=("$2")
+    [[ $got == "$1" && $got_code == "$2" ]] && echo "ok   $1  refused with $2" \
+      || { echo "FAIL want $1 $2 got $got ${got_code:-no code}"; note_fail; }
+  }
+  # urow ID: the columns of the request's usage row, for a FAIL (a null is empty); usage_row WHAT ID CONDITION: exactly that one row of an
+  # answered request meets the condition, or one FAIL with its columns.
+  urow() {
+    sql "SELECT (streamed, http_status, passed_on_ms, understood_ms, engine_call_ms, first_token_ms, first_answer_token_ms, last_token_ms,
+                 engine_queue_ms, engine_prefill_ms, engine_generation_ms, error_code, finish_reason, duration_ms)::text
+         FROM usage.usage_event WHERE request_id = '$1'" | tr -d '\r'
+  }
+  usage_row() {
+    [[ $(sql "SELECT count(*) FROM usage.usage_event WHERE request_id = '$2' AND http_status = 200 AND error_code IS NULL
+              AND finish_reason IS NOT NULL AND $3 $eng" | tr -d '\r') == 1 ]] && echo "ok   $1" \
+      || { echo "FAIL $1: the row is (streamed, status, six moments, three engine lengths, error code, finish reason, duration)"
+           echo "     $(urow "$2")"; note_fail; }
+  }
+  # The value of the loss counter of the refusal records for this deployment's model and the reason cap ("none" without the series).
+  left_out_cap() {
+    "${DC[@]}" exec -T tools curl -s -m 5 http://inference:8081/actuator/prometheus | tr -d '\r' \
+      | awk -v m="model=\"$DM\"" '/^carmona_inference_refusal_records_left_out_total\{/ && index($0, m) && index($0, "reason=\"cap\"") {
+          s += $NF; n++ } END { print n ? s + 0 : "none" }'
+  }
+
+  OWN_ENGINE_MODEL=$DM "${DCO[@]}" up -d --no-deps engine-own >/dev/null 2>&1 \
+    || { echo "FAIL the simulator for $DM did not start"; note_fail; }
+  up=""
+  for _ in $(seq 30); do
+    up=$("${DC[@]}" exec -T tools curl -s -m 2 -o /dev/null -w '%{http_code}' http://engine-own:8000/metrics)
+    [[ $up == 200 ]] && break
+    sleep 1
+  done
+  [[ $up == 200 ]] && echo "ok   200  the simulator that serves $DM answers" \
+    || { echo "FAIL the simulator that serves $DM answered '$up'"; note_fail; }
+
+  # The operator makes the deployment: it is stopped, and the list and the read say so.
+  dep_want 201 POST "/organizations/$org/deployments" \
+    "{\"name\":\"$dep\",\"machines\":[{\"provider\":\"smoke\",\"providerMachineId\":\"m1\"}]}"
+  expect 200 "${A[@]}" "${reads[0]}"
+  body_has "the list holds $dep, stopped, under the model id $DM" "\"name\":\"$dep\"" '"state":"stopped"' "\"modelId\":\"$DM\""
+  expect 200 "${A[@]}" "${reads[1]}"
+  body_has "$dep is stopped" '"state":"stopped"'
+  expect 404 "${A[@]}" "$G/organizations/$org/deployments/nobody-made-this"
+  body_has "a deployment nobody made is deployment_not_found" '"code":"deployment_not_found"'
+
+  # The operator connects the engine: serving, with one loaded model, and neither the key nor the address is ever in a read.
+  rev=a1b2c3d4e5f60718293a4b5c6d7e8f9012345678
+  spec='{"contextWindow":4096,"maxOutput":1024,"replicas":[{"url":"http://engine-own:8000","slots":2,"queue":2}],'
+  spec+='"tiers":{"trial":{"requestsPerMinute":6,"inputTokensPerMinute":20000,"outputTokensPerMinute":10000,"maxInFlight":2}}}'
+  # deployment-service documents that the operator repeats a failed connect (DeploymentService.java:108-113); it reaches model-service
+  # with a 1 s connect timeout and no retry. A first 503 is repeated once; a second one is a FAIL.
+  conn=(PUT "/organizations/$org/deployments/$dep/engine"
+    "{\"apiKey\":\"$engkey\",\"spec\":$spec,\"repository\":\"Qwen/Qwen3-4B-Instruct-2507\",\"revision\":\"$rev\"}")
+  dep_call "${conn[@]}"
+  if [[ $depcode == 503 ]]; then echo "note: the connect answered 503 once and was repeated"; sleep 2; dep_call "${conn[@]}"; fi
+  if [[ $depcode == 200 ]]; then echo "ok   200  PUT ${conn[1]} on deployment-service"
+  else echo "FAIL want 200 got $depcode: PUT ${conn[1]} on deployment-service"; head -c 300 "$BODY"; echo; note_fail; fi
+  body_has "the connect answers serving" '"state":"serving"'
+  for u in "${reads[@]:0:2}"; do
+    expect 200 "${A[@]}" "$u"
+    if grep -qF -e "$engkey" -e engine-own -e apiKey "$BODY"; then echo "FAIL a read holds the engine key, its address or apiKey"; note_fail
+    else echo "ok   no key and no address in the read"; fi
+  done
+  body_has "$dep is serving with its loaded model, connected and not stopped" '"state":"serving"' \
+    '"repository":"Qwen/Qwen3-4B-Instruct-2507"' "\"revision\":\"$rev\"" '"connectedAt":"[0-9]' '"stoppedAt":null'
+
+  # A console read takes a console token: none, or an API key, is a 401 (the gateway's, with its own code).
+  expect 401 "${reads[0]}"
+  grep -q '"code":"invalid_token"' "$BODY" || { echo "FAIL the 401 of a read with no token has no code invalid_token"; note_fail; }
+  for u in "${reads[@]:1}"; do expect 401 "$u"; done
+  for u in "${reads[@]}"; do expect 401 "${K2[@]}" "$u"; done
+
+  # inference-service follows the registry every few seconds: poll a chat to the deployment's model until it answers, 40 s at most. That
+  # first answer is the whole-answer call; then a streamed one. Neither may carry the engine's report to the client.
+  code=""
+  for _ in $(seq 40); do
+    code=$(curl -s -o "$BODY" -D "$HDRS" -w '%{http_code}' "${K2[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" \
+      -d "$(chat_for "$DM" 'Say hi.' 8)")
+    [[ $code == 200 ]] && break
+    sleep 1
+  done
+  [[ $code == 200 ]] && echo "ok   200  the deployment's model answers" \
+    || { echo "FAIL the deployment's model answered '$code' for 40 s"; head -c 300 "$BODY"; echo; note_fail; }
+  rid_whole=$(sed -nE 's/^x-request-id: ([0-9a-f-]{36}).*/\1/ip' "$HDRS" | tr -d '\r' | head -1)
+  if grep -q '"metrics"' "$BODY"; then echo "FAIL the engine's report reached the client in a whole answer"; note_fail
+  else echo "ok   the whole answer holds no engine report"; fi
+  curl -sN -o "$BODY" -D "$HDRS" "${K2[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" \
+    -d "$(chat_for "$DM" 'Count to five.' 16 ',"stream":true,"stream_options":{"include_usage":true}')"
+  rid_stream=$(sed -nE 's/^x-request-id: ([0-9a-f-]{36}).*/\1/ip' "$HDRS" | tr -d '\r' | head -1)
+  grep -qE '^data: ?\[DONE\]' "$BODY" && echo "ok   the streamed call ends in [DONE]" \
+    || { echo "FAIL the streamed call does not end in [DONE]"; note_fail; }
+  if grep -q '"metrics"' "$BODY"; then echo "FAIL the engine's report reached the client in a stream"; note_fail
+  else echo "ok   the stream holds no engine report"; fi
+
+  # The two request records, read back through the gateway: the state, the status, the stream flag, the key, the stages, the engine's
+  # lengths inside them.
+  lookup "$rid_whole" 15
+  [[ $code == 200 ]] || { echo "FAIL the lookup of the whole answer $rid_whole got $code after 15 s"; note_fail; }
+  body_has "the whole answer's record: ok, 200, not streamed, with the key's id" \
+    '"state":"ok"' '"httpStatus":200' '"streamed":false' "\"apiKeyId\":\"$key2_id\""
+  stages_are gateway,receiving,queue_wait,engine
+  stage_numbers "the engine stage holds the engine's three lengths" engine engineQueueMs enginePrefillMs engineGenerationMs
+  lookup "$rid_stream" 15
+  [[ $code == 200 ]] || { echo "FAIL the lookup of the stream $rid_stream got $code after 15 s"; note_fail; }
+  body_has "the stream's record: ok, 200, streamed, with the key's id" \
+    '"state":"ok"' '"httpStatus":200' '"streamed":true' "\"apiKeyId\":\"$key2_id\""
+  stages_are gateway,receiving,queue_wait,first_output,generation
+  stage_numbers "the first_output stage holds the engine's queue and prefill lengths" first_output engineQueueMs enginePrefillMs
+  expect 404 "${A[@]}" "${reads[3]}"
+  body_has "an id nobody has is request_not_found" '"code":"request_not_found"'
+  expect 404 "${A[@]}" "$G/usage/organizations/$org/deployments/other/requests/$rid_whole"
+  body_has "a request read under another deployment's name is request_not_found" '"code":"request_not_found"'
+  expect 200 "${A[@]}" "$RQ?from=$rfrom&size=100"
+  body_has "the list holds both requests, one page, no refusal cut off" "$rid_whole" "$rid_stream" '"next":null' '"refusalsCapped":false'
+  expect 200 "${A[@]}" "$RQ?from=$rfrom&size=100&state=ok"
+  body_has "state=ok holds both requests" "$rid_whole" "$rid_stream"
+  expect 200 "${A[@]}" "$RQ?from=$rfrom&size=100&state=refused"
+  if grep -qE "$rid_whole|$rid_stream" "$BODY"; then echo "FAIL state=refused holds an answered request"; note_fail
+  else echo "ok   state=refused holds neither answered request"; fi
+  expect 200 "${A[@]}" "$G/usage/organizations/$org/deployments/nobody-made-this/requests?from=$rfrom"
+  body_has "a deployment name nobody made has an empty list" '"rows":\[\]'
+  expect 400 "${A[@]}" "$RQ"
+  body_has "a list with no from is invalid_request" '"code":"invalid_request"'
+
+  # The new columns of the two usage rows (the engine's lengths are null without the engine's report: the stock simulator has none).
+  eng="AND engine_queue_ms IS NOT NULL AND engine_prefill_ms IS NOT NULL AND engine_generation_ms IS NOT NULL"
+  [[ ${SIM_STOCK:-0} == 1 ]] && eng=""
+  usage_row "the usage row of the whole answer: three moments in order, no token moment, not streamed, the engine's lengths" "$rid_whole" \
+    "streamed = false AND passed_on_ms >= 0 AND passed_on_ms <= understood_ms AND understood_ms <= engine_call_ms
+     AND engine_call_ms <= duration_ms AND first_token_ms IS NULL AND first_answer_token_ms IS NULL AND last_token_ms IS NULL"
+  usage_row "the usage row of the stream: six moments in order, streamed, the engine's lengths" "$rid_stream" \
+    "streamed = true AND passed_on_ms >= 0 AND passed_on_ms <= understood_ms AND understood_ms <= engine_call_ms
+     AND engine_call_ms <= first_token_ms AND first_token_ms <= first_answer_token_ms AND first_answer_token_ms <= last_token_ms
+     AND last_token_ms <= duration_ms"
+
+  # The refusals of the deployment's model, one of each kind (a bad parameter, a body over the window, a guard, a drained engine, the limit
+  # reached), each with the key. The refusal of the public model before them leaves no record: it is nobody's deployment.
+  rr_id=(); rr_status=(); rr_code=()
+  dsend -d "$(chat x 8 ',"n":2')"
+  rid_public=$rid_last
+  [[ $got == 400 ]] && echo "ok   400  n=2 on the public model $M (no record of it is made)" \
+    || { echo "FAIL n=2 on $M got $got"; note_fail; }
+  dsend -d "$(chat_for "$DM" x 8 ',"n":2')"
+  drefused 400 unsupported_n
+  big=$(mktemp)
+  chat_for "$DM" "$(head -c 70000 /dev/zero | tr '\0' x)" 8 > "$big"
+  dsend --data-binary @"$big"
+  rm -f "$big"
+  drefused 413 context_length_exceeded
+  dsend -d "{\"model\":\"$DM\",\"messages\":[{\"role\":\"nobody\",\"content\":\"x\"}],\"max_tokens\":8}"
+  drefused 400 invalid_role
+  # engine_unavailable: the one replica is drained through inference-service's management port, from the tools container (the helpers of the
+  # drain section are further down); undrain puts it back if the run ends here. The states are read once a second: 2 s after each change.
+  dm_drain() {
+    "${DC[@]}" exec -T tools curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
+      -d "{\"model\":\"$DM\",\"replica\":0,\"state\":\"$1\"${2:-}}" http://inference:8081/actuator/drain
+  }
+  dep_drained=1
+  code=$(dm_drain DRAINING ',"grace":"60s"')
+  [[ $code == 200 ]] && echo "ok   200  replica 0 of $DM is DRAINING" || { echo "FAIL draining $DM got '$code'"; note_fail; }
+  sleep 2
+  dsend -d "$(chat_for "$DM" x 8)"
+  drefused 503 engine_unavailable
+  code=$(dm_drain READY)
+  dep_drained=0
+  [[ $code == 200 ]] && echo "ok   200  replica 0 of $DM is READY again" || { echo "FAIL putting $DM back got '$code'"; note_fail; }
+  sleep 2
+  # rate_limit_exceeded is the last call this model gets that may be answered: the spec's trial limit is 6 a minute for the organization and
+  # the model, so the first 429 comes within a few calls (20 at most).
+  for _ in $(seq 20); do
+    dsend -d "$(chat_for "$DM" 'Say hi.' 8)"
+    [[ $got == 429 ]] && break
+  done
+  drefused 429 rate_limit_exceeded
+
+  # Found by request id. The records leave inference-service once a second, in order: with the last one stored, the ones before it are
+  # stored or were left out.
+  lookup "${rr_id[-1]}" 15
+  [[ $code == 200 ]] && echo "ok   200  the last refusal's record is stored" \
+    || { echo "FAIL the record of the last refusal ${rr_id[-1]} got $code after 15 s"; note_fail; }
+  for i in "${!rr_id[@]}"; do
+    lookup "${rr_id[i]}" 0
+    case ${rr_code[i]} in unsupported_n|context_length_exceeded) want=gateway,receiving ;; *) want=gateway,receiving,queue_wait ;; esac
+    body_has "the record of ${rr_code[i]}: refused, ${rr_status[i]}, the key's id, no stream flag, no tokens, no finish reason" \
+      '"state":"refused"' "\"httpStatus\":${rr_status[i]}" "\"errorCode\":\"${rr_code[i]}\"" "\"apiKeyId\":\"$key2_id\"" \
+      '"streamed":null' '"inputTokens":null' '"outputTokens":null' '"finishReason":null'
+    stages_are "$want"
+  done
+  # The table, the list, and what a refusal is not: no usage event, and the public model's one is nowhere.
+  ids=$(printf ",'%s'" "${rr_id[@]}"); ids=${ids#,}
+  nrr=$(sql "SELECT count(*) FROM usage.refused_request WHERE model = '$DM'" | tr -d '\r')
+  [[ $nrr == "${#rr_id[@]}" ]] && echo "ok   usage.refused_request holds the $nrr refusals of $DM" \
+    || { echo "FAIL usage.refused_request holds $nrr refusals of $DM, ${#rr_id[@]} were sent"; note_fail; }
+  [[ $(sql "SELECT count(*) FROM usage.refused_request WHERE request_id = '$rid_public'" | tr -d '\r') == 0 ]] \
+    && echo "ok   the refusal of the public model is not in the table, which holds the later ones" \
+    || { echo "FAIL the refusal of the public model $rid_public has a record"; note_fail; }
+  lookup "$rid_public" 0
+  [[ $code == 404 ]] && echo "ok   404  the refusal of the public model is no record of the deployment" \
+    || { echo "FAIL the lookup of the public model's refusal got $code"; note_fail; }
+  [[ $(sql "SELECT count(*) FROM usage.usage_event WHERE request_id IN ($ids)" | tr -d '\r') == 0 ]] \
+    && echo "ok   a refusal leaves no usage event" || { echo "FAIL a refused request has a usage event"; note_fail; }
+  expect 200 "${A[@]}" "$RQ?from=$rfrom&size=100&state=refused"
+  body_has "state=refused holds every refusal, none cut off" "${rr_id[@]}" '"refusalsCapped":false'
+  if grep -qE "$rid_whole|$rid_stream" "$BODY"; then echo "FAIL state=refused holds an answered request"; note_fail
+  else echo "ok   state=refused holds neither answered request"; fi
+  expect 200 "${A[@]}" "$RQ?from=$rfrom&size=100&state=refused&state=ok"
+  body_has "state=refused&state=ok holds the refusals and both answered requests" "${rr_id[@]}" "$rid_whole" "$rid_stream"
+  [[ $(left_out_cap) == 0 ]] && echo "ok   no refusal record was left out for the cap of a clock minute" \
+    || { echo "FAIL the loss counter for the cap is '$(left_out_cap)' for $DM"; note_fail; }
+  "${DCO[@]}" rm -sf engine-own >/dev/null 2>&1 || true
+fi
+
 ## Admission: rate-limit headers, and each tier only gets its share of the engine
 remaining=$(curl -s -D - -o /dev/null "${K2[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" -d "$(chat 'Say hi.' 8)" | sed -nE 's/^x-ratelimit-remaining-requests: ([0-9]+).*/\1/ip')
 [[ -n $remaining ]] && echo "ok   200  x-ratelimit-remaining-requests: $remaining" || { echo "FAIL no rate-limit headers"; note_fail; }
@@ -364,19 +681,6 @@ drain_set() {
   [[ $dcode == 200 ]] && grep -q "\"state\":\"$2\"" "$BODY" && echo "ok   200  replica $1 of $M is $2" \
     || { echo "FAIL replica $1 to $2 got '$dcode'"; head -c 300 "$BODY"; echo; note_fail; }
 }
-# The states live in Valkey and outlive this script. However it ends from here on (a Ctrl-C, a killed run, a docker call that fails), the
-# replicas it drained are put back, or every client of the stack and the next run of this script are answered 503 engine_unavailable.
-drained_by_smoke=0
-undrain() {
-  [[ $drained_by_smoke == 1 ]] || return 0
-  local r
-  for r in $(seq 0 $((${replicas:-1} - 1))); do
-    "${DC[@]}" exec -T tools curl -s -o /dev/null -X POST -H 'Content-Type: application/json' \
-      -d "{\"model\":\"$M\",\"replica\":$r,\"state\":\"READY\"}" http://inference:8081/actuator/drain || true
-  done
-}
-longout=$(mktemp)
-trap 'undrain; rm -f "$BODY" "$HDRS" "$longout"' EXIT
 drain_call GET
 replicas=$(grep -o "\"model\":\"$M\"" "$BODY" | wc -l | tr -d ' ')
 [[ $dcode == 200 && ${replicas:-0} -ge 1 ]] && grep -q '"state":"READY"' "$BODY" && echo "ok   200  GET /actuator/drain lists $replicas replica(s) of $M, all READY" \
@@ -490,13 +794,44 @@ rm -f "$big"
 [[ $code == 413 ]] && echo "ok   413  over-context prompt" || { echo "FAIL over-context prompt got $code"; note_fail; }
 curl -sN --max-time 1 "${K2[@]}" "${J[@]}" -X POST "$G/v1/chat/completions" -d "$(chat "$canary Write a long story." 500 ',"stream":true')" >/dev/null || true
 expect 400 "${K2[@]}" "$G/v1/models?api_key=cmn_test_$canary"
+if [[ $ENGINE == sim ]]; then
+  # Round OB: the refusals of the deployment's model leave records (usage.refused_request) of ids, a status and a code, never the text of a
+  # request. Five refusals carry the canary in the part of the request a record must not keep. None needs the engine, which is gone by now:
+  # each is refused in the parse or by the guard, before the rate bucket that the deployments section emptied. The control comes first: a
+  # grep over a table that is empty proves nothing.
+  n0=${#rr_id[@]}
+  dsend -d "$(chat_for "$DM" "$canary" 8 ',"n":2')"
+  drefused 400 unsupported_n
+  dsend -d "$(chat_for "$DM" x 8 ",\"logit_bias\":{\"$canary\":1}")"
+  drefused 400 unsupported_parameter
+  dsend -d "{\"model\":\"$DM\",\"messages\":[{\"role\":\"$canary\",\"content\":\"x\"}],\"max_tokens\":8}"
+  drefused 400 invalid_role
+  dsend -d "{\"model\":\"$DM\",\"messages\":\"$canary\"}"
+  drefused 400 invalid_messages
+  big=$(mktemp)
+  chat_for "$DM" "$canary $(head -c 70000 /dev/zero | tr '\0' x)" 8 > "$big"
+  dsend --data-binary @"$big"
+  rm -f "$big"
+  drefused 413 context_length_exceeded
+  ids=$(printf ",'%s'" "${rr_id[@]:n0}"); ids=${ids#,}
+  nrr=0
+  deadline=$((SECONDS + 15))
+  while :; do
+    nrr=$(sql "SELECT count(*) FROM usage.refused_request WHERE request_id IN ($ids)" | tr -d '\r')
+    [[ $nrr == $((${#rr_id[@]} - n0)) || $SECONDS -ge $deadline ]] && break
+    sleep 0.5
+  done
+  [[ $nrr == $((${#rr_id[@]} - n0)) ]] && echo "ok   usage.refused_request holds the $nrr refusals that carried the canary" \
+    || { echo "FAIL $nrr of $((${#rr_id[@]} - n0)) refusals that carried the canary are in usage.refused_request"; note_fail; }
+fi
 sleep 2   # let batches and logs flush
 access_log() { MSYS_NO_PATHCONV=1 "${DC[@]}" exec -T gateway sh -c 'cat /var/log/carmona/access.log'; }
 valkey_file() { MSYS_NO_PATHCONV=1 "${DC[@]}" exec -T valkey sh -c 'cat /data/appendonlydir/*'; }
 leaks=$( { "${DC[@]}" logs --no-color 2>&1; "${DC[@]}" exec -T db sh -c 'pg_dumpall -U "$POSTGRES_USER"'; access_log; valkey_file; } \
-  | grep -acF -e "$canary" -e "Bearer " -e "$key2" -e "api_key=" -e "${keep#*=}" || true)
-[[ $leaks == 0 ]] && echo "ok   the canary, bearer headers, the API key and query strings are in no log (access log included), nowhere in the database and nowhere in Valkey's file" \
-  || { echo "FAIL $leaks lines leak the canary, a bearer header, the key or a query string"; note_fail; }
+  | grep -acF -e "$canary" -e "Bearer " -e "$key2" -e "$engkey" -e "api_key=" -e "${keep#*=}" || true)
+[[ $leaks == 0 ]] && echo "ok   the canary, bearer headers, API keys, an engine key and query strings are in no log (access log too)," \
+    "nowhere in the database (the new columns and the table of refusal records included) and nowhere in Valkey's file" \
+  || { echo "FAIL $leaks lines leak the canary, a bearer header, a key or a query string"; note_fail; }
 # Marco Civil access log: the request above, with its ids, in the gateway's own file (not on stdout).
 grep -q "$rid" <(access_log) && grep "$rid" <(access_log) | grep -q "\"organization_id\":\"$org\"" \
   && echo "ok   access log: request $rid with its organization and key" || { echo "FAIL request $rid not in the access log"; note_fail; }
@@ -602,8 +937,6 @@ registry_want() {
   registry "$@"
   if [[ $rcode == "$want" ]]; then echo "ok   $want  $1 $2 on model-service"; else echo "FAIL want $want got $rcode: $1 $2 on model-service"; head -c 300 "$BODY"; echo; note_fail; fi
 }
-# chat_for MODEL CONTENT MAX_TOKENS: a chat request body for any model.
-chat_for() { echo "{\"model\":\"$1\",\"messages\":[{\"role\":\"user\",\"content\":\"$2\"}],\"max_tokens\":$3}"; }
 # wait_status STATUS KEY_ARRAY_NAME MODEL: polls a chat to MODEL with the key until it answers STATUS, at most 40 s; the last status is left in $code.
 wait_status() {
   local -n hdr=$2
@@ -774,6 +1107,10 @@ first_email=$email
 account
 S=(-H "Authorization: Bearer $token")
 expect 404 "${S[@]}" "$G/organizations/$org"
+for u in "${reads[@]}"; do   # round OB: the reads of a deployment answer a stranger as the organization's own path does, a 404 with no code
+  expect 404 "${S[@]}" "$u"
+  if grep -q '"code"' "$BODY"; then echo "FAIL the 404 a stranger got has a code"; note_fail; fi
+done
 expect 404 "${S[@]}" "${J[@]}" -X POST "$G/organizations/$org/api-keys" -d '{"name":"x"}'
 expect 404 "${S[@]}" -X DELETE "$G/organizations/$org"
 expect 403 "${S[@]}" "$G/accounts/$id/export"
@@ -801,6 +1138,25 @@ for _ in $(seq 30); do
   sleep 1
 done
 [[ $files == 0 ]] && echo "ok   closing the organization erased its batch files" || { echo "FAIL $files batch files left after closing"; note_fail; }
+# Round OB: closing the organization ends its deployment (the sweep of deployment-service, 5 s here). The read still answers the member of a
+# closed organization, the loaded model has stopped, the list still holds the deployment, and the requests of an ended deployment are still
+# read.
+if [[ $ENGINE == sim ]]; then
+  ended=""
+  for _ in $(seq 40); do
+    code=$(curl -s -o "$BODY" -w '%{http_code}' "${A[@]}" "${reads[1]}")
+    grep -q '"state":"ended"' "$BODY" && { ended=1; break; }
+    sleep 1
+  done
+  [[ -n $ended && $code == 200 ]] && echo "ok   200  closing the organization ended its deployment, which its member still reads" \
+    || { echo "FAIL the deployment of the closed organization is not ended after 40 s (the read got $code)"
+         head -c 300 "$BODY"; echo; note_fail; }
+  grep -qE '"stoppedAt":"[0-9]' "$BODY" && echo "ok   the loaded model of the ended deployment has a stoppedAt" \
+    || { echo "FAIL the loaded model of the ended deployment has no stoppedAt"; note_fail; }
+  expect 200 "${A[@]}" "${reads[0]}"
+  body_has "the list still holds the ended deployment" "\"name\":\"$dep\"" '"state":"ended"'
+  expect 200 "${A[@]}" "${reads[2]}"
+fi
 expect 204 "${A[@]}" -X DELETE "$G/accounts/$id"
 expect 401 -X POST "$G/auth/refresh" -H "Cookie: $keep"                  # its sessions ended with it
 expect 404 "${A[@]}" "$G/accounts/$id"
