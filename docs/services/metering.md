@@ -287,7 +287,7 @@ engines' counters. Once a window is sealed, the totals are the record.
 **Request records live in the usage event's table, and a refusal never becomes a row there.** One row per request
 keeps the bill and the request's story in the same place, written by the same relay with the same idempotence, with no
 second pipeline to drift. A refusal is the case that breaks it: it would be counted as a billed request by the seal and
-by the reconciliation, so it lives apart, best effort and capped, and is never counted in the error rate (the
+by the reconciliation, so it lives apart, best effort and capped, and is never counted in a deployment's error rate (the
 [decisions page](../reference/decisions.md) has the entry).
 
 **Errors are counted, not summed.** A request that failed inside the platform cost tokens and earned nothing,

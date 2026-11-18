@@ -178,7 +178,7 @@ answer with `limit` (1–100 groups, at most 31 days), because a silently trunca
 
 ```yaml
 management:
-  server: { port: 8081 }            # never published, never routed; the comment is in all nine services
+  server: { port: 8081 }            # never published, never routed; the comment is in all ten services
   endpoint: { health: { probes: { enabled: true } } }
   endpoints: { web: { exposure: { include: health,prometheus,reconcile } } }   # reconcile: inference, billing
 ```

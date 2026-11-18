@@ -2,8 +2,8 @@
 
 ## What it is
 
-Carmona is one Git repository per module: fifteen Maven modules under `api/`, six of them **libraries**
-that hold a contract (and, in two of them, a value type both sides compute with), and nine of them **services** that hold a Spring Boot application
+Carmona is one Git repository per module: seventeen Maven modules under `api/`, seven of them **libraries**
+that hold a contract (and, in two of them, a value type both sides compute with), and ten of them **services** that hold a Spring Boot application
 and one Postgres schema. A service may call another service's library and may never read another service's
 tables. Where two services genuinely need each other's data, they call each other — and the page below is
 mostly about what that costs.
@@ -172,7 +172,7 @@ across it, because there is no transaction that could span it.</figcaption>
 ## What would change it
 
 The rule is enforced by review and by the shape of the code, **not by the database**: one Postgres user
-owns all seven schemas, so nothing physically stops a query from joining across two of them. The append-only
+owns all eight schemas, so nothing physically stops a query from joining across two of them. The append-only
 ledger has the same ceiling — it is enforced by triggers, not by a second role. Both are written down as
 shortcuts in the fact sheet's shortcut table, with "separate roles when the DB is shared" as the upgrade
 path. Two other boundaries are waiting on a decision rather than on code: batch files belong in object

@@ -137,7 +137,7 @@ with nowhere to send them.</figcaption>
   <span><i class="is-accent"></i> the observability stack (teal outline)</span>
 </div>
 
-1. **`mvn -B clean verify` from the repository root** builds all fifteen modules in dependency order and runs
+1. **`mvn -B clean verify` from the repository root** builds all seventeen modules in dependency order and runs
    the unit tests plus one Testcontainers integration test per database service.
 2. **`docker compose up -d --build --wait`** starts fifteen containers and blocks until every health check
    passes. `.env` must exist first; compose refuses to start without it.
@@ -194,7 +194,7 @@ management ports follow, and the only host binding in the whole compose file is 
 
 ## How work ships
 
-One GitHub Actions workflow in `back`, on every pull request and every push to `main`: fetch the fifteen
+One GitHub Actions workflow in `back`, on every pull request and every push to `main`: fetch the seventeen
 private module repositories with `CARMONAI_TOKEN`, check that the copies agree (`docker/check-copies.sh`), `mvn -B verify`,
 generate a fresh `.env`, bring the stack up, run `smoke.sh`, and dump the container logs when something failed. The docs
 site has its own workflow.

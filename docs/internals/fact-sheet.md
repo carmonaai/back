@@ -264,5 +264,5 @@ code. They are recorded here so that nobody re-derives them:
 1. "The gateway's flood brake is per-replica in memory." It is not any more: `RateLimitFilter` keeps the
    bucket in Valkey through one Lua round trip, with in-memory buckets only on the fail-open path. It answers
    an OpenAI-shaped 429 with `retry-after` and `retry-after-ms`.
-2. "There is no observability." Prometheus and Grafana were added on 2026-10-05; the rule file now holds 23 alert rules and
+2. "There is no observability." Prometheus and Grafana were added on 2026-10-05; the rule file now holds 24 alert rules and
    there are 3 provisioned dashboards. What is genuinely missing is the alerting *destination*.

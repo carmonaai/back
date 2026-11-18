@@ -2,7 +2,7 @@
 
 ## What it is
 
-Nine Spring Boot services, one Postgres, one Valkey and two model engines, all on a single Docker network.
+Ten Spring Boot services, one Postgres, one Valkey and two model engines, all on a single Docker network.
 Exactly one container publishes a port: the gateway. Everything else — including every management port — is
 reachable only from inside, so the topology of this system is mostly the story of what the gateway forwards
 and what it refuses to.
@@ -137,7 +137,7 @@ appears to pass behind a service rather than through it.</figcaption>
 | `batch-service` | `batch` | `file`, `batch`, `batch_line` | `/v1/files**`, `/v1/batches**` |
 | `inference-service` | — | nothing durable; usage goes to a Valkey stream | `/v1/chat/completions`, `/v1/models` |
 
-Seven services hold a schema in one Postgres, created by Flyway and versioned by date; Hibernate only validates.
+Eight services hold a schema in one Postgres, created by Flyway and versioned by date; Hibernate only validates.
 Two hold none — the point of `/v1` is that nothing on the token path reads a database
 ([schemas](../data/schemas.md), [tenancy](../data/tenancy.md)).
 
@@ -158,7 +158,7 @@ Valkey holds things that expire or are rebuilt, on purpose:
 
 | Container | Image or build | Notes |
 |---|---|---|
-| `db` | `postgres:17.11-bookworm` (digest-pinned) | one database, seven schemas |
+| `db` | `postgres:17.11-bookworm` (digest-pinned) | one database, eight schemas |
 | `valkey` | `valkey/valkey:9.0.6` (digest-pinned) | `--appendonly yes --appendfsync everysec` |
 | `mailpit` | `axllent/mailpit:v1.31.4` | verification and reset mail, locally |
 | `account`, `organization`, `model`, `auth`, `usage`, `billing`, `inference`, `batch`, `gateway` | `build: ../api/<name>/Dockerfile` | one jar per service, non-root, port 8080, management 8081 |

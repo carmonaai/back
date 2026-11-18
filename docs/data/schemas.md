@@ -13,7 +13,7 @@ shape carries a decision rather than a column list.
   <desc id="dsch-desc">Two schemas are drawn as walls, usage on the left and organizations on the right. A
   solid path carries an organization_id from usage_event across both boundaries to organization, and it
   arrives. A second, dotted path starts at the same place and stops short of the second wall, because no
-  foreign key exists between the two schemas. Five further schemas are named below.</desc>
+  foreign key exists between the two schemas. Six further schemas are named below.</desc>
 
   <defs>
     <marker id="dsch-arrow" viewBox="0 0 10 10" refX="9" refY="5"
@@ -55,8 +55,8 @@ shape carries a decision rather than a column list.
 
   <g class="cmn-node cmn-node--soft" id="dsch-rest" aria-labelledby="dsch-rest-label">
     <rect x="200" y="214" width="360" height="48" rx="10"/>
-    <text id="dsch-rest-label" x="380" y="232">the other five schemas</text>
-    <text class="cmn-sub" x="380" y="250">accounts · auth · billing · batch · models</text>
+    <text id="dsch-rest-label" x="380" y="232">the other six schemas</text>
+    <text class="cmn-sub" x="380" y="250">accounts · auth · billing · batch · models · deployments</text>
   </g>
 
   <circle class="cmn-packet cmn-travel" r="5"

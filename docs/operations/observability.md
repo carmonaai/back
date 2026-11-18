@@ -141,6 +141,7 @@ nothing: the engine's own counters are real series today.
 | `carmona_engine_prefix_cache_hit_ratio` | gauge | `model` | — |
 | `carmona_inference_reconcile_mismatch` | gauge | `model` | — |
 | `carmona_inference_first_output_seconds` | timer | `model`, `cache` (`none`, `partial`, `full`) | 0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 30, 45, 60, 90 (wider than TTFT: a cold 32k prefill takes tens of seconds) |
+| `carmona_inference_refusal_records_left_out_total` | counter | `model`, `reason` (`cap`, `buffer_full`, `post_failed`) | — |
 | `carmona_inference_finish_total` | counter | `model`, `reason` | — |
 | `carmona_engine_contract_ok` | gauge | `model`, `replica`, `check` | — |
 | `carmona_engine_slots`, `carmona_engine_queue_places` | gauge | `model` | — |
@@ -260,9 +261,8 @@ capacity; engine running/waiting and KV cache; tokens per second by mode and kin
 prompt cache hit ratio (30 m and 15 m, against the 0.30 line of the alert) and the prompt tokens per second split into hit and miss. Three panels came with the request record: panel 20, the first output p95 by cache
 (`first_output:p95_5m`, engine call to first token), and, in a row of its own, "Refusal records (best effort: a missing row is not an outage)" (row 21), panel 22,
 the records left out by reason, and panel 23, the records lost in the last hour (`buffer_full` and `post_failed` only: zero is healthy, and `cap` is not counted
-because it is the designed limit). Panels 6, 7 and 10 say in their titles and descriptions what they measure now; panels 8, 12 and 15 still carry their
-"NOT PUBLISHED YET" mark in their descriptions, and the dashboard's own description still speaks of `carmona_inference_*` panels that are empty until their metrics
-are published, which is no longer true of most of them.
+because it is the designed limit). Panels 6, 7 and 10 say in their titles and descriptions what they measure now; panels 8, 12 and 15 and the dashboard's own description now say what they read, and no
+panel is marked as waiting for a metric that inference-service does not publish.
 **Carmona — service
 RED** has one repeated row per service — rate by route, error share against the 5 % line, duration max and
 mean — plus a gateway row by `routeId`. **Carmona — revenue integrity** has 402s served, usage events received
@@ -305,7 +305,7 @@ and then `exec`s Prometheus, which reads it through `bearer_token_file`. The key
 ## What checks the rules and the dashboards
 
 Two scripts in `docker/` prove the files without a running stack, and CI runs both in one step, "Check the rules, their tests and the dashboards", after "Check the copies agree" and
-after the modules are fetched (the second needs the Java):
+after the modules are fetched (the second needs the Java source):
 
 - `docker/check-prometheus.sh` checks the config, runs `promtool test rules` on `rules.test.yml` in the pinned Prometheus image (111 cases against the 37 rules) and checks
   the DNS-discovered jobs. The cases for the refusal records cover the alert (it fires on a loss of either reason, including the first loss of a series that starts at 0, resolves ten minutes after the last loss,

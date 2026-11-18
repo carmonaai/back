@@ -285,7 +285,7 @@ replica's memory is the ceiling: a restart without its last post loses what the 
 
 The service writes no line for each request, but it writes one when a request failed, and the line carries `request_id`, the key of the gateway's
 access line. A request that ended as `error` leaves a WARN `request failed` with the id, the model, the code, the HTTP status when it has one and
-the duration, and never a message. A failure **before the first byte**, for a request that got as far as the engine, leaves two WARN lines with the same request id: that line, and
+the duration, and never a message. A failure **before the first byte**, for a request that got as far as the engine, leaves one WARN line (`request failed`) when the engine refused it with a 4xx, and two with the same request id when the answer is a 5xx: that line, and
 `chat request failed` with the code and the exception's class, written when the 5xx answer is built. A failure after the first byte of a stream leaves
 the first only, since the stream is no HTTP error.
 
