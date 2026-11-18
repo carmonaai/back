@@ -71,6 +71,10 @@ breaks '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12} is in' 's/-
 breaks '"org-" is in' 's/"org-"/"org_"/' "api/billing/$J/billing/Price.java"
 breaks "'org-' is in" "s/'org-'/'org_'/g" "api/model-service/src/main/resources/db/migration/V2026.11.12.001__create_tables.sql"
 
+# 5. The refusal codes: a word that leaves one list, and a word that changes in the other.
+breaks 'the refusal codes differ' 's/"model_busy", //' "api/usage-service/$J/usage/RefusalRecord.java"
+breaks 'the refusal codes differ' 's/"nesting_too_deep"/"nesting_too_deeper"/' "api/inference-service/$J/inference/RefusalRecords.java"
+
 # the one thing that may differ: the callees
 f="$work/api/account-service/$J/account/InternalToken.java"
 cp "$f" "$bak/callees"

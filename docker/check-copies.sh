@@ -83,5 +83,13 @@ spelled only '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' api/
 spelled only '"org-"' api/billing/$J/billing/Price.java api/deployment-service/$J/deployment/Deployment.java api/model-service/$J/model/ModelId.java $INF/InferenceProperties.java api/usage-service/$J/usage/UsageService.java
 spelled has "'org-'" api/model-service/src/main/resources/db/migration/V2026.11.12.001__create_tables.sql
 
+# 5. The refusal codes: inference-service leaves a refusal record for these codes and usage-service stores a record only when its code is one of its own list, so a
+# word in one list and not in the other is a record lost in silence. The two lists must hold the same words.
+codes() { tr -d '
+' < "$1" | grep -oE "Set<String> $2 = Set.of([^)]*)" | grep -oE '"[a-z_]+"' | sort || true; }
+sent=$(codes $INF/RefusalRecords.java CODES)
+kept=$(codes api/usage-service/$J/usage/RefusalRecord.java ERROR_CODES)
+[[ -n $sent && $sent == "$kept" ]] || fail "the refusal codes differ: $INF/RefusalRecords.java (CODES) and api/usage-service/$J/usage/RefusalRecord.java (ERROR_CODES) must hold the same words"
+
 (( bad == 0 )) || exit 1
 echo "  SUCCESS: the copies of the internal-secret guard agree, and the key, header, Valkey and model id spellings are where they should be"
