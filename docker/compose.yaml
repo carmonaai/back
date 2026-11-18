@@ -153,7 +153,9 @@ services:
   deployment:
     secrets: [internal_token]
     build: ../api/deployment-service
-    environment: *database
+    environment:
+      <<: *database
+      DEPLOYMENT_SWEEP_EVERY: 5s   # the prototype ends the deployments of a closed organization within seconds (the service's default is 1 m)
     depends_on:
       db: { condition: service_healthy }
       organization: { condition: service_healthy }
