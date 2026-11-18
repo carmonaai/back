@@ -6,20 +6,31 @@ groups:
   # The SLOs, using the targets the code and the benches already hold (inference-plan.md §8; phase-3 and
   # phase-5 measurements): TTFT p95 below 2 s and inter-token p95 below 100 ms are the goodput definition,
   # and TTFT is where capacity C = 4 shows up first.
+  # What TTFT is since round OB (ticket 05): from the gateway's acceptance of the request to the first token of any kind, reasoning included, the same value the
+  # request's record stores, for streamed requests only (a whole answer has no first token and is not in the histogram). Gateway time and receiving are inside it,
+  # and a model that thinks reads shorter than it did, so the 2 s line is still a placeholder. The goodput's denominator is therefore the streamed requests.
+  # The bound 2 is still one of the buckets (the set is 0.05 to 30 s, Metrics), which is why the goodput can be read straight off the histogram. The exposition writes
+  # a whole-number bound with a decimal, so the selector is le="2.0": le="2" matches nothing, and the goodput was an empty vector on the running stack (seen in OB-20).
   - name: inference-slo
     rules:
       - record: ttft:p95_5m
         expr: histogram_quantile(0.95, sum by (le, model, tier) (rate(carmona_inference_ttft_seconds_bucket[5m])))
 
-      # Goodput: the share of requests whose first token arrived within 2 s (2 is a bucket boundary in the
+      # Goodput: the share of streamed requests whose first token arrived within 2 s (2 is a bucket boundary in the
       # metric contract, which is why it can be read straight off the histogram).
       - record: ttft:goodput_5m
         expr: |
-          sum by (model, tier) (rate(carmona_inference_ttft_seconds_bucket{le="2"}[5m]))
+          sum by (model, tier) (rate(carmona_inference_ttft_seconds_bucket{le="2.0"}[5m]))
             / sum by (model, tier) (rate(carmona_inference_ttft_seconds_count[5m]))
 
       - record: itl:p95_5m
         expr: histogram_quantile(0.95, sum by (le, model, tier) (rate(carmona_inference_itl_seconds_bucket[5m])))
+
+      # First output: the engine call to the first token of any kind (the queue wait is not in it), by the share of the prompt the cache served (none, partial,
+      # full). Its buckets reach 90 s (a cold prefill of a long prompt takes tens of seconds) and the first is 0.1 s. Read by the dashboard's panel in the prompt
+      # cache row: mostly `none` means the cache is not being hit.
+      - record: first_output:p95_5m
+        expr: histogram_quantile(0.95, sum by (le, model, cache) (rate(carmona_inference_first_output_seconds_bucket[5m])))
 
   # The engine from its own /metrics, which is also what the queue-depth alert needs: inference-service's
   # carmona_engine_* gauges come from a reconcile that runs hourly, too coarse to alert on.
@@ -464,6 +475,27 @@ groups:
             whose hard-mode or soft-mode is reject). The customer gets a 400 for each, so a new SDK or a changed template is
             the first thing to look for. The 400 text names the problem and never repeats the content; no organization is
             on any metric, so the client is found from the customer's side or from the access log by time.
+
+  # The refusal records of an organization's own deployments (round OB, ticket 07). A refusal is answered whatever happens to its record: the record is best effort,
+  # and inference-service counts every one it leaves out in carmona_inference_refusal_records_left_out_total{model, reason}, which it creates at 0 for each deployment, so
+  # the first loss of a series is an increase. `cap` is the designed limit (the customer's count reads "N ou mais" for such a minute) and has a panel only; the two
+  # other reasons are a record that was allowed and was lost, with nothing to tell the customer. Info: usage-service being down already pages (ServiceDown,
+  # UsageIngestionStalled), and this is what it costs the customer's list of requests. No organization is on the metric but its id inside `model`.
+  - name: refusal-records
+    rules:
+      # One record lost is the alert (no `for`: by the time one elapsed the loss would be old, and a minute with a few is as real as a long one). `increase`
+      # extrapolates to the window's ends, so this is only good to "something was lost in the last 10m", which is all it says.
+      - alert: RefusalRecordsLost
+        expr: sum by (model, reason) (increase(carmona_inference_refusal_records_left_out_total{reason=~"buffer_full|post_failed"}[10m])) > 0
+        labels: {severity: info}
+        annotations:
+          summary: "{{ $labels.model }} lost refusal records ({{ $labels.reason }}) in the last 10m"
+          description: >-
+            A refusal record that the service was allowed to keep was lost, so the customer's list of requests misses those rows and is not told (the
+            refusal itself was answered as always). buffer_full: more than 10,000 records were waiting to be posted. post_failed: usage-service did not
+            take a batch, and a batch is not posted again. Look at usage-service and at UsageIngestionStalled. The reason cap is not this alert: it is the
+            designed limit of 60 records a minute for one deployment on each replica, and it is drawn on the SLO board. The exact count of refusals lives
+            only in this counter, which Prometheus keeps for 15 days.
 
   # The prompt cache (P0-1). carmona_inference_prompt_cache_tokens_total{model, mode, result} counts, once per engine run whose final
   # usage was seen, the prompt tokens the engine served from its prefix cache (result="hit") and the rest (result="miss"). The hit

@@ -59,6 +59,13 @@ jobs:
           bash docker/check-copies.sh
           bash docker/check-copies-guards.sh
 
+      # The alert rules' own unit tests (promtool in the pinned Prometheus image) and the dashboards: valid JSON, unique ids, every expression parsed by promtool, and every
+      # carmona_ metric they name found in the Java (so it needs the modules fetched above). No stack, no .env, no secret; a container that is removed is all it leaves.
+      - name: Check the rules, their tests and the dashboards
+        run: |
+          bash docker/check-prometheus.sh
+          bash docker/check-dashboards.sh
+
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
