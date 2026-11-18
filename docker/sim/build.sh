@@ -1,26 +1,30 @@
 #!/usr/bin/env bash
-# Builds the simulated engine with the disconnect patch into a local image (never :latest):
-#   bash docker/sim/build.sh                       -> carmona/llm-d-inference-sim:v0.11.4-disconnect.1
-#   SIM_TEST=1 bash docker/sim/build.sh            -> also runs the simulator's Go tests (the patch's included) in the build
+# Builds the simulated engine with the disconnect patch and the report patch into a local image (never :latest):
+#   bash docker/sim/build.sh                       -> carmona/llm-d-inference-sim:v0.11.4-disconnect.2
+#   SIM_TEST=1 bash docker/sim/build.sh            -> also runs the simulator's Go tests (the patches' included) in the build
 #   SIM_SRC=<dir> SIM_IMAGE=<tag> bash docker/sim/build.sh
 #
 # SIM_SRC is a checkout of github.com/llm-d/llm-d-inference-sim at tag v0.11.4 (commit db3e12bdf8ccf500d93309dc73015fb811296404).
 # The default is the one the prototype kept: ../../../prototype-sim/_sim-src-v0.11.4, i.e. work/prototype-sim next to the
 # workspaces. The script does not clone anything; fetch the tag yourself if you have no copy. It copies the tree, makes
 # the sources LF (a Windows checkout is CRLF), checks that they are exactly v0.11.4 (SRC_PIN below: sha256 of the sha256
-# of every .go file, go.mod and go.sum, which is all `go build` reads), applies disconnect.patch and builds the Dockerfile
-# next to this file. The patch is the whole difference to the pinned upstream engine; what it changes is in its header.
+# of every .go file, go.mod and go.sum, which is all `go build` reads), applies disconnect.patch and then report.patch
+# (made against what the first leaves), and builds the Dockerfile next to this file. The two patches are the whole
+# difference to the pinned upstream engine; what each changes is in its header.
 #
-# What the patch does (G1 of work/prototype-sim/FINDINGS-contract.md, contract points E19, E34, E35):
+# What disconnect.patch does (G1 of work/prototype-sim/FINDINGS-contract.md, contract points E19, E34, E35):
 #  - a client that hangs up stops the generation at its next token, in the queue, before the first token and mid-stream,
 #    and a waiting request leaves the queue at once (stock v0.11.4 ran every request to its end);
 #  - stream_options.continuous_usage_stats puts the usage so far on every chat chunk, as vLLM does (G3), so a cancelled
 #    stream is billed the tokens it had produced;
 #  - an aborted request counts the work done in vllm:request_success_total{finish_reason="abort"} and the token counters.
+# What report.patch does (OB-18): with the new flag --enable-per-request-metrics (off by default, as in vLLM) the engine
+# adds its own timing report, the object "metrics" (queue, prefill and generation in milliseconds, and two derived
+# numbers), to a whole chat answer and to the final usage chunk of a stream, as vLLM does.
 # It needs Docker (slots: this is a build, take one with work/docker-slots.sh) and network (Go modules, base images).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-TAG=${SIM_IMAGE:-carmona/llm-d-inference-sim:v0.11.4-disconnect.1}
+TAG=${SIM_IMAGE:-carmona/llm-d-inference-sim:v0.11.4-disconnect.2}
 SRC=${SIM_SRC:-$here/../../../prototype-sim/_sim-src-v0.11.4}
 SRC_PIN=a5e33354b7d8de92844a7632fde8bbe299f06dc7f61e63aad24437878608c9e1
 [[ $TAG == *:* && $TAG != *:latest ]] || { echo "SIM_IMAGE must carry an explicit tag that is not latest: $TAG" >&2; exit 1; }
@@ -38,6 +42,7 @@ if [[ $got != "$SRC_PIN" ]]; then
   exit 1
 fi
 patch -p1 -s < "$here/disconnect.patch"
+patch -p1 -s < "$here/report.patch"
 
 if [[ ${SIM_TEST:-0} == 1 ]]; then
   # --no-cache-filter: the suites run every time, so their lines are always in the log (a cached stage prints nothing)

@@ -1,0 +1,545 @@
+Carmona patch 2 for llm-d-inference-sim v0.11.4 (commit db3e12bdf8ccf500d93309dc73015fb811296404), applied by docker/sim/build.sh
+after disconnect.patch: it is made against the tree that patch leaves and does not apply to the pristine source.
+Adds vLLM's per-request timing report (OB-18), so the stack can show the engine's own queue, prefill and generation of a request.
+
+What it does:
+ 1. A new flag, --enable-per-request-metrics (yaml: enable-per-request-metrics), default off, as the real engine's.
+ 2. With it, the object "metrics" is written beside "usage" on a whole chat answer and on the final usage chunk of a stream (the one
+    with choices: [], which exists when stream_options.include_usage is set): queue_time_ms, time_to_first_token_ms (the prefill: vLLM
+    counts it from scheduling), generation_time_ms, mean_itl_ms (only with more than one output token) and tokens_per_second.
+    JSON numbers; milliseconds on the simulator's own clock, tokens_per_second per second. Never on a running chunk, on a stream that is
+    cut before its usage chunk, or when n > 1 (vLLM sends none then either).
+ 3. The times are measured, not configured. The queue is from the request reaching the simulator to a worker starting it (close to
+    nothing for a request that finds a free worker; the simulator's own queue histogram only sees the ones that waited), the prefill is
+    the first-token delay as it was slept, the generation is from the first token to the last one. They ride on the response context
+    (Times()). The generation time is set before each token is sent: the writer of a stream builds the final chunk as soon as it has
+    the last token. tokens_per_second is the completion tokens over prefill + generation, as vLLM counts from scheduling.
+ Not done: the report for /v1/completions, /v1/responses and /v1/messages (chat completions only, the one endpoint inference-service uses).
+ Tests: pkg/communication/report_test.go, specs through a real simulator behind a real HTTP server, as disconnect_test.go does. Each guard
+ this patch has (the flag, n == 1, one output token, no time to count, the report on the final chunk only) is covered by a spec that
+ fails when only that one is removed.
+
+diff --git a/pkg/api/response.go b/pkg/api/response.go
+index 7ad706d..b1d2472 100644
+--- a/pkg/api/response.go
++++ b/pkg/api/response.go
+@@ -122,6 +122,21 @@ type TextLogprobs struct {
+ 	TextOffset []int `json:"text_offset"`
+ }
+ 
++// RequestMetrics is the engine's timing report of one request, as vLLM sends it with --enable-per-request-metrics
++// (carmona patch): milliseconds on the engine's clock, tokens_per_second per second.
++type RequestMetrics struct {
++	// QueueTimeMs is the wait before a worker took the request
++	QueueTimeMs float64 `json:"queue_time_ms"`
++	// TimeToFirstTokenMs counts from scheduling, so it is the prefill
++	TimeToFirstTokenMs float64 `json:"time_to_first_token_ms"`
++	// GenerationTimeMs is from the first token to the last
++	GenerationTimeMs float64 `json:"generation_time_ms"`
++	// MeanItlMs is the generation time over the gaps between tokens; absent for one token
++	MeanItlMs *float64 `json:"mean_itl_ms,omitempty"`
++	// TokensPerSecond is the completion tokens over the prefill and the generation
++	TokensPerSecond float64 `json:"tokens_per_second"`
++}
++
+ // ChatCompletionsResponse defines structure of /chat/completions response
+ type ChatCompletionsResponse struct {
+ 	baseCompletionsResponse
+@@ -129,6 +144,9 @@ type ChatCompletionsResponse struct {
+ 	Choices []ChatRespChoice `json:"choices"`
+ 	// ECTransferParams holds simulated encoder-cache transfer params per mm hash
+ 	ECTransferParams map[string]ECTransferParams `json:"ec_transfer_params,omitempty"`
++	// Metrics is the timing report, beside usage: on a whole answer and on the final usage chunk of a stream, never on
++	// a running chunk (carmona patch)
++	Metrics *RequestMetrics `json:"metrics,omitempty"`
+ }
+ 
+ // baseResponseChoice contains base completions response's choice related information
+diff --git a/pkg/common/config.go b/pkg/common/config.go
+index b927a4b..8af2934 100644
+--- a/pkg/common/config.go
++++ b/pkg/common/config.go
+@@ -215,6 +215,11 @@ type Configuration struct {
+ 	// a value of 100 always produces len(availableTools) calls. Optional, defaults to 45.
+ 	ToolCallExtraCallProbability int `yaml:"tool-call-extra-call-probability" json:"tool-call-extra-call-probability"`
+ 
++	// EnablePerRequestMetrics adds vLLM's per-request timing report to the usage of a chat completion: the object "metrics"
++	// beside "usage", on a whole answer and on the final usage chunk of a stream (carmona patch, docker/sim/report.patch).
++	// Optional, defaults to false.
++	EnablePerRequestMetrics bool `yaml:"enable-per-request-metrics" json:"enable-per-request-metrics"`
++
+ 	// EnableKVCache defines if kv cache feature will be enabled
+ 	EnableKVCache bool `yaml:"enable-kvcache" json:"enable-kvcache"`
+ 	//  KVCacheSize is the maximum number of token blocks in kv cache, the default value is 1024
+diff --git a/pkg/common/parser.go b/pkg/common/parser.go
+index 8446a1d..470b656 100644
+--- a/pkg/common/parser.go
++++ b/pkg/common/parser.go
+@@ -149,6 +149,7 @@ func ParseCommandParamsAndLoadConfig() (*Configuration, error) {
+ 	f.IntVar(&config.ObjectToolCallNotRequiredParamProbability, "object-tool-call-not-required-field-probability", config.ObjectToolCallNotRequiredParamProbability, "Probability to add a field, that is not required, in an object in a tool call")
+ 	f.IntVar(&config.ToolCallExtraCallProbability, "tool-call-extra-call-probability", config.ToolCallExtraCallProbability, "Probability (0-100) to make one additional tool call beyond the minimum; rolls repeat until a roll fails or all tools are called")
+ 
++	f.BoolVar(&config.EnablePerRequestMetrics, "enable-per-request-metrics", config.EnablePerRequestMetrics, "Add vLLM's per-request timing report (the object metrics) to the usage of a chat completion")
+ 	f.BoolVar(&config.EnableKVCache, "enable-kvcache", config.EnableKVCache, "Defines if KV cache feature is enabled")
+ 	f.IntVar(&config.KVCacheSize, "kv-cache-size", config.KVCacheSize, "Maximum number of token blocks in kv cache")
+ 	f.Float64Var(&config.GlobalCacheHitThreshold, "global-cache-hit-threshold", 0, "Default cache hit threshold [0, 1] for all requests. If a request specifies cache_hit_threshold, it takes precedence")
+diff --git a/pkg/communication/http.go b/pkg/communication/http.go
+index f808ae8..29cbc01 100644
+--- a/pkg/communication/http.go
++++ b/pkg/communication/http.go
+@@ -140,7 +140,8 @@ func (c *Communication) getRequestID(ctx *fasthttp.RequestCtx) string {
+ 
+ // HandleChatCompletions http handler for /v1/chat/completions
+ func (c *Communication) HandleChatCompletions(ctx *fasthttp.RequestCtx) {
+-	c.handleHTTP(&simulator.ChatCompletionsRequest{}, &chatComplHTTPRespBuilder{}, ctx)
++	c.handleHTTP(&simulator.ChatCompletionsRequest{},
++		&chatComplHTTPRespBuilder{metrics: c.simulator.Context.Config().EnablePerRequestMetrics}, ctx)
+ }
+ 
+ // HandleTextCompletions http handler for /v1/completions
+diff --git a/pkg/communication/report_test.go b/pkg/communication/report_test.go
+new file mode 100644
+index 0000000..802c0d1
+--- /dev/null
++++ b/pkg/communication/report_test.go
+@@ -0,0 +1,263 @@
++/*
++Copyright 2025 The llm-d-inference-sim Authors.
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++    http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++// Carmona patch (docker/sim/report.patch): the engine's per-request timing report, as vLLM sends it with
++// --enable-per-request-metrics. The helpers of disconnect_test.go (serverFor, metric, chatBody) are used here.
++
++package communication
++
++import (
++	"bufio"
++	"encoding/json"
++	"fmt"
++	"io"
++	"net/http"
++	"strings"
++	"time"
++
++	. "github.com/onsi/ginkgo/v2"
++	. "github.com/onsi/gomega"
++
++	"github.com/llm-d/llm-d-inference-sim/pkg/api"
++	"github.com/llm-d/llm-d-inference-sim/pkg/common"
++	"github.com/llm-d/llm-d-inference-sim/pkg/simulator"
++)
++
++const reportFlag = "--enable-per-request-metrics"
++
++// the five fields of the report: milliseconds on the engine's clock, tokens_per_second per second
++var reportFields = []string{"queue_time_ms", "time_to_first_token_ms", "generation_time_ms", "mean_itl_ms", "tokens_per_second"}
++
++// wholeAnswer posts a chat request that is not streamed (an echoed answer of about words tokens, plus extra json fields)
++// and returns the answer as it arrived and decoded.
++func wholeAnswer(addr string, words int, extra string) (string, map[string]any) {
++	body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":%q}],"max_tokens":%d%s}`,
++		common.TestModelName, strings.TrimSpace(strings.Repeat("w ", words)), words*3+10, extra)
++	resp, err := http.Post("http://"+addr+"/v1/chat/completions", "application/json", strings.NewReader(body))
++	Expect(err).NotTo(HaveOccurred())
++	defer resp.Body.Close() //nolint:errcheck
++	data, err := io.ReadAll(resp.Body)
++	Expect(err).NotTo(HaveOccurred())
++	Expect(resp.StatusCode).To(Equal(http.StatusOK), string(data))
++	var v map[string]any
++	Expect(json.Unmarshal(data, &v)).To(Succeed())
++	return string(data), v
++}
++
++// arrived is a streamed chunk, decoded, with the time it reached the client.
++type arrived struct {
++	v  map[string]any
++	at time.Time
++}
++
++// streamed posts a streaming chat request and returns every chunk, [DONE] left out.
++func streamed(addr, body string) []arrived {
++	resp, err := http.Post("http://"+addr+"/v1/chat/completions", "application/json", strings.NewReader(body))
++	Expect(err).NotTo(HaveOccurred())
++	defer resp.Body.Close() //nolint:errcheck
++	var out []arrived
++	sc := bufio.NewScanner(resp.Body)
++	sc.Buffer(make([]byte, 1<<20), 1<<20)
++	for sc.Scan() {
++		data, ok := strings.CutPrefix(sc.Text(), "data: ")
++		if !ok || data == "[DONE]" {
++			continue
++		}
++		var v map[string]any
++		Expect(json.Unmarshal([]byte(data), &v)).To(Succeed())
++		out = append(out, arrived{v, time.Now()})
++	}
++	Expect(sc.Err()).NotTo(HaveOccurred())
++	return out
++}
++
++// reportOf is the "metrics" object of an answer or chunk, nil when it has none.
++func reportOf(v map[string]any) map[string]any {
++	m, _ := v["metrics"].(map[string]any)
++	return m
++}
++
++// completionTokens is what the usage of an answer or chunk says the engine generated.
++func completionTokens(v map[string]any) float64 {
++	return v["usage"].(map[string]any)["completion_tokens"].(float64)
++}
++
++// contentOf is the text a chunk carries, "" for a chunk with none.
++func contentOf(v map[string]any) string {
++	choices, _ := v["choices"].([]any)
++	if len(choices) == 0 {
++		return ""
++	}
++	delta, _ := choices[0].(map[string]any)["delta"].(map[string]any)
++	text, _ := delta["content"].(string)
++	return text
++}
++
++// theFive fails the spec unless m holds the five fields as json numbers (except mean_itl_ms, which has one more rule).
++func theFive(m map[string]any, withMeanItl bool) {
++	want := len(reportFields)
++	for _, f := range reportFields {
++		if f == "mean_itl_ms" && !withMeanItl {
++			Expect(m).NotTo(HaveKey(f))
++			want--
++			continue
++		}
++		Expect(m).To(HaveKey(f))
++		Expect(m[f]).To(BeAssignableToTypeOf(float64(0)), f+" is a json number")
++	}
++	Expect(m).To(HaveLen(want), "nothing else is in it")
++}
++
++// timeless is an answer that has no time at all to count, as one that never waited for a first token has (the immediate
++// return of a cache_threshold request); the embedded interface is nil, only these two methods are called.
++type timeless struct{ simulator.ResponseContext }
++
++func (timeless) Times() *simulator.EngineTimes { return &simulator.EngineTimes{} }
++func (timeless) UsageData() *api.Usage         { return &api.Usage{CompletionTokens: 5} }
++
++// the engine of slowServerWith: 300 ms of prefill, 20 ms between tokens, one slot
++var _ = Describe("the per-request timing report", func() {
++	withStream := `,"stream_options":{"include_usage":true}`
++
++	It("aFlagThatIsOffSendsNoMetrics", func() {
++		addr, _ := serverFor(common.ModeEcho, "20ms")
++
++		raw, _ := wholeAnswer(addr, 5, "")
++		Expect(raw).NotTo(ContainSubstring("metrics"))
++
++		chunks := streamed(addr, chatBody(5, withStream))
++		Expect(chunks[len(chunks)-1].v["usage"]).NotTo(BeNil(), "the usage chunk is there")
++		for _, c := range chunks {
++			Expect(reportOf(c.v)).To(BeNil())
++		}
++	})
++
++	It("aWholeAnswerCarriesTheFiveFieldsInMilliseconds", func() {
++		addr, _ := serverFor(common.ModeEcho, "20ms", reportFlag)
++
++		_, v := wholeAnswer(addr, 20, "")
++		m := reportOf(v)
++		Expect(m).NotTo(BeNil())
++		theFive(m, true)
++		tokens := completionTokens(v)
++		Expect(tokens).To(BeNumerically(">", 1))
++		ttft, gen := m["time_to_first_token_ms"].(float64), m["generation_time_ms"].(float64)
++
++		Expect(m["queue_time_ms"]).To(BeNumerically("<", 100), "a worker was free")
++		Expect(ttft).To(BeNumerically(">=", 300), "the prefill is the first-token delay, 300 ms, in ms")
++		Expect(ttft).To(BeNumerically("<", 450))
++		Expect(gen).To(BeNumerically(">=", (tokens-1)*20), "the sleeps between the tokens are never shorter than asked")
++		Expect(gen).To(BeNumerically("<", (tokens-1)*20+200))
++		// the formulas of vLLM, from the same two durations
++		Expect(m["mean_itl_ms"]).To(BeNumerically("~", gen/(tokens-1), 1e-6))
++		Expect(m["tokens_per_second"]).To(BeNumerically("~", tokens/((ttft+gen)/1000), 1e-6))
++	})
++
++	It("theFinalUsageChunkCarriesThemAndTheChunksBeforeItDoNot", func() {
++		addr, _ := serverFor(common.ModeEcho, "20ms", reportFlag)
++
++		// continuous_usage_stats puts the usage on every chunk: the report is still on the last one only
++		chunks := streamed(addr, chatBody(10, `,"stream_options":{"include_usage":true,"continuous_usage_stats":true}`))
++		Expect(len(chunks)).To(BeNumerically(">", 10))
++		last := chunks[len(chunks)-1].v
++		Expect(last["choices"]).To(BeEmpty(), "the final usage chunk has no choices")
++		m := reportOf(last)
++		Expect(m).NotTo(BeNil())
++		theFive(m, true)
++		Expect(m["generation_time_ms"]).To(BeNumerically(">", 0), "it is known before the last token is sent")
++		for _, c := range chunks[:len(chunks)-1] {
++			Expect(reportOf(c.v)).To(BeNil())
++		}
++
++		// a stream that did not ask for the usage has no final usage chunk, so no report either
++		for _, c := range streamed(addr, chatBody(5, "")) {
++			Expect(reportOf(c.v)).To(BeNil())
++		}
++	})
++
++	It("meanItlIsLeftOutForOneOutputToken", func() {
++		addr, _ := serverFor(common.ModeEcho, "20ms", reportFlag)
++
++		_, v := wholeAnswer(addr, 1, "")
++		Expect(completionTokens(v)).To(Equal(1.0))
++		m := reportOf(v)
++		Expect(m).NotTo(BeNil())
++		theFive(m, false)
++		Expect(m["generation_time_ms"]).To(BeNumerically("<", 5), "the first token is the last")
++		Expect(m["tokens_per_second"]).To(BeNumerically(">", 0))
++	})
++
++	It("nGreaterThanOneSendsNone", func() {
++		addr, _ := serverFor(common.ModeEcho, "20ms", reportFlag)
++
++		raw, v := wholeAnswer(addr, 3, `,"n":2`)
++		Expect(v["choices"]).To(HaveLen(2))
++		Expect(raw).NotTo(ContainSubstring("metrics"))
++
++		chunks := streamed(addr, chatBody(3, `,"n":2,"stream_options":{"include_usage":true}`))
++		Expect(chunks[len(chunks)-1].v["usage"]).NotTo(BeNil(), "the usage chunk is there")
++		for _, c := range chunks {
++			Expect(reportOf(c.v)).To(BeNil())
++		}
++	})
++
++	It("theTokensPerSecondOfARequestWithNoTimeIsZeroAndNotInfinite", func() {
++		m := timingReport([]simulator.ResponseContext{timeless{}})
++		Expect(m.TokensPerSecond).To(BeZero())
++		_, err := json.Marshal(m) // an infinite number would be no json at all
++		Expect(err).NotTo(HaveOccurred())
++	})
++
++	It("theQueueTimeIsTheWaitOfARequestThatWaited", func() {
++		addr, _ := serverFor(common.ModeEcho, "20ms", reportFlag)
++
++		firstDone := make(chan map[string]any, 1)
++		go func() { // takes the only slot for about 1.1 s
++			defer GinkgoRecover()
++			_, v := wholeAnswer(addr, 40, "")
++			firstDone <- v
++		}()
++		Eventually(func() float64 { return metric(addr, "vllm:num_requests_running", "") }, "2s", "10ms").Should(Equal(1.0))
++		_, second := wholeAnswer(addr, 5, "") // waits for the first to end
++		first := <-firstDone
++
++		Expect(reportOf(first)["queue_time_ms"]).To(BeNumerically("<", 100), "it did not wait")
++		Expect(reportOf(second)["queue_time_ms"]).To(BeNumerically(">=", 600), "it waited for the first")
++		Expect(reportOf(second)["queue_time_ms"]).To(BeNumerically("<", 1500))
++		Expect(reportOf(second)["time_to_first_token_ms"]).To(BeNumerically("<", 450), "the wait is not in the prefill")
++	})
++
++	It("theGenerationTimeIsFirstTokenToLastToken", func() {
++		addr, _ := serverFor(common.ModeEcho, "20ms", reportFlag)
++
++		chunks := streamed(addr, chatBody(20, withStream))
++		var first, last time.Time
++		for _, c := range chunks {
++			if contentOf(c.v) != "" {
++				if first.IsZero() {
++					first = c.at
++				}
++				last = c.at
++			}
++		}
++		final := chunks[len(chunks)-1].v
++		gen := reportOf(final)["generation_time_ms"].(float64)
++		sawMs := float64(last.Sub(first)) / float64(time.Millisecond)
++
++		Expect(gen).To(BeNumerically("~", sawMs, 100), "what the client saw between its first and its last token")
++		Expect(gen).To(BeNumerically("<", (completionTokens(final)-1)*20+200), "the prefill is not in it")
++	})
++})
+diff --git a/pkg/communication/response_builder.go b/pkg/communication/response_builder.go
+index 6436912..83766b7 100644
+--- a/pkg/communication/response_builder.go
++++ b/pkg/communication/response_builder.go
+@@ -242,7 +242,39 @@ func (*textComplHTTPRespBuilder) createRenderResponse(tokens [][]uint32,
+ 
+ var _ responseBuilder = (*textComplHTTPRespBuilder)(nil)
+ 
+-type chatComplHTTPRespBuilder struct{ baseRespBuilder }
++type chatComplHTTPRespBuilder struct {
++	baseRespBuilder
++	// metrics adds the per-request timing report (--enable-per-request-metrics) to the whole answer and to the final
++	// usage chunk (carmona patch, docker/sim/report.patch)
++	// ponytail: chat completions only, the one endpoint inference-service uses; the other builders send none.
++	// Upgrade: the Metrics field on their response types and the same call in their builders.
++	metrics bool
++}
++
++// timingReport is vLLM's per-request timing report of an answer: the times the simulator measured, in milliseconds.
++// vLLM sends none for n > 1, and a mean_itl_ms only for more than one output token.
++func timingReport(respCtxPerChoice []simulator.ResponseContext) *api.RequestMetrics {
++	if len(respCtxPerChoice) != 1 {
++		return nil
++	}
++	respCtx := respCtxPerChoice[0]
++	times := respCtx.Times()
++	tokens := respCtx.UsageData().CompletionTokens
++	ms := func(d time.Duration) float64 { return float64(d) / float64(time.Millisecond) }
++	report := &api.RequestMetrics{
++		QueueTimeMs:        ms(times.Queue),
++		TimeToFirstTokenMs: ms(times.Prefill),
++		GenerationTimeMs:   ms(times.Generation),
++	}
++	if tokens > 1 {
++		itl := ms(times.Generation) / float64(tokens-1)
++		report.MeanItlMs = &itl
++	}
++	if scheduled := times.Prefill + times.Generation; scheduled > 0 { // vLLM counts from scheduling, not from the queue
++		report.TokensPerSecond = float64(tokens) / scheduled.Seconds()
++	}
++	return report
++}
+ 
+ func (respBuilder *chatComplHTTPRespBuilder) createResponse(respCtxPerChoice []simulator.ResponseContext,
+ 	tokens []api.Tokenized) any {
+@@ -291,6 +323,9 @@ func (respBuilder *chatComplHTTPRespBuilder) createResponse(respCtxPerChoice []s
+ 
+ 	resp := api.CreateChatCompletionsResponse(baseResp, choices)
+ 	resp.ECTransferParams = respCtx.ECTransferParams()
++	if respBuilder.metrics {
++		resp.Metrics = timingReport(respCtxPerChoice)
++	}
+ 	return resp
+ }
+ 
+@@ -302,7 +337,11 @@ func (respBuilder *chatComplHTTPRespBuilder) createUsageChunk(respCtxPerChoice [
+ 	baseChunk := api.CreateBaseCompletionsResponse(
+ 		respCtx.CreationTime(), respCtx.DisplayModel(), aggregateUsage(respCtxPerChoice), respCtx.RequestID(), false)
+ 	baseChunk.Object = api.ChatCompletionChunkObject
+-	return &jsonDataChunk{data: api.CreateChatCompletionsResponse(baseChunk, []api.ChatRespChoice{})}
++	chunk := api.CreateChatCompletionsResponse(baseChunk, []api.ChatRespChoice{})
++	if respBuilder.metrics {
++		chunk.Metrics = timingReport(respCtxPerChoice) // the report rides on this chunk only
++	}
++	return &jsonDataChunk{data: chunk}
+ }
+ 
+ // createChunk creates and returns a CompletionsRespChunk, a single chunk of streamed completion
+diff --git a/pkg/simulator/response.go b/pkg/simulator/response.go
+index 8e77352..8de3de4 100644
+--- a/pkg/simulator/response.go
++++ b/pkg/simulator/response.go
+@@ -18,6 +18,7 @@ package simulator
+ 
+ import (
+ 	"sync"
++	"time"
+ 
+ 	"github.com/llm-d/llm-d-inference-sim/pkg/api"
+ )
+@@ -27,6 +28,18 @@ const (
+ 	ResponseEndOfTokens   = "eot"
+ )
+ 
++// EngineTimes is what the simulator measured of one request, for the per-request timing report (carmona patch,
++// docker/sim/report.patch). Each part is set before the response message that follows it is sent, so the final usage
++// chunk and the whole answer, which are built after the last token, read all three.
++type EngineTimes struct {
++	// Queue is from the request reaching the simulator to a worker starting it (a free worker: close to nothing)
++	Queue time.Duration
++	// Prefill is the first-token delay
++	Prefill time.Duration
++	// Generation is from the first token to the last one sent so far
++	Generation time.Duration
++}
++
+ type ResponseInfo struct {
+ 	Tokens    *api.Tokenized
+ 	RespCtx   ResponseContext
+@@ -54,6 +67,8 @@ type ResponseContext interface {
+ 	TopLogprobs() *int
+ 	ECTransferParams() map[string]api.ECTransferParams
+ 	SendImage() bool
++	// Times are the engine's own measurements of the request (carmona patch)
++	Times() *EngineTimes
+ 	setWG(*sync.WaitGroup)
+ 	Done()
+ }
+@@ -86,6 +101,8 @@ type baseResponseContext struct {
+ 	nLogprobs *int
+ 	// wait group of this response
+ 	wg *sync.WaitGroup
++	// what the engine measured of this request (carmona patch)
++	times EngineTimes
+ }
+ 
+ func newBaseResponseContext(reqCtx requestContext, displayModel string, responseTokens *api.Tokenized,
+@@ -163,6 +180,9 @@ func (b *baseResponseContext) setWG(wg *sync.WaitGroup) {
+ func (b *baseResponseContext) SendImage() bool {
+ 	return b.reqCtx.request().SendImage()
+ }
++func (b *baseResponseContext) Times() *EngineTimes {
++	return &b.times
++}
+ 
+ func respIsEmpty(respCtx ResponseContext) bool {
+ 	tokens := respCtx.responseTokens()
+diff --git a/pkg/simulator/simulator.go b/pkg/simulator/simulator.go
+index 31e5419..d07e915 100644
+--- a/pkg/simulator/simulator.go
++++ b/pkg/simulator/simulator.go
+@@ -502,11 +502,13 @@ func (s *Simulator) simulateResponseProcessing(respCtx ResponseContext) (out pro
+ 		common.WriteToChannel(reqCtx.responseChannel(), &ResponseInfo{RespCtx: respCtx, ChoiceIdx: choiceIdx},
+ 			s.Context.logger)
+ 	} else {
++		startPrefill := time.Now()
+ 		if !s.Context.simulateTTFT(ctx, respCtx) {
+ 			out.cancelled = true
+ 			return out
+ 		}
+ 		out.prefilled = true
++		respCtx.Times().Prefill = time.Since(startPrefill) // the report's time_to_first_token_ms, set before the response is announced
+ 
+ 		// Response started
+ 		common.WriteToChannel(reqCtx.responseChannel(),
+@@ -540,6 +542,9 @@ func (s *Simulator) simulateResponseProcessing(respCtx ResponseContext) (out pro
+ 					if i == len(respCtx.responseTokens().Tokens)-1 {
+ 						respInfo.Status = ResponseEndOfTokens
+ 					}
++					// first token to this one, set before the token is sent: the writer builds the final usage chunk as soon as
++					// it has the last token, and reads the report's generation_time_ms then
++					respCtx.Times().Generation = time.Since(startDecode)
+ 					common.WriteToChannel(reqCtx.responseChannel(), &respInfo, s.Context.logger)
+ 					out.generated++
+ 				}
+@@ -566,6 +571,7 @@ func (s *Simulator) simulateResponseProcessing(respCtx ResponseContext) (out pro
+ 						if tcIdx == len(toolCalls)-1 && i == len(args.Tokens)-1 {
+ 							respInfo.Status = ResponseEndOfTokens
+ 						}
++						respCtx.Times().Generation = time.Since(startDecode) // as above
+ 						common.WriteToChannel(reqCtx.responseChannel(), &respInfo, s.Context.logger)
+ 						out.generated++
+ 					}
+diff --git a/pkg/simulator/worker.go b/pkg/simulator/worker.go
+index 5ab95cb..50115ea 100644
+--- a/pkg/simulator/worker.go
++++ b/pkg/simulator/worker.go
+@@ -73,6 +73,9 @@ func (s *Simulator) processRequest(reqCtx requestContext) {
+ 		return
+ 	}
+ 
++	// The wait of the report's queue_time_ms: from the request reaching the simulator to a worker starting it. A request
++	// that went to a free worker has almost none; the waiting queue's own histogram only sees the ones that waited.
++	respCtx.Times().Queue = startTime.Sub(reqCtx.startProcessingTime())
+ 	if out := s.simulateResponseProcessing(respCtx); out.cancelled {
+ 		// The client left (carmona patch). The simulator's own accounting of an aborted request: the prompt once it was
+ 		// processed, the tokens produced so far, finish_reason "abort". The repo's own measurement (phase-6-progress.md:39)
