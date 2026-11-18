@@ -221,6 +221,6 @@ first customer.
 
     ---
 
-    The six shared Feign contracts, the `url` convention, and what changing one costs.
+    The seven shared Feign contracts, the `url` convention, and what changing one costs.
 
 </div>

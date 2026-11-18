@@ -1,7 +1,7 @@
 # Running it locally
 
 This page is meant to be followed top to bottom on a machine that has never run Carmona. Every command is the
-one in the repository, and every file it names is one that exists. When you are done you have fifteen
+one in the repository, and every file it names is one that exists. When you are done you have sixteen
 containers, a passing smoke test, and two model engines — one of them on your GPU, if you have one.
 
 <figure class="cmn-figure">
@@ -117,7 +117,7 @@ its health check has a 600 s start period because the first run downloads the mo
 
 ## What it is
 
-A single-machine deployment of fifteen containers plus, optionally, a sixteenth for the GPU engine. Every
+A single-machine deployment of sixteen containers plus, optionally, a seventeenth for the GPU engine. Every
 service is built from a jar you compile first; every secret comes from `docker/.env`; every container reports
 readiness through `/actuator/health/readiness` on the management port rather than through an HTTP header.
 `docker compose up -d --build --wait` returns only when all of them are healthy.
@@ -430,7 +430,7 @@ forgetting one is a startup error with a readable message rather than a service 
 
 ## Where to look
 
-- [compose.yaml](https://github.com/carmonaai/back/blob/main/docker/compose.yaml) — fifteen services, the
+- [compose.yaml](https://github.com/carmonaai/back/blob/main/docker/compose.yaml) — sixteen services, the
   shared `x-readiness` health check, and every `depends_on` condition this page draws.
 - [.env.example](https://github.com/carmonaai/back/blob/main/docker/.env.example) — the six secrets and the
   `openssl` command for each.

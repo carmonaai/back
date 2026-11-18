@@ -301,7 +301,7 @@ refused, and **Settings → Pages → Source** must be *Deploy from a branch*, b
 keep a Java version in step. The integration test is what actually needs to run, and only `back` can run it —
 it is the only repository that sees all seventeen modules at once.
 
-**The full stack, on every pull request.** Starting fifteen containers and running about 800 lines of smoke test
+**The full stack, on every pull request.** Starting sixteen containers and running about 800 lines of smoke test
 takes minutes, and it is the only check that catches a broken migration, a route predicate that no longer
 matches its path, or a filter that stopped stripping a header.
 

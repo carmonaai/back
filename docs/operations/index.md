@@ -9,7 +9,7 @@ is already running.
 <svg viewBox="0 0 760 280" role="img" aria-labelledby="dops-title" aria-describedby="dops-desc"
      xmlns="http://www.w3.org/2000/svg">
   <title id="dops-title">Building the stack, checking it, and watching it</title>
-  <desc id="dops-desc">Maven verifies every module and its tests, then compose builds and starts the fifteen
+  <desc id="dops-desc">Maven verifies every module and its tests, then compose builds and starts the sixteen
   containers and waits for their health checks. The smoke test drives the whole stack through the gateway.
   Two further checks run against the same stack: a load bench on the GPU and a check of the books. Prometheus
   scrapes every service's management port and the engine's own metrics endpoint every fifteen seconds, Grafana
@@ -49,7 +49,7 @@ is already running.
   <g class="cmn-node cmn-node--flow" id="dops-compose" aria-labelledby="dops-compose-label">
     <rect x="176" y="48" width="132" height="56" rx="10"/>
     <text id="dops-compose-label" x="242" y="68">compose up</text>
-    <text class="cmn-sub" x="242" y="86">15 containers</text>
+    <text class="cmn-sub" x="242" y="86">16 containers</text>
   </g>
 
   <g class="cmn-node cmn-node--flow" id="dops-smoke" aria-labelledby="dops-smoke-label">
@@ -122,7 +122,7 @@ is already running.
 </svg>
 </div>
 <figcaption>Steps 1 and 2 are the build: Maven verifies every module and its tests, then compose builds the
-images, starts the fifteen containers and waits for their health checks before returning. Step 3 is `smoke.sh`
+images, starts the sixteen containers and waits for their health checks before returning. Step 3 is `smoke.sh`
 driving the running stack through the gateway. Steps 4 and 5 are the two checks that need a running stack and
 a reason to run them — the GPU load bench and the books. Step 6 is the metrics flow, which is asynchronous and
 independent of every check: Prometheus scrapes each service's management port and the engine's own `/metrics`
@@ -139,7 +139,7 @@ with nowhere to send them.</figcaption>
 
 1. **`mvn -B clean verify` from the repository root** builds all seventeen modules in dependency order and runs
    the unit tests plus one Testcontainers integration test per database service.
-2. **`docker compose up -d --build --wait`** starts fifteen containers and blocks until every health check
+2. **`docker compose up -d --build --wait`** starts sixteen containers and blocks until every health check
    passes. `.env` must exist first; compose refuses to start without it.
 3. **`bash smoke.sh`** drives the stack through the gateway end to end — accounts, sessions, organizations,
    API keys, inference on both engines, usage, billing, the Batch API, erasure and a canary sweep.
@@ -233,5 +233,5 @@ surface to the gateway, at the cost of having to be on the machine to look at a 
 - [CI and shipping](ci.md) — the workflow, the module token and the merge order.
 - [Batch API design](batch-api.md) — how the asynchronous path works and what a crash proved.
 - [Knowledge base](knowledge-base.md) — the project's own notes, and which of them to trust.
-- [compose.yaml](https://github.com/carmonaai/back/blob/main/docker/compose.yaml) — all fifteen services,
+- [compose.yaml](https://github.com/carmonaai/back/blob/main/docker/compose.yaml) — all sixteen services,
   their health checks and their dependencies, in one file.
