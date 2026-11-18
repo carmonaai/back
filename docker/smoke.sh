@@ -15,10 +15,11 @@
 # Late in the run it registers a model on model-service (the shared secret) on a second simulator that it starts for the purpose (engine-own, removed at the end of that section),
 # calls it with its owner's key, shows that another organization's key cannot, and checks that the owner is not charged for it (ENGINE=sim only).
 # Before the admission section it also connects that same simulator as a deployment of the first organization (round OB, ENGINE=sim only):
-# the operator's calls make and connect it (the shared secret), the reads of the deployment, of its requests and of its refusals are
-# asserted through the gateway (the window read is not: its block comes with its milestone), as are the new columns of its usage rows, and
-# closing the organization ends it. It starts engine-own for that model name first and removes it at the end of the section, so `docker
-# compose --profile own-engine down` cleans a killed run, as for the next section.
+# the operator's calls make and connect it (the shared secret), the reads of the deployment, of its requests, of its refusals and of the
+# numbers of its window are asserted through the gateway (the window against the records the deployment left, and the operator's histogram
+# counts against the same records, except with FLEET=1), as are the new columns of its usage rows, and closing the organization ends it.
+# It starts engine-own for that model name first and removes it at the end of the section, so `docker compose --profile own-engine down`
+# cleans a killed run, as for the next section.
 # Run it against another compose project with COMPOSE_PROJECT_NAME=... (compose reads it; the stack must run under it).
 # On the two-simulator stack (compose.fleet.yaml) run it with FLEET=1, which adds that file to every compose call and asserts that two replicas are listed.
 # Continue-on-fail: a failed assertion is counted (note_fail) and the run goes on, so one run lists every failure; the
@@ -327,16 +328,19 @@ rid=$(curl -s -D - -o /dev/null "${K2[@]}" "${J[@]}" -H 'X-Request-Id: client-ch
 [[ -n $rid ]] && echo "ok   200  X-Request-Id $rid (the gateway's)" || { echo "FAIL no gateway request id"; note_fail; }
 
 # Names of the deployments section, of the stranger's reads and of the canary below. engkey is the engine's key as the operator states it:
-# no log, no table and no answer may hold it. rfrom is a start of range that every request of this run is after. The four reads of a
-# deployment that a console account has: the list, one deployment, the list of its requests and one request (the window read has no block
-# here: it comes with its milestone).
+# no log, no table and no answer may hold it. rfrom is a start of range that every request of this run is after. The five reads of a
+# deployment that a console account has: the list, one deployment, the list of its requests, one request and the window of its numbers
+# (the deployments section asserts what the window answers; in this array it joins the 401s, the stranger's 404 and the closed
+# organization's 200).
 dep=smoke-dep
 DM="org-$org/$dep"
 engkey="CANARY-engine-key-$RANDOM$RANDOM$RANDOM"
 rfrom=$(date -u -d '-2 hours' +%Y-%m-%dT%H:%M:%SZ)
 nil=00000000-0000-0000-0000-000000000000
 RQ="$G/usage/organizations/$org/deployments/$dep/requests"
-reads=("$G/organizations/$org/deployments" "$G/organizations/$org/deployments/$dep" "$RQ?from=$rfrom" "$RQ/$nil")
+W="$G/usage/organizations/$org/deployments/$dep/window"
+reads=("$G/organizations/$org/deployments" "$G/organizations/$org/deployments/$dep" "$RQ?from=$rfrom" "$RQ/$nil"
+       "$W?from=$rfrom&bucket=300")
 # chat_for MODEL CONTENT MAX_TOKENS [EXTRA JSON]: a chat request body for any model.
 chat_for() { echo "{\"model\":\"$1\",\"messages\":[{\"role\":\"user\",\"content\":\"$2\"}],\"max_tokens\":$3${4:-}}"; }
 # The states of the drain live in Valkey and outlive this script. However it ends from here on (a Ctrl-C, a killed run, a docker call that
@@ -491,9 +495,10 @@ else
     '"repository":"Qwen/Qwen3-4B-Instruct-2507"' "\"revision\":\"$rev\"" '"connectedAt":"[0-9]' '"stoppedAt":null'
 
   # A console read takes a console token: none, or an API key, is a 401 (the gateway's, with its own code).
-  expect 401 "${reads[0]}"
-  grep -q '"code":"invalid_token"' "$BODY" || { echo "FAIL the 401 of a read with no token has no code invalid_token"; note_fail; }
-  for u in "${reads[@]:1}"; do expect 401 "$u"; done
+  for u in "${reads[@]}"; do
+    expect 401 "$u"
+    grep -q '"code":"invalid_token"' "$BODY" || { echo "FAIL the 401 of $u with no token has no code invalid_token"; note_fail; }
+  done
   for u in "${reads[@]}"; do expect 401 "${K2[@]}" "$u"; done
 
   # inference-service follows the registry every few seconds: poll a chat to the deployment's model until it answers, 40 s at most. That
@@ -633,6 +638,99 @@ else
   body_has "state=refused&state=ok holds the refusals and both answered requests" "${rr_id[@]}" "$rid_whole" "$rid_stream"
   [[ $(left_out_cap) == 0 ]] && echo "ok   no refusal record was left out for the cap of a clock minute" \
     || { echo "FAIL the loss counter for the cap is '$(left_out_cap)' for $DM"; note_fail; }
+
+  # The window read (OB-06, OB-07, OB-07b): the last 30 minutes of $dep against its own records. from is the caller's own boundary, on the
+  # minute (the app sends one); to is left out, so it is the server's now: 30 to 31 minutes in buckets of 300 s. The usage events of the
+  # rate-limit loop reach usage-service a second or two after their calls, so the window is read until it counts the records, never once.
+  # The totals come before the series in the answer (WindowOut's order) and the previous window's totals, which have the same names, come
+  # last: the first "requests", "ok" and "error" of the answer are the totals'. A refusal is in no number of the window but the Refused
+  # count: the records it is compared with are the usage events, which a refusal never leaves.
+  wfrom=$(date -u -d '-30 minutes' +%Y-%m-%dT%H:%M:00Z)
+  wq="from=$wfrom&bucket=300"
+  wnum() { grep -o "\"$1\":[0-9]*" "$BODY" | head -1 | cut -d: -f2; }
+  ucount() { sql "SELECT count(*) FROM usage.usage_event WHERE model = '$DM' ${1:+AND $1}" | tr -d '\r'; }
+  nreq=0
+  for _ in $(seq 15); do
+    nreq=$(ucount)
+    curl -s -o "$BODY" "${A[@]}" "$W?$wq"
+    [[ $(wnum requests) == "$nreq" ]] && break
+    sleep 1
+  done
+  expect 200 "${A[@]}" "$W?$wq"
+  [[ $nreq -ge 2 && $(wnum requests) == "$nreq" ]] && echo "ok   the window counts $nreq requests, as the records of $dep do" \
+    || { echo "FAIL the window counts '$(wnum requests)' requests, the records of $dep are $nreq (2 or more expected)"; note_fail; }
+  nok=$(ucount "status = 'ok'"); nerr=$(ucount "status = 'error'")
+  [[ $(wnum ok) == "$nok" && $(wnum error) == "$nerr" ]] && echo "ok   the totals hold the records' $nok ok and $nerr error" \
+    || { echo "FAIL the totals say $(wnum ok) ok and $(wnum error) error, the records of $dep say $nok and $nerr"; note_fail; }
+  body_has "the window echoes its bucket, says when it was computed and names no part it did not compute" \
+    '"bucketSeconds":300' '"computedAt":"20' '"notComputed":\{\}'
+  # One entry for each bucket of the range the answer says it used, ceil((to - from) / 300 s), each with its peak concurrency as a number.
+  wto=$(grep -o '"to":"[^"]*"' "$BODY" | head -1 | cut -d'"' -f4)
+  nb=$(( ($(date -u -d "$wto" +%s%3N) - $(date -u -d "$wfrom" +%s%3N) + 299999) / 300000 ))
+  nser=$(grep -o '"peakConcurrency":[0-9]' "$BODY" | wc -l)
+  [[ $nb -ge 6 && $nb -le 7 && $nser == "$nb" ]] && echo "ok   the series has $nser entries with a peak, one per 300 s bucket" \
+    || { echo "FAIL the series has $nser entries with a peak, the range to ${wto:-nothing} makes $nb buckets of 300 s (6 or 7 expected)"
+         note_fail; }
+  # The Refused count is the refusal records of the table, each code once, and no minute of them is capped (5 are far under the limit).
+  cc=(); for c in "${rr_code[@]}"; do cc+=("\"$c\":1[,}]"); done
+  body_has "the Refused count is the $nrr refusal records of $dep, each code once" "\"refused\":\{\"total\":$nrr," "${cc[@]}"
+  if grep -qE '"(capped|refusedCapped)":true' "$BODY"; then echo "FAIL a minute of refusal records is marked capped"; note_fail
+  else echo "ok   no minute of refusal records is capped"; fi
+  # The percentiles are numbers: the duration's, the first token's (rid_stream is a streamed answer) and the prefill's (the engine's
+  # report, OB-18).
+  pct() { echo "\"$1\":\{\"p50\":[0-9][0-9.eE+-]*,\"p95\":[0-9][0-9.eE+-]*,\"p99\":[0-9][0-9.eE+-]*"; }
+  body_has "the percentiles of the duration and of the first token are numbers" "$(pct duration)" "$(pct ttft)"
+  if [[ ${SIM_STOCK:-0} == 1 ]]; then skip_sim "the prefill percentiles of the window" "the stock simulator sends no engine report"
+  else body_has "the percentiles of the prefill are numbers: the engine's report reached the records" "$(pct prefill)"; fi
+  body_has "the previous window is there" '"previousTotals":\{'
+  # The list of the same range holds the requests the window counts, the ones that ended ok, error or cancelled (a refused row is not one).
+  expect 200 "${A[@]}" "$RQ?from=$wfrom&size=100"
+  nlist=$(grep -oE '"state":"(ok|error|cancelled)"' "$BODY" | wc -l)
+  [[ $nlist == "$nreq" ]] && grep -q '"next":null' "$BODY" \
+    && echo "ok   the list of the same range holds the $nlist requests the window counts, on one page" \
+    || { echo "FAIL the list of $wfrom holds $nlist ok, error or cancelled requests on one page, the window counts $nreq"; note_fail; }
+  # A name the organization does not have is a window of 0 requests and no percentile, never a 404 or a 0 (usage-service does not know
+  # deployments).
+  expect 200 "${A[@]}" "$G/usage/organizations/$org/deployments/nobody-made-this/window?$wq"
+  [[ $(wnum requests) == 0 ]] && ! grep -q '"duration":{' "$BODY" && echo "ok   a deployment nobody made has 0 requests and no percentile" \
+    || { echo "FAIL a deployment nobody made has '$(wnum requests)' requests, or a duration percentile"; note_fail; }
+  # The 404 of an organization that does not exist has no code, as a stranger's has; a window with no from, or a bucket the app never
+  # sends, is a 400.
+  expect 404 "${A[@]}" "$G/usage/organizations/$nil/deployments/$dep/window?$wq"
+  if grep -q '"code"' "$BODY"; then echo "FAIL the 404 of an organization that does not exist has a code"; note_fail; fi
+  expect 400 "${A[@]}" "$W?bucket=300"
+  body_has "a window with no from is invalid_request" '"code":"invalid_request"'
+  expect 400 "${A[@]}" "$W?from=$wfrom&bucket=61"
+  body_has "a bucket of 61 s is invalid_request" '"code":"invalid_request"'
+
+  # The operator's histograms count the requests the records hold (ticket 05: one meaning for the operator and the customer): the
+  # requests that reached the engine, the ones with a first token of any kind (a whole answer has none) and, among those, the ones whose
+  # final usage came too. Counts only: a value is another clock. inference-service's own port answers as one replica, so a stack with
+  # more is not read.
+  ops_counts() {   # "<request> <ttft> <first_output>": the sum of each histogram's _count lines for $DM, over its tiers or its caches
+    "${DC[@]}" exec -T tools curl -s -m 5 http://inference:8081/actuator/prometheus | tr -d '\r' \
+      | awk -v m="model=\"$DM\"" 'index($0, m) && $1 ~ /^carmona_inference_(request|ttft|first_output)_seconds_count\{/ {
+            split($1, a, "{"); c[a[1]] += $NF }
+          END { printf "%d %d %d\n", c["carmona_inference_request_seconds_count"], c["carmona_inference_ttft_seconds_count"],
+                c["carmona_inference_first_output_seconds_count"] }'
+  }
+  if [[ ${FLEET:-0} == 1 ]]; then echo "skip  the operator's histogram counts of $DM are not asserted with FLEET=1"
+  else
+    nft=$(ucount "first_token_ms IS NOT NULL")
+    deadline=$((SECONDS + 10))
+    while :; do
+      read -r hreq hft hfo <<<"$(ops_counts)"
+      [[ $hreq == "$nreq" && $hft == "$nft" && $hfo -ge 1 && $hfo -le $nft ]] && break
+      [[ $SECONDS -ge $deadline ]] && break
+      sleep 1
+    done
+    [[ $hreq == "$nreq" ]] && echo "ok   the operator's request histogram counts the $nreq requests of the records" \
+      || { echo "FAIL the operator's request histogram counts $hreq for $DM, the records hold $nreq"; note_fail; }
+    [[ $hft == "$nft" ]] && echo "ok   the operator's first token histogram counts the $nft requests of the records that have one" \
+      || { echo "FAIL the operator's first token histogram counts $hft for $DM, the records with a first token are $nft"; note_fail; }
+    [[ $hfo -ge 1 && $hfo -le $nft ]] && echo "ok   the operator's first output histogram counts $hfo of those $nft requests" \
+      || { echo "FAIL the operator's first output histogram counts $hfo for $DM, one to $nft expected"; note_fail; }
+  fi
   "${DCO[@]}" rm -sf engine-own >/dev/null 2>&1 || true
 fi
 
@@ -1139,8 +1237,8 @@ for _ in $(seq 30); do
 done
 [[ $files == 0 ]] && echo "ok   closing the organization erased its batch files" || { echo "FAIL $files batch files left after closing"; note_fail; }
 # Round OB: closing the organization ends its deployment (the sweep of deployment-service, 5 s here). The read still answers the member of a
-# closed organization, the loaded model has stopped, the list still holds the deployment, and the requests of an ended deployment are still
-# read.
+# closed organization, the loaded model has stopped, the list still holds the deployment, and the requests and the window of an ended
+# deployment are still read.
 if [[ $ENGINE == sim ]]; then
   ended=""
   for _ in $(seq 40); do
@@ -1156,6 +1254,7 @@ if [[ $ENGINE == sim ]]; then
   expect 200 "${A[@]}" "${reads[0]}"
   body_has "the list still holds the ended deployment" "\"name\":\"$dep\"" '"state":"ended"'
   expect 200 "${A[@]}" "${reads[2]}"
+  expect 200 "${A[@]}" "${reads[4]}"
 fi
 expect 204 "${A[@]}" -X DELETE "$G/accounts/$id"
 expect 401 -X POST "$G/auth/refresh" -H "Cookie: $keep"                  # its sessions ended with it
