@@ -361,7 +361,7 @@ trap 'undrain; rm -f "$BODY" "$HDRS" "$longout"' EXIT
 ## Deployments (round OB): an engine connected as a deployment of $org, and what its organization reads about it: the deployment (the list
 ## and one), its requests (the list and one) with their refusals, and the columns the usage rows have now. The operator's calls (create,
 ## connect) have no gateway route, as the registry's have none; the reads go through the gateway with the console account. Before the
-## Admission section on purpose: this one calls its model until the rate limit, and the usage of $org is counted and billed by the sections
+## This section sits before the Admission one on purpose: this one calls its model until the rate limit, and the usage of $org is counted and billed by the sections
 ## after it. The engine is engine-own, started here for the deployment's model name and removed at the end (the registered-model section
 ## starts it again for its own name); a run that is killed here leaves it.
 if [[ $ENGINE != sim ]]; then
@@ -473,8 +473,14 @@ else
   rev=a1b2c3d4e5f60718293a4b5c6d7e8f9012345678
   spec='{"contextWindow":4096,"maxOutput":1024,"replicas":[{"url":"http://engine-own:8000","slots":2,"queue":2}],'
   spec+='"tiers":{"trial":{"requestsPerMinute":6,"inputTokensPerMinute":20000,"outputTokensPerMinute":10000,"maxInFlight":2}}}'
-  dep_want 200 PUT "/organizations/$org/deployments/$dep/engine" \
-    "{\"apiKey\":\"$engkey\",\"spec\":$spec,\"repository\":\"Qwen/Qwen3-4B-Instruct-2507\",\"revision\":\"$rev\"}"
+  # deployment-service documents that the operator repeats a failed connect (DeploymentService.java:108-113); it reaches model-service
+  # with a 1 s connect timeout and no retry. A first 503 is repeated once; a second one is a FAIL.
+  conn=(PUT "/organizations/$org/deployments/$dep/engine"
+    "{\"apiKey\":\"$engkey\",\"spec\":$spec,\"repository\":\"Qwen/Qwen3-4B-Instruct-2507\",\"revision\":\"$rev\"}")
+  dep_call "${conn[@]}"
+  if [[ $depcode == 503 ]]; then echo "note: the connect answered 503 once and was repeated"; sleep 2; dep_call "${conn[@]}"; fi
+  if [[ $depcode == 200 ]]; then echo "ok   200  PUT ${conn[1]} on deployment-service"
+  else echo "FAIL want 200 got $depcode: PUT ${conn[1]} on deployment-service"; head -c 300 "$BODY"; echo; note_fail; fi
   body_has "the connect answers serving" '"state":"serving"'
   for u in "${reads[@]:0:2}"; do
     expect 200 "${A[@]}" "$u"
