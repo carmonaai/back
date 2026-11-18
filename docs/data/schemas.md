@@ -94,7 +94,7 @@ would have done that checking — it stops well short of the second wall.</figca
 
 ## What it is
 
-Seven schemas in one database, each created and migrated by the service that owns it. The schema name is the
+Eight schemas in one database, each created and migrated by the service that owns it. The schema name is the
 service's aggregate, plural. Two services have no schema at all — `inference-service` and `gateway-service` —
 because neither owns a durable fact: inference holds counters in memory and usage in a stream, and the gateway
 holds configuration and the access log.
@@ -107,9 +107,10 @@ holds configuration and the access log.
 | `auth` | auth-service | `api_key`, `session` |
 | `organizations` | organization-service | `organization`, `membership` |
 | `models` | model-service | `model`, `model_clock` |
-| `usage` | usage-service | `usage_event`, `usage_window`, `usage_seal` |
+| `usage` | usage-service | `usage_event`, `usage_window`, `usage_seal`, `refused_request` |
 | `billing` | billing-service | `price`, `ledger_entry`, `balance`, `billing_cursor` |
 | `batch` | batch-service | `file`, `batch`, `batch_line` |
+| `deployments` | deployment-service | `deployment`, `machine`, `loaded_model` |
 
 `spring.flyway.schemas` and `hibernate.default_schema` in each service's `application.yaml` point at its own
 schema, and `spring.jpa.hibernate.ddl-auto` is `validate` everywhere: Hibernate checks its mapping against the
@@ -123,7 +124,7 @@ URL instead, so unqualified table names work, and cap every statement at 5 s wit
 Files live in `src/main/resources/db/migration/` of the owning service and are named
 `V<year>.<month>.<day>.<n>__<description>.sql` — `V2026.10.02.001__create_table.sql` in account-service,
 `V2026.10.05.001__api_key_expiry.sql` in auth-service, `V2026.10.03.002__batch_prices.sql` in billing-service.
-Nineteen files across the seven services that have a schema today. The date prefix orders migrations by the day they were written,
+Twenty-three files across the eight services that have a schema today. The date prefix orders migrations by the day they were written,
 which survives two branches merging in either order; Flyway's own counter would not. Each service keeps its own
 `flyway_schema_history` inside its own schema, so one service's migrations never see another's.
 
@@ -164,6 +165,31 @@ on the parent and on each partition (about a hundred: the days from 90 back to a
 queues behind any reader of the table. The 5 s `statement_timeout` of the JDBC URL would cancel that wait and stop the
 service from starting, so this migration lifts it with `SET LOCAL statement_timeout = 0`, as a migration that needs
 longer must.
+
+A request record is the same row. `V2026.11.15.001__request_record.sql` adds thirteen more nullable columns to
+`usage_event` the same way (the six moments in whole milliseconds from the gateway's acceptance, `streamed`, the engine's
+three lengths, `http_status`, `error_code`, `finish_reason`), with no default, no `CHECK` and no backfill, under the same
+`ACCESS EXCLUSIVE` lock and the same `SET LOCAL statement_timeout = 0`, and two indexes made on the parent:
+`usage_event_model_started (model, started_at DESC)`, which serves a deployment's requests newest first, and
+`usage_event_request (request_id)`. `CREATE INDEX` on a partitioned table blocks the inserts while it runs, short on a table
+this small; the migration's own `ponytail:` comment names the upgrade (each partition's index built `CONCURRENTLY`).
+
+A refusal is not in that table. `V2026.11.17.001__refused_request.sql` makes `refused_request`, keyed by
+`(request_id, started_at)` and partitioned by `started_at` with a default partition, as `usage_event` is, with one index,
+`refused_request_model_started (model, started_at DESC)`. It holds four ids, `http_status` and `error_code` (both `NOT NULL`),
+`passed_on_ms` and `understood_ms` (null when the moment was never reached), `duration_ms`, and `received_at`. It has no
+`CHECK` either: the Java side leaves out a record that does not fit. `PartitionJob` makes and drops its partitions on the same
+schedule, in a transaction of its own. It is a new table, so its migration lifts no timeout.
+
+## deployments: three tables, nothing deleted
+
+`V2026.11.15.001__create_tables.sql` of deployment-service makes `deployment` (`UNIQUE (organization_id, name)`; the name
+must match `^[a-z0-9][a-z0-9._-]{0,63}$` and the state is `serving`, `stopped` or `ended`, each a named `CHECK`),
+`machine` (the computers the operator declared, `UNIQUE (deployment_id, position)`) and `loaded_model` (one line for each
+connect, `stopped_at` null while it serves). A deployment row is never deleted or renamed: an ended deployment keeps its
+row, and because the key does not look at the state, its name stays taken. A second migration adds a partial unique index,
+`loaded_model_one_open_per_deployment`, so that at most one line of a deployment is open whatever the code above does. The
+columns that are the operator's own references (`registry_id`, `provider_machine_id`) are kept and never answered.
 
 ## batch_line uses the row lock itself as the lease
 
@@ -215,7 +241,7 @@ in tension: the seal job reads by `received_at` and needs the separate `usage_ev
 
 ## What would change it
 
-- **Hosting.** Seven schemas in one local database become seven databases, or one with seven roles, when the
+- **Hosting.** Eight schemas in one local database become eight databases, or one with eight roles, when the
   platform leaves the laptop. The schema split is what makes that a connection string rather than a rewrite.
 - **Raw events worth keeping past 90 days.** The retention is `RETENTION_DAYS = 90` in `PartitionJob`; a longer
   window needs storage, not a bigger number.
@@ -232,5 +258,7 @@ in tension: the seal job reads by `received_at` and needs the separate `usage_ev
   — `batch_line`, its partial index, and the `ponytail:` comment on storing content in Postgres.
 - [BatchRepository.java](https://github.com/carmonaai/back/blob/main/api/batch-service/src/main/java/ai/carmona/batch/BatchRepository.java)
   — the claim query, and the `FOR UPDATE SKIP LOCKED` used to delete and expire pending lines safely.
+- [refused_request migration](https://github.com/carmonaai/back/blob/main/api/usage-service/src/main/resources/db/migration/V2026.11.17.001__refused_request.sql)
+  — the refusal records' own table, and why they are not in `usage_event`.
 - [PartitionJob.java](https://github.com/carmonaai/back/blob/main/api/usage-service/src/main/java/ai/carmona/usage/PartitionJob.java)
   — the 7-days-ahead window, the advisory lock and the 90-day drop.
