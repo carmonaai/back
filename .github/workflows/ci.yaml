@@ -97,12 +97,17 @@ jobs:
         working-directory: docker
         run: bash init-secrets.sh
 
-      # The simulated engine is upstream's llm-d-inference-sim v0.11.4 plus docker/sim/disconnect.patch, a local image
-      # that compose never pulls. build.sh refuses a source that is not exactly v0.11.4 (it hashes the Go files).
+      # The simulated engine is upstream's llm-d-inference-sim v0.11.4 plus docker/sim/disconnect.patch and docker/sim/report.patch,
+      # a local image that compose never pulls. build.sh refuses a source that is not exactly v0.11.4 (it hashes the Go files).
       - name: Build the simulated engine
         run: |
           git clone --quiet --depth 1 --branch v0.11.4 https://github.com/llm-d/llm-d-inference-sim "$RUNNER_TEMP/sim-src"
           SIM_SRC="$RUNNER_TEMP/sim-src" bash docker/sim/build.sh
+
+      # The patches' own live check, with no stack: a hang-up stops the generation, usage on every chunk, the timing report
+      # with its flag and not without it. Seconds; the Go tests of the build (SIM_TEST) are too long for CI.
+      - name: Check the simulated engine
+        run: bash docker/check-sim-disconnect.sh
 
       - name: Start the stack
         id: stack

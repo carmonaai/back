@@ -1,4 +1,5 @@
-# The simulated engine with the disconnect patch (docker/sim/disconnect.patch) applied to llm-d-inference-sim v0.11.4.
+# The simulated engine with the disconnect patch and the report patch (docker/sim/disconnect.patch, docker/sim/report.patch)
+# applied to llm-d-inference-sim v0.11.4.
 # Not built by compose: `bash docker/sim/build.sh` prepares the context (the verified, patched source) and tags the image.
 #
 # builder: the source is compiled the way upstream's Dockerfile does it (pure Go, no CGO). Base pinned by digest.
@@ -9,7 +10,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/llm-d-inference-sim ./cmd/llm-d-inference-sim
 
-# test (build.sh with SIM_TEST=1): the simulator's own suites plus the patch's, as go test runs them.
+# test (build.sh with SIM_TEST=1): the simulator's own suites plus the patches', as go test runs them.
 FROM builder AS test
 RUN go test -count=1 ./pkg/api/... ./pkg/simulator/... ./pkg/communication/...
 

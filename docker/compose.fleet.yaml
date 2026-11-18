@@ -10,7 +10,7 @@
 #
 # Not for production, and not combined with compose.gpu.yaml (both turn the default `engine` off and replace inference's depends_on).
 x-sim: &sim
-  image: ${ENGINE_IMAGE:-carmona/llm-d-inference-sim:v0.11.4-disconnect.1}
+  image: ${ENGINE_IMAGE:-carmona/llm-d-inference-sim:v0.11.4-disconnect.2}
   pull_policy: never
   # The same flags as `engine` in compose.yaml, kept in step by hand: change both. Each replica is the 4 running + 8 waiting simulator
   # whose own queue never fills, because inference-service admits 4 slots + 2 queue places per replica (the model's slots and queue).
@@ -27,6 +27,7 @@ x-sim: &sim
     - --inter-token-latency=24ms
     - --inter-token-latency-std-dev=4ms
     - --seed=42
+    - --enable-per-request-metrics
   read_only: true
   cap_drop: [ALL]
   security_opt: ["no-new-privileges:true"]
